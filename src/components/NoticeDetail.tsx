@@ -1,6 +1,7 @@
 import type { FieldValue, NormalizedNotice } from "@/lib/g2b/normalize";
 import type { ScrapedDetail } from "@/lib/g2b/detail-page";
 import type { ApiNotice } from "@/lib/g2b/types";
+import { apiFieldDisplayName } from "@/lib/g2b/api-field-labels";
 
 function publicLink(value: string): string | null {
   try {
@@ -14,14 +15,14 @@ function rawValue(value: unknown): string {
   return typeof value === "string" ? value : JSON.stringify(value);
 }
 
-function RawFields({ fields }: { fields: Record<string, unknown> }) {
+function RawFields({ fields, apiLabels = false }: { fields: Record<string, unknown>; apiLabels?: boolean }) {
   const entries = Object.entries(fields);
   if (!entries.length) return <p className="muted">수집된 항목이 없습니다.</p>;
   return <dl className="raw-fields">{entries.map(([name, value]) => {
     const display = rawValue(value);
     const href = typeof value === "string" ? publicLink(value) : null;
     return <div className="raw-field" key={name}>
-      <dt>{name}</dt>
+      <dt>{apiLabels ? apiFieldDisplayName(name) : name}</dt>
       <dd>{display ? href ? <a href={href} target="_blank" rel="noopener noreferrer">{display}</a> : display : <span className="muted">값 없음</span>}</dd>
     </div>;
   })}</dl>;
@@ -35,7 +36,7 @@ function SourceComparison({ api, detail }: { api: ApiNotice; detail: ScrapedDeta
     <div className="source-columns">
       <section className="source-panel" aria-label="API 원본 데이터" tabIndex={0}>
         <div className="source-panel-header"><h3>API 원본 데이터</h3><span>{Object.keys(api).length}개 항목</span></div>
-        <RawFields fields={api} />
+        <RawFields fields={api} apiLabels />
         <details className="raw-json"><summary>API JSON 원문 보기</summary><pre>{JSON.stringify(api, null, 2)}</pre></details>
       </section>
       <section className="source-panel" aria-label="나라장터 상세 수집 데이터" tabIndex={0}>

@@ -22,7 +22,7 @@ describe("NoticeDetail", () => {
     expect(screen.getByRole("link", { name: "나라장터 원문 보기" })).toHaveAttribute("rel", "noopener noreferrer");
   });
 
-  it("shows every saved API field beside scraped fields and the full page text", () => {
+  it("shows Korean(API key) labels for API fields while preserving scraped labels and full text", () => {
     render(<NoticeDetail notice={notice} api={{
       bidNtceNo: "R26BK1", bidNtceOrd: "000", srvceDivNm: "연구용역",
       cntrctPrd: "", bidNtceDtlUrl: "https://www.g2b.go.kr/detail"
@@ -32,9 +32,10 @@ describe("NoticeDetail", () => {
       links: [{ label: "관련 페이지", url: "https://www.g2b.go.kr/related" }]
     }} />);
     const api = within(screen.getByRole("region", { name: "API 원본 데이터" }));
-    expect(api.getByText("srvceDivNm")).toBeInTheDocument();
+    expect(api.getByText("용역구분명(srvceDivNm)")).toBeInTheDocument();
+    expect(api.getByText("입찰공고번호(bidNtceNo)")).toBeInTheDocument();
     expect(api.getByText("연구용역")).toBeInTheDocument();
-    expect(api.getByText("cntrctPrd")).toBeInTheDocument();
+    expect(api.getByText("cntrctPrd")).toBeInTheDocument(); // 명세에 없는 키는 원문 유지
     expect(api.getByText("값 없음")).toBeInTheDocument();
     expect(api.getByRole("link", { name: "https://www.g2b.go.kr/detail" })).toHaveAttribute("target", "_blank");
     const scraped = within(screen.getByRole("region", { name: "나라장터 상세 수집 데이터" }));
