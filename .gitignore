@@ -7,3 +7,4 @@ data/
 # Playwright MCP generated files
 .playwright-mcp/
 docs
+*.tsbuildinfo
