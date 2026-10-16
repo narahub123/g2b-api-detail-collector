@@ -1,0 +1,9 @@
+node_modules/
+.next/
+.env.local
+.env
+data/
+.superpowers/
+# Playwright MCP generated files
+.playwright-mcp/
+docs
