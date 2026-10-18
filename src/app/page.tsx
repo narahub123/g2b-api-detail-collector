@@ -14,7 +14,7 @@ export default async function Home() {
       <p>업무 내용과 기간, 금액, 참가 조건을 확인하기 쉽게 모았습니다.</p>
     </section>
     <CollectionForm />
-    <section className="results-section"><div className="results-heading"><div><span className="eyebrow">SAVED NOTICES</span><h2>수집된 공고 <span>{notices.length}</span></h2></div><p>공고를 선택하면 상세 정보를 볼 수 있습니다.</p></div>
+    <section className="results-section"><div className="results-heading"><div><span className="eyebrow">SAVED NOTICES</span><h2>수집된 공고 <span>{notices.length}</span></h2></div><div className="results-actions"><p>공고를 선택하면 상세 정보를 볼 수 있습니다.</p><a href="/data-explorer">원본 JSON 탐색 →</a></div></div>
       <NoticeList notices={notices} /></section>
     <footer>데이터 출처: 조달청 나라장터 입찰공고정보서비스 · 상세 정보는 원문을 함께 확인하세요.</footer>
   </main>;
