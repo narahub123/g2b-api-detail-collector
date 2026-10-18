@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
-import { readdir } from "node:fs/promises";
+import { readdir, unlink } from "node:fs/promises";
 import { fetchServiceNotices } from "./api-client";
 import { parsePostedDateRange } from "./date-range";
 import { scrapeDetailPage, serviceDetailUrl, type ScrapeResult } from "./detail-page";
@@ -50,6 +50,9 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies): 
     return { number, order };
   };
   const pathFor = (key: string) => join(dir, "notices", `${key}.json`);
+  const intentDir = join(dir, "relation-intents");
+  const intentPath = (source: string, related: string) =>
+    join(intentDir, `${[source, related].sort().join("__")}.json`);
   const readRecord = async (key: string): Promise<StoredNotice | null> => {
     try { return await readJson<StoredNotice>(pathFor(key)); }
     catch (error) {
@@ -72,7 +75,7 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies): 
     await saveRecord(key, record);
     return record;
   };
-  const addRelation = async (source: string, related: string) => {
+  const writeReciprocalRelation = async (source: string, related: string) => {
     if (source === related) return;
     const sourceRecord = await ensureRecord(source);
     const relatedRecord = await ensureRecord(related);
@@ -80,6 +83,13 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies): 
     relatedRecord.relatedNoticeKeys = [...new Set([...(relatedRecord.relatedNoticeKeys || []), source])];
     await saveRecord(source, sourceRecord);
     await saveRecord(related, relatedRecord);
+  };
+  const addRelation = async (source: string, related: string) => {
+    if (source === related) return;
+    const path = intentPath(source, related);
+    await writeJsonAtomic(path, { source, related });
+    await writeReciprocalRelation(source, related);
+    await unlink(path);
   };
   const processRecord = async (key: string, api: ApiNotice | null = null): Promise<string[]> => {
     const record = await ensureRecord(key, api);
@@ -127,7 +137,32 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies): 
       await enqueueRelated(key, discovered);
     }
   };
+  const recoverRelationIntents = async () => {
+    let files: string[];
+    try { files = await readdir(intentDir); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw error;
+    }
+    for (const file of files.filter((name) => name.endsWith(".json"))) {
+      const { source, related } = await readJson<{ source: string; related: string }>(join(intentDir, file));
+      parts(source);
+      parts(related);
+      if (source === related || file !== `${[source, related].sort().join("__")}.json`) {
+        throw new Error(`잘못된 관련 공고 복구 기록: ${file}`);
+      }
+      await writeReciprocalRelation(source, related);
+      await unlink(join(intentDir, file));
+      for (const key of [source, related]) {
+        if ((await readRecord(key))?.detail || queued.has(key)) continue;
+        if (queued.size < 200) { queued.add(key); queue.push(key); }
+        else job.errors.push(`${key}: 관련 공고 탐색 한도(200건)로 상세 수집 보류`);
+      }
+    }
+  };
   try {
+    await recoverRelationIntents();
+    await drainRelated();
     for await (const page of fetchServiceNotices(job.range, deps.fetcher)) {
       await writeJsonAtomic(join(dir, "api", job.id, `${page.date}-${page.pageNo}.json`), page.raw);
       for (const item of page.items) {

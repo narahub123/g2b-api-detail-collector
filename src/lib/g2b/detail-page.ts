@@ -3,13 +3,14 @@ import { chromium } from "playwright-core";
 import { noticeKeyFromParts } from "./identity";
 
 export type Attachment = { name: string; url: string | null };
-export type AttachmentMetadata = { orgnlAtchFileNm: string; atchFileSqno: number };
+export type AttachmentMetadata = { orgnlAtchFileNm: string; atchFileSqno: number; scrnIndtYn?: string };
 export type StructuredField = { label: string; value: string | null };
 export type StructuredTable = { columns: string[]; rows: (string | null)[][] };
 export type StructuredSection = { title: string; fields: StructuredField[]; tables: StructuredTable[]; text: string };
 export type ModalCapture = {
   trigger: { index: number; tag: string; label: string; value: string; sectionHint: string | null; html: string; parentModalTitle?: string | null };
   modal: { text: string; html: string; title: string | null; fields: StructuredField[]; tables: StructuredTable[] };
+  settling?: { status: "settled" | "timeout"; elapsedMs: number };
 };
 export type ScrapedDetail = {
   schemaVersion?: "pilot-4";
@@ -116,18 +117,30 @@ export function extractDetailPage(html: string, pageUrl: string, fileMetadata: A
   const order = url.searchParams.get("bidPbancOrd") || "";
   const attachments: Attachment[] = [];
   const sequenceByName = new Map(fileMetadata.map((file) => [clean(cheerio.load(file.orgnlAtchFileNm).text()), file.atchFileSqno]));
-  $("td[col_id='orgnlAtchFileNm']").each((_, cell) => {
-    const name = clean($(cell).text());
-    if (!name) return;
-    const sequence = sequenceByName.get(name);
-    if (!sequence || !Number.isSafeInteger(sequence) || sequence <= 0) { attachments.push({ name, url: null }); return; }
+  const attachmentUrl = (sequence: number | undefined): string | null => {
+    if (!sequence || !Number.isSafeInteger(sequence) || sequence <= 0) return null;
     const download = new URL("https://www.g2b.go.kr/pn/pnp/pnpe/UntyAtchFile/downloadFile.do");
     download.searchParams.set("bidPbancNo", number);
     download.searchParams.set("bidPbancOrd", order);
     download.searchParams.set("fileSeq", String(sequence));
     download.searchParams.set("fileType", "");
-    attachments.push({ name, url: download.toString() });
+    return download.toString();
+  };
+  const seenAttachmentNames = new Set<string>();
+  $("td[col_id='orgnlAtchFileNm']").each((_, cell) => {
+    const name = clean($(cell).text());
+    if (!name || seenAttachmentNames.has(name)) return;
+    attachments.push({ name, url: attachmentUrl(sequenceByName.get(name)) });
+    seenAttachmentNames.add(name);
   });
+  // The grid can still be rendering when its attachment-list response is complete.
+  for (const file of fileMetadata) {
+    if (file.scrnIndtYn === "N") continue;
+    const name = clean(cheerio.load(file.orgnlAtchFileNm).text());
+    if (!name || seenAttachmentNames.has(name)) continue;
+    attachments.push({ name, url: attachmentUrl(file.atchFileSqno) });
+    seenAttachmentNames.add(name);
+  }
   const links: ScrapedDetail["links"] = [];
   $("a[href]").each((_, anchor) => {
     try {
@@ -269,6 +282,55 @@ async function visibleDialogs(page: import("playwright-core").Page): Promise<Dia
   }));
 }
 
+type ModalWaitResult = { status: "settled" | "timeout"; elapsedMs: number; nonemptyValues: number };
+
+/** Wait for actual modal field/grid values to stop changing, not merely for labels to appear.
+ * Empty values are legitimate: a timeout is recorded, not silently treated as success.
+ * This is a bounded heuristic, not proof that the G2B application finished loading.
+ */
+async function waitForModalDataSettled(
+  page: import("playwright-core").Page,
+  before: DialogSnapshot[],
+  maxWaitMs = 8000,
+  quietMs = 1500
+): Promise<ModalWaitResult> {
+  const started = Date.now();
+  let lastSignature: string | null = null;
+  let lastChange = started;
+  let nonemptyValues = 0;
+  while (Date.now() - started < maxWaitMs) {
+    const state = await page.locator(MODAL_SELECTOR).evaluateAll((nodes, oldDialogs) => {
+      const visible = nodes.filter(node => {
+        const el = node as HTMLElement;
+        const style = getComputedStyle(el);
+        return !!el.getClientRects().length && style.display !== "none" && style.visibility !== "hidden" &&
+          (!!(el.innerText || "").trim() || !!el.querySelector("td[data-title],td[col_id]"));
+      }) as HTMLElement[];
+      const el = visible.find(node => !oldDialogs.some(old => old.id === node.id));
+      if (!el) return null;
+      const values = [...el.querySelectorAll("td[data-title],td[col_id]")].map(cell => {
+        const controls = [...cell.querySelectorAll("input:not([type=hidden]),textarea,select")]
+          .map(control => (control as HTMLInputElement).value?.trim() || "");
+        const copy = cell.cloneNode(true) as HTMLElement;
+        copy.querySelectorAll("input,textarea,select,button,script,style").forEach(node => node.remove());
+        return [...controls, (copy.innerText || copy.textContent || "").trim()].filter(Boolean).join(" ");
+      });
+      return { signature: JSON.stringify(values), nonemptyValues: values.filter(Boolean).length };
+    }, before.map(item => ({ id: item.id, text: item.text })));
+    if (state) {
+      nonemptyValues = state.nonemptyValues;
+      if (state.signature !== lastSignature) {
+        lastSignature = state.signature;
+        lastChange = Date.now();
+      } else if (nonemptyValues > 0 && Date.now() - lastChange >= quietMs) {
+        return { status: "settled", elapsedMs: Date.now() - started, nonemptyValues };
+      }
+    }
+    await page.waitForTimeout(125);
+  }
+  return { status: "timeout", elapsedMs: Date.now() - started, nonemptyValues };
+}
+
 async function clickCandidates(page: import("playwright-core").Page, dialogId: string | null): Promise<Candidate[]> {
   const root = dialogId ? page.locator(`[id=${JSON.stringify(dialogId)}]`) : page.locator("body");
   return root.locator(CLICK_SELECTOR).evaluateAll((nodes, { dialogId, modalSelector }) => nodes.map((node, index) => {
@@ -336,19 +398,8 @@ export async function collectModalContents(page: import("playwright-core").Page)
         // WebSquare can leave a process overlay over readable controls. Dispatch only
         // after the read-only candidate filter, so the overlay cannot intercept it.
         await control.dispatchEvent("click", undefined, { timeout: 2500 });
-        await page.waitForFunction(({ selector, before }) => [...document.querySelectorAll(selector)].some((node) => {
-          const element = node as HTMLElement;
-          const style = window.getComputedStyle(element);
-          if (!element.getClientRects().length || style.visibility === "hidden" || style.display === "none") return false;
-          const old = before.find((item) => item.id === element.id);
-          if (old && (element.innerText || "").trim() === old.text) return false;
-          const title = element.querySelector("[id$='_header_title'],.w2window_header_title,h1,h2,h3")?.textContent?.trim() || "";
-          const bodyText = (element.innerText || "").replace(title, "").trim();
-          const fields = [...element.querySelectorAll("td[data-title]")].some((cell) => (cell.textContent || "").trim());
-          return fields || bodyText.length > 20;
-        }), { selector: MODAL_SELECTOR, before: before.map((item) => ({ id: item.id, text: item.text })) }, { timeout: 8000 }).catch(() => undefined);
+        const settling = await waitForModalDataSettled(page, before);
         if (page.url() !== beforeUrl) throw new Error("클릭 후 페이지가 이동했습니다.");
-        await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => undefined);
         const after = await visibleDialogs(page);
         const fresh = after.find((item) => !before.some((old) => old.id === item.id));
         if (fresh) {
@@ -359,7 +410,8 @@ export async function collectModalContents(page: import("playwright-core").Page)
           if (hasData) {
             captures.push({ trigger: { index: candidate.index, tag: candidate.tag, label: candidate.label,
               value: candidate.value, sectionHint: candidate.sectionHint, html: candidate.html, parentModalTitle },
-              modal: { text: fresh.text, html: fresh.html, ...structured } });
+              modal: { text: fresh.text, html: fresh.html, ...structured },
+              settling: { status: settling.status, elapsedMs: settling.elapsedMs } });
             if (fresh.id) await explore(fresh.id, fresh.title, depth + 1);
           }
         }

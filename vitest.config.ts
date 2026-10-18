@@ -7,6 +7,7 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    setupFiles: ["./vitest.setup.ts"]
+    setupFiles: ["./vitest.setup.ts"],
+    maxWorkers: process.platform === "win32" ? 1 : undefined
   }
 });

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -63,6 +63,7 @@ describe("related notices", () => {
     expect(called).toEqual(["002"]);
     expect((await getNoticeRecord("R26BK1--002", dir))?.relatedNoticeKeys).toEqual(["R26BK1--001"]);
     expect((await getNoticeRecord("R26BK1--001", dir))?.relatedNoticeKeys).toEqual(["R26BK1--002"]);
+    expect(await readdir(join(dir, "relation-intents"))).toEqual([]);
   });
 
   it("repairs an interrupted reciprocal write before processing new API items", async () => {

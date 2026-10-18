@@ -88,4 +88,11 @@ describe("NoticeComparison", () => {
     expect(clicked.getByText("공지사항 상세에서 열림")).toBeInTheDocument();
     expect(clicked.getByText("추가 안내 · 추가 안내 상세")).toBeInTheDocument();
   });
+
+  it("marks a modal whose values did not settle before the time limit", () => {
+    const uncertain = { ...detail, modalCaptures: [{ ...detail.modalCaptures![0],
+      settling: { status: "timeout" as const, elapsedMs: 8000 } }] };
+    render(<NoticeComparison api={null} detail={uncertain} />);
+    expect(screen.getByRole("region", { name: "클릭 상세 정보" })).toHaveTextContent("값 로딩 확인 시간 초과");
+  });
 });

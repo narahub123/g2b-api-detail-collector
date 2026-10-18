@@ -34,6 +34,22 @@ describe("extractDetailPage", () => {
     expect(result.attachments[0].url).toContain("fileSeq=1");
   });
 
+  it("keeps all visible attachment metadata when the rendered grid is incomplete", () => {
+    const html = `<table><tr><th>공고명</th><td>용역</td></tr></table>
+      <table><tr><td col_id="orgnlAtchFileNm">2. 공고문(최종).pdf</td></tr></table>`;
+    const result = extractDetailPage(html, url, [
+      { orgnlAtchFileNm: "2. 공고문&#40;최종&#41;.pdf", atchFileSqno: 1, scrnIndtYn: "Y" },
+      { orgnlAtchFileNm: "3. 제안요청서.hwp", atchFileSqno: 2, scrnIndtYn: "Y" },
+      { orgnlAtchFileNm: "긴급입찰사유서.hwp", atchFileSqno: 3, scrnIndtYn: "Y" },
+      { orgnlAtchFileNm: "숨긴 파일.hwp", atchFileSqno: 4, scrnIndtYn: "N" },
+    ]);
+    expect(result.attachments.map((item) => item.name)).toEqual([
+      "2. 공고문(최종).pdf", "3. 제안요청서.hwp", "긴급입찰사유서.hwp"
+    ]);
+    expect(result.attachments.map((item) => new URL(item.url!).searchParams.get("fileSeq"))).toEqual(["1", "2", "3"]);
+    expect(result.summary?.attachmentCount).toBe(3);
+  });
+
   it("rejects non-G2B source URLs", () => {
     expect(() => extractDetailPage("<h2>공고</h2>", "https://example.com/")).toThrow();
   });

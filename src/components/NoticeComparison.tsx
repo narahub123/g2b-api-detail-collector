@@ -97,6 +97,7 @@ export function NoticeComparison({ api, detail }: { api: ApiNotice | null; detai
             <summary>{capture.trigger.label} · {capture.modal.title || "제목 없음"}
               <span>필드 {capture.modal.fields.length} · 표 {capture.modal.tables.length}</span></summary>
             {capture.trigger.parentModalTitle && <p className="muted">{capture.trigger.parentModalTitle}에서 열림</p>}
+            {capture.settling?.status === "timeout" && <p className="comparison-failures">값 로딩 확인 시간 초과 · 일부 값이 누락되었을 수 있습니다.</p>}
             <FieldList fields={capture.modal.fields} />
             <TableList tables={capture.modal.tables} group={capture.trigger.label} />
             {capture.modal.text && <div className="comparison-text-block"><h4>팝업 본문</h4><p>{capture.modal.text}</p></div>}
