@@ -3,10 +3,11 @@ import { join } from "node:path";
 import { readdir } from "node:fs/promises";
 import { fetchServiceNotices } from "./api-client";
 import { parsePostedDateRange } from "./date-range";
-import { scrapeDetailPage, serviceDetailUrl, type ScrapedDetail } from "./detail-page";
-import { noticeKey } from "./identity";
+import { scrapeDetailPage, serviceDetailUrl, type ScrapeResult } from "./detail-page";
+import { noticeKey, noticeKeyFromParts } from "./identity";
 import { readJson, writeJsonAtomic } from "./json-store";
 import { normalizeNotice, type NormalizedNotice } from "./normalize";
+import type { StoredNotice } from "./notices";
 import type { ApiNotice, PostedDateRange } from "./types";
 
 export type CollectionJob = {
@@ -25,7 +26,7 @@ export type CollectionJob = {
 type CollectionDependencies = {
   fetcher?: typeof fetch;
   dataDir?: string;
-  scrape?: (url: string) => Promise<ScrapedDetail>;
+  scrape?: (url: string) => Promise<ScrapeResult>;
 };
 
 const jobRuntime = globalThis as typeof globalThis & { __g2bActiveJobId?: string | null };
@@ -39,7 +40,93 @@ async function saveJob(job: CollectionJob, dir: string) {
 async function runCollection(job: CollectionJob, deps: CollectionDependencies): Promise<void> {
   const dir = deps.dataDir || defaultDataDir();
   const scrape = deps.scrape || scrapeDetailPage;
-  const seen = new Set<string>();
+  const seenApi = new Set<string>();
+  const scraped = new Set<string>();
+  const queued = new Set<string>();
+  const queue: string[] = [];
+  const parts = (key: string) => {
+    const [number, order] = key.split("--");
+    if (noticeKeyFromParts(number, order) !== key) throw new Error(`잘못된 공고 키: ${key}`);
+    return { number, order };
+  };
+  const pathFor = (key: string) => join(dir, "notices", `${key}.json`);
+  const readRecord = async (key: string): Promise<StoredNotice | null> => {
+    try { return await readJson<StoredNotice>(pathFor(key)); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    }
+  };
+  const saveRecord = async (key: string, record: StoredNotice) => {
+    const identity = parts(key);
+    record.key = key;
+    record.relatedNoticeKeys = [...new Set(record.relatedNoticeKeys || [])];
+    record.normalized = normalizeNotice(record.api, record.detail, identity);
+    await writeJsonAtomic(pathFor(key), record);
+  };
+  const ensureRecord = async (key: string, api: ApiNotice | null = null): Promise<StoredNotice> => {
+    const identity = parts(key);
+    const record = await readRecord(key) || { key, api: null, detail: null, relatedNoticeKeys: [],
+      detailUrl: serviceDetailUrl(identity.number, identity.order), detailError: null, collectedAt: new Date().toISOString() };
+    if (api) record.api = api;
+    await saveRecord(key, record);
+    return record;
+  };
+  const addRelation = async (source: string, related: string) => {
+    if (source === related) return;
+    const sourceRecord = await ensureRecord(source);
+    const relatedRecord = await ensureRecord(related);
+    sourceRecord.relatedNoticeKeys = [...new Set([...(sourceRecord.relatedNoticeKeys || []), related])];
+    relatedRecord.relatedNoticeKeys = [...new Set([...(relatedRecord.relatedNoticeKeys || []), source])];
+    await saveRecord(source, sourceRecord);
+    await saveRecord(related, relatedRecord);
+  };
+  const processRecord = async (key: string, api: ApiNotice | null = null): Promise<string[]> => {
+    const record = await ensureRecord(key, api);
+    if (record.detail || scraped.has(key)) return [];
+    scraped.add(key);
+    job.phase = "detail";
+    await saveJob(job, dir);
+    const identity = parts(key);
+    try {
+      const result = await scrape(serviceDetailUrl(identity.number, identity.order));
+      record.detail = result.detail;
+      record.detailError = null;
+      job.detailSucceeded++;
+      await saveRecord(key, record);
+      await saveJob(job, dir);
+      return result.relatedNoticeKeys;
+    } catch (error) {
+      record.detailError = error instanceof Error ? error.message : "상세 수집 오류";
+      job.detailFailed++;
+      job.errors.push(`${key}: ${record.detailError}`);
+      await saveRecord(key, record);
+      await saveJob(job, dir);
+      return [];
+    }
+  };
+  const enqueueRelated = async (source: string, relatedKeys: string[]) => {
+    for (const related of relatedKeys) {
+      try {
+        if (related === source) continue;
+        parts(related);
+        await addRelation(source, related);
+        if (!queued.has(related)) {
+          if (queued.size < 200) { queued.add(related); queue.push(related); }
+          else job.errors.push(`${related}: 관련 공고 탐색 한도(200건)로 상세 수집 보류`);
+        }
+      } catch (error) {
+        job.errors.push(`${source} → ${related}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  };
+  const drainRelated = async () => {
+    while (queue.length) {
+      const key = queue.shift()!;
+      const discovered = await processRecord(key);
+      await enqueueRelated(key, discovered);
+    }
+  };
   try {
     for await (const page of fetchServiceNotices(job.range, deps.fetcher)) {
       await writeJsonAtomic(join(dir, "api", job.id, `${page.date}-${page.pageNo}.json`), page.raw);
@@ -47,29 +134,12 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies): 
         let key: string;
         try { key = noticeKey(item); }
         catch (error) { job.errors.push(error instanceof Error ? error.message : "공고 식별 오류"); continue; }
-        if (seen.has(key)) continue;
-        seen.add(key);
+        if (seenApi.has(key)) continue;
+        seenApi.add(key);
         job.apiCount++;
-        const detailUrl = serviceDetailUrl(item.bidNtceNo!, item.bidNtceOrd!);
-        const record: { key: string; api: ApiNotice; detail: ScrapedDetail | null; normalized: NormalizedNotice; detailUrl: string; detailError: string | null; collectedAt: string } = {
-          key, api: item, detail: null, detailUrl, detailError: null, collectedAt: new Date().toISOString()
-          , normalized: normalizeNotice(item, null)
-        };
-        const path = join(dir, "notices", `${key}.json`);
-        await writeJsonAtomic(path, record);
-        job.phase = "detail";
-        await saveJob(job, dir);
-        try {
-          record.detail = await scrape(detailUrl);
-          job.detailSucceeded++;
-        } catch (error) {
-          record.detailError = error instanceof Error ? error.message : "상세 수집 오류";
-          job.detailFailed++;
-          job.errors.push(`${key}: ${record.detailError}`);
-        }
-        record.normalized = normalizeNotice(item, record.detail);
-        await writeJsonAtomic(path, record);
-        await saveJob(job, dir);
+        const discovered = await processRecord(key, item);
+        await enqueueRelated(key, discovered);
+        await drainRelated();
       }
     }
     job.status = "completed";

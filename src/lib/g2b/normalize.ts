@@ -1,6 +1,6 @@
 import type { ScrapedDetail } from "./detail-page";
 import { serviceDetailUrl } from "./detail-page";
-import { noticeKey } from "./identity";
+import { noticeKeyFromParts } from "./identity";
 import type { ApiNotice } from "./types";
 
 export type FieldValue = { value: string | null; source: "api" | "detail" | null };
@@ -30,13 +30,13 @@ const read = (record: Record<string, unknown>, key: string): string | null => {
     ? String(value).trim() : null;
 };
 
-function pick(api: ApiNotice, detail: ScrapedDetail | null, detailKeys: string[], apiKeys: string[]): FieldValue {
+function pick(api: ApiNotice | null, detail: ScrapedDetail | null, detailKeys: string[], apiKeys: string[]): FieldValue {
   for (const key of detailKeys) {
     const value = detail?.fields[key]?.trim();
     if (value) return { value, source: "detail" };
   }
   for (const key of apiKeys) {
-    const value = read(api, key);
+    const value = read(api || {}, key);
     if (value) return { value, source: "api" };
   }
   return { value: null, source: null };
@@ -59,10 +59,11 @@ function validDateTime(value: string): boolean {
     && date.getUTCDate() === Number(day) && Number(hour) < 24 && Number(minute) < 60 && Number(second) < 60;
 }
 
-export function normalizeNotice(api: ApiNotice, detail: ScrapedDetail | null): NormalizedNotice {
-  const key = noticeKey(api);
-  const number = api.bidNtceNo!;
-  const order = api.bidNtceOrd!;
+export function normalizeNotice(api: ApiNotice | null, detail: ScrapedDetail | null, identity?: { number: string; order: string }): NormalizedNotice {
+  const number = api?.bidNtceNo || identity?.number;
+  const order = api?.bidNtceOrd || identity?.order;
+  const key = noticeKeyFromParts(number, order);
+  if (!number || !order) throw new Error("공고번호 또는 공고차수가 없습니다.");
   const validationIssues: ValidationIssue[] = [];
   const postedAt = pick(api, detail, ["게시일시"], ["bidNtceDt"]);
   const deadline = pick(api, detail, ["입찰서제출 마감일시", "입찰마감일시"], ["bidClseDt", "bidClseDtTm"]);
@@ -88,8 +89,8 @@ export function normalizeNotice(api: ApiNotice, detail: ScrapedDetail | null): N
     if (url && !seen.has(item.name)) { attachments.push({ name: item.name, url }); seen.add(item.name); }
   }
   for (let i = 1; i <= 10; i++) {
-    const name = read(api, `ntceSpecFileNm${i}`);
-    const url = read(api, `ntceSpecDocUrl${i}`);
+    const name = read(api || {}, `ntceSpecFileNm${i}`);
+    const url = read(api || {}, `ntceSpecDocUrl${i}`);
     const safe = url && safeG2bUrl(url);
     if (name && safe && !seen.has(name)) { attachments.push({ name, url: safe }); seen.add(name); }
   }
@@ -103,7 +104,7 @@ export function normalizeNotice(api: ApiNotice, detail: ScrapedDetail | null): N
     qualifications: pick(api, detail, ["입찰자격", "입찰참가자격", "업종제한사항", "업종제한"], []),
     region: pick(api, detail, ["지역제한", "참가가능지역"], ["prtcptPsblRgnNm"]),
     attachments,
-    originalUrl: safeG2bUrl(detail?.sourceUrl || "") || serviceDetailUrl(number, order),
+    originalUrl: safeG2bUrl(detail?.sourceUrl || "") || serviceDetailUrl(number!, order!),
     scrapeStatus: detail ? "succeeded" : "failed",
     validationIssues
   };

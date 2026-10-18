@@ -23,7 +23,7 @@ describe("collection flow", () => {
       dataDir, fetcher: fetcher as typeof fetch,
       scrape: async (url) => {
         if (url.includes("bidPbancOrd=001")) throw new Error("상세 페이지 접근 실패");
-        return { sourceUrl: url, fields: { "공고명": "첫 차수 상세", "입찰자격": "중소기업" }, text: "첫 차수 상세", attachments: [], links: [] };
+        return { detail: { sourceUrl: url, fields: { "공고명": "첫 차수 상세", "입찰자격": "중소기업" }, text: "첫 차수 상세", attachments: [], links: [] }, relatedNoticeKeys: [] };
       }
     });
     let state = await getCollectionJob(job.id, dataDir);

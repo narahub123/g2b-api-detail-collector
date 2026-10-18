@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
 import { NoticeDetail } from "./NoticeDetail";
 import type { NormalizedNotice } from "@/lib/g2b/normalize";
 
@@ -14,35 +14,43 @@ const notice: NormalizedNotice = {
 };
 
 describe("NoticeDetail", () => {
+  afterEach(cleanup);
   it("shows missing fields and provides download and new-tab source links", () => {
     render(<NoticeDetail notice={notice} />);
     expect(screen.getAllByText("정보 없음").length).toBeGreaterThan(0);
     expect(screen.getByRole("link", { name: "공고문.pdf" })).toHaveAttribute("download");
     expect(screen.getByRole("link", { name: "나라장터 원문 보기" })).toHaveAttribute("target", "_blank");
     expect(screen.getByRole("link", { name: "나라장터 원문 보기" })).toHaveAttribute("rel", "noopener noreferrer");
+    expect(screen.getByRole("link", { name: "수집 정보 비교" })).toHaveAttribute("href", "/bids/R26BK1--000/compare");
   });
 
-  it("shows Korean(API key) labels for API fields while preserving scraped labels and full text", () => {
-    render(<NoticeDetail notice={notice} api={{
-      bidNtceNo: "R26BK1", bidNtceOrd: "000", srvceDivNm: "연구용역",
-      cntrctPrd: "", bidNtceDtlUrl: "https://www.g2b.go.kr/detail"
-    }} detail={{
-      sourceUrl: "https://www.g2b.go.kr/", fields: { "업종제한사항": "학술연구용역" },
-      text: "실제 상세 페이지의 전체 공개 본문", attachments: [{ name: "과업지시서.hwp", url: "https://www.g2b.go.kr/download" }],
-      links: [{ label: "관련 페이지", url: "https://www.g2b.go.kr/related" }]
-    }} />);
-    const api = within(screen.getByRole("region", { name: "API 원본 데이터" }));
-    expect(api.getByText("용역구분명(srvceDivNm)")).toBeInTheDocument();
-    expect(api.getByText("입찰공고번호(bidNtceNo)")).toBeInTheDocument();
-    expect(api.getByText("연구용역")).toBeInTheDocument();
-    expect(api.getByText("cntrctPrd")).toBeInTheDocument(); // 명세에 없는 키는 원문 유지
-    expect(api.getByText("값 없음")).toBeInTheDocument();
-    expect(api.getByRole("link", { name: "https://www.g2b.go.kr/detail" })).toHaveAttribute("target", "_blank");
-    const scraped = within(screen.getByRole("region", { name: "나라장터 상세 수집 데이터" }));
-    expect(scraped.getByText("업종제한사항")).toBeInTheDocument();
-    expect(scraped.getByText("학술연구용역")).toBeInTheDocument();
-    expect(scraped.getByText("실제 상세 페이지의 전체 공개 본문")).toBeInTheDocument();
-    expect(scraped.getByRole("link", { name: "관련 페이지" })).toHaveAttribute("target", "_blank");
-    expect(scraped.getByRole("link", { name: "과업지시서.hwp" })).toHaveAttribute("download");
+  it("keeps the summary and dedicated comparison link without the inline comparison", () => {
+    render(<NoticeDetail notice={notice} />);
+    expect(screen.getByRole("heading", { name: "주요 항목 요약" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "수집 정보 비교" })).toHaveAttribute("href", "/bids/R26BK1--000/compare");
+    expect(screen.queryByRole("heading", { name: "수집 데이터 비교" })).not.toBeInTheDocument();
+  });
+
+  it("links only directly related notices from the current notice", () => {
+    render(<NoticeDetail notice={notice} relatedNoticeKeys={["R26BK2--001", "R26BK3--000"]} />);
+    const related = screen.getByRole("region", { name: "관련 공고" });
+    expect(related.querySelectorAll("a")).toHaveLength(2);
+    expect(screen.getByRole("link", { name: "R26BK2 · 001차" })).toHaveAttribute("href", "/bids/R26BK2--001");
+    expect(screen.queryByRole("link", { name: /R26BK4/ })).not.toBeInTheDocument();
+  });
+
+  it("shows a related notice independently when no API item exists", () => {
+    render(<NoticeDetail notice={{ ...notice, key: "R26BK2--001", number: "R26BK2", order: "001",
+      title: { value: "관련 공고 상세", source: "detail" } }} relatedNoticeKeys={["R26BK1--000"]} />);
+    expect(screen.getByRole("heading", { name: "관련 공고 상세" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "R26BK1 · 000차" })).toHaveAttribute("href", "/bids/R26BK1--000");
+  });
+
+  it("shows failed or unavailable related detail beside its link", () => {
+    render(<NoticeDetail notice={notice} relatedNoticeKeys={["R26BK2--001", "R26BK3--000"]}
+      relatedNoticeStates={{ "R26BK2--001": "failed", "R26BK3--000": "unavailable" }} />);
+    const related = screen.getByRole("region", { name: "관련 공고" });
+    expect(related).toHaveTextContent("수집 실패");
+    expect(related).toHaveTextContent("상세 정보 없음");
   });
 });

@@ -46,4 +46,14 @@ describe("normalizeNotice", () => {
     expect(notice.deadline.value).toBeNull();
     expect(notice.validationIssues.map((issue) => issue.field)).toEqual(["postedAt", "deadline"]);
   });
+
+  it("normalizes an independent related notice before its API item arrives", () => {
+    const notice = normalizeNotice(null, {
+      sourceUrl: "https://www.g2b.go.kr/link/PNPE027_01/single/?bidPbancNo=R26BK01766517&bidPbancOrd=001",
+      fields: { 공고명: "이전 차수 공고", 공고기관: "고흥군" }, text: "공고 본문", attachments: [], links: []
+    }, { number: "R26BK01766517", order: "001" });
+    expect(notice.key).toBe("R26BK01766517--001");
+    expect(notice.title).toEqual({ value: "이전 차수 공고", source: "detail" });
+    expect(notice.scrapeStatus).toBe("succeeded");
+  });
 });

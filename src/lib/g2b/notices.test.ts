@@ -41,9 +41,27 @@ describe("saved notices", () => {
       detail: { sourceUrl: "https://www.g2b.go.kr/", fields: { "업종제한사항": "연구" }, text: "전체 본문", attachments: [], links: [] }
     }));
     const record = await getNoticeRecord("R26BK1--000", dir);
-    expect(record?.api.srvceDivNm).toBe("연구");
+    expect(record?.api?.srvceDivNm).toBe("연구");
     expect(record?.detail?.text).toBe("전체 본문");
     expect(record?.normalized.title.value).toBe("용역");
     expect(await getNoticeRecord("../bad", dir)).toBeNull();
+  });
+
+  it("loads API-free related notices and unique direct relationships", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "g2b-notices-")); dirs.push(dir);
+    await mkdir(join(dir, "notices"));
+    await writeFile(join(dir, "notices", "R26BK1--001.json"), JSON.stringify({
+      key: "R26BK1--001", api: null,
+      detail: { sourceUrl: "https://www.g2b.go.kr/", fields: { 공고명: "이전 공고" }, text: "본문", attachments: [], links: [] },
+      relatedNoticeKeys: ["R26BK1--002", "R26BK1--002"]
+    }));
+    const record = await getNoticeRecord("R26BK1--001", dir);
+    expect(record?.api).toBeNull();
+    expect(record?.normalized.title.value).toBe("이전 공고");
+    expect(record?.relatedNoticeKeys).toEqual(["R26BK1--002"]);
+    await writeFile(join(dir, "notices", "R26BK1--002.json"), JSON.stringify({
+      key: "wrong--key", api: null, detail: null
+    }));
+    expect(await getNoticeRecord("R26BK1--002", dir)).toBeNull();
   });
 });

@@ -1,17 +1,25 @@
 import * as cheerio from "cheerio";
 import { chromium } from "playwright-core";
+import { noticeKeyFromParts } from "./identity";
 
 export type Attachment = { name: string; url: string | null };
 export type AttachmentMetadata = { orgnlAtchFileNm: string; atchFileSqno: number };
 export type StructuredField = { label: string; value: string | null };
 export type StructuredTable = { columns: string[]; rows: (string | null)[][] };
 export type StructuredSection = { title: string; fields: StructuredField[]; tables: StructuredTable[]; text: string };
+export type ModalCapture = {
+  trigger: { index: number; tag: string; label: string; value: string; sectionHint: string | null; html: string; parentModalTitle?: string | null };
+  modal: { text: string; html: string; title: string | null; fields: StructuredField[]; tables: StructuredTable[] };
+};
 export type ScrapedDetail = {
   schemaVersion?: "pilot-4";
   noticeKey?: string;
   sourceUrl: string;
   capturedAt?: string;
   sections?: StructuredSection[];
+  // Raw, unclassified contents of dialogs opened by read-only controls.
+  modalCaptures?: ModalCapture[];
+  modalDiscovery?: { candidates: number; attempted: number; captured: number; skipped: number; failures: string[] };
   summary?: { sectionCount: number; fieldCount: number; nonemptyFieldCount: number; tableCount: number; tableRowCount: number; attachmentCount: number; linkCount: number };
   attachments: Attachment[];
   links: { label: string; url: string }[];
@@ -35,6 +43,15 @@ function assertG2bUrl(value: string): URL {
 const clean = (value: string) => value.replace(/\s+/g, " ").trim();
 const nonempty = (value: string): string | null => clean(value) || null;
 const SECTION_TITLES = ["공고일반", "입찰자격", "입찰진행정보", "가격", "기초금액공개", "기관담당자정보", "연관정보", "파일첨부 관련 안내사항", "파일첨부"];
+
+export function extractRelatedNoticeKeys(html: string): string[] {
+  const $ = cheerio.load(html);
+  const keys = $("td[data-title='관련공고'] a").toArray().flatMap((anchor) => {
+    const match = /^(R\d{2}BK\d+)-(\d{3})$/.exec(clean($(anchor).text()));
+    return match ? [noticeKeyFromParts(match[1], match[2])] : [];
+  });
+  return [...new Set(keys)];
+}
 
 export function extractDetailPage(html: string, pageUrl: string, fileMetadata: AttachmentMetadata[] = []): ScrapedDetail {
   const url = assertG2bUrl(pageUrl);
@@ -98,7 +115,7 @@ export function extractDetailPage(html: string, pageUrl: string, fileMetadata: A
   const number = url.searchParams.get("bidPbancNo") || "";
   const order = url.searchParams.get("bidPbancOrd") || "";
   const attachments: Attachment[] = [];
-  const sequenceByName = new Map(fileMetadata.map((file) => [clean(file.orgnlAtchFileNm), file.atchFileSqno]));
+  const sequenceByName = new Map(fileMetadata.map((file) => [clean(cheerio.load(file.orgnlAtchFileNm).text()), file.atchFileSqno]));
   $("td[col_id='orgnlAtchFileNm']").each((_, cell) => {
     const name = clean($(cell).text());
     if (!name) return;
@@ -151,7 +168,227 @@ export function extractDetailPage(html: string, pageUrl: string, fileMetadata: A
   };
 }
 
-export async function scrapeDetailPage(url: string): Promise<ScrapedDetail> {
+/**
+ * Parse a DOM snapshot whose form values have been synchronized from live controls.
+ * G2B WebSquare uses td[data-title] for detail fields and col_id for grid data.
+ * Do not infer fields from every table header: grid headers are not field labels.
+ */
+export function extractModalStructure(html: string): { title: string | null; fields: StructuredField[]; tables: StructuredTable[] } {
+  const $ = cheerio.load(html);
+  $("script,style").remove();
+  const root = $("[role='dialog']").first().length ? $("[role='dialog']").first() : $("body");
+  const title = nonempty(root.find("[id$='_header_title'],.w2window_header_title,h1,h2,h3").first().text());
+  const fields: StructuredField[] = [];
+  const tables: StructuredTable[] = [];
+  const readValue = (cell: cheerio.Cheerio<any>): string | null => {
+    const controls = cell.find("input,textarea,select").filter((_, el) => !$(el).is("[type='checkbox'],[type='radio'],[type='hidden']"));
+    const values = controls.toArray().map(el => {
+      const input = $(el);
+      if (input.is("textarea")) return nonempty(input.val()?.toString() || input.text());
+      if (input.is("select")) return nonempty(input.find("option:selected").text() || input.val()?.toString() || "");
+      return nonempty(input.attr("value") || input.val()?.toString() || "");
+    }).filter((value): value is string => value !== null);
+    const plain = cell.clone();
+    plain.find("input,textarea,select,button,script,style").remove();
+    return nonempty([...values, clean(plain.text())].filter(Boolean).join(" "));
+  };
+  // A single data-title cell is a single field; never also collect its paired th.
+  const fieldIndex = new Map<string, number>();
+  root.find("td[data-title]").each((_, element) => {
+    const cell = $(element);
+    if (cell.closest("[role='dialog']").length && root.is("body")) return;
+    if (cell.closest("table").attr("id")?.match(/grd|grid/i) || cell.is("[col_id]")) return;
+    const label = clean(cell.attr("data-title") || "");
+    if (!label) return;
+    const value = readValue(cell);
+    const previous = fieldIndex.get(label);
+    if (previous === undefined) {
+      fieldIndex.set(label, fields.length);
+      fields.push({ label, value });
+    } else if (fields[previous].value === null && value !== null) {
+      fields[previous].value = value;
+    }
+  });
+  // Fallback only for a genuine immediate th/td pair without data-title.
+  root.find("th.w2tb_th").each((_, element) => {
+    const th = $(element);
+    const next = th.next();
+    if (!next.is("td") || next.attr("data-title")) return;
+    const label = clean(th.text());
+    if (label) fields.push({ label, value: readValue(next) });
+  });
+  // WebSquare grids: only actual data cells (col_id), not row-status/checkbox controls.
+  root.find("table").each((_, element) => {
+    const table = $(element);
+    const dataRows = table.find("tr").filter((_, tr) => $(tr).children("td[col_id]").length > 0);
+    if (!dataRows.length) return;
+    const firstCells = dataRows.first().children("td[col_id]");
+    const ids = firstCells.toArray().map(cell => $(cell).attr("col_id") || "").filter(Boolean);
+    if (!ids.length) return;
+    const columns = ids.map(id => {
+      const header = table.find("th[col_id]").filter((_, th) => $(th).attr("col_id") === id).first();
+      return clean(header.text()) || id;
+    });
+    const rows = dataRows.toArray().map(tr => ids.map(id => {
+      const cell = $(tr).children("td[col_id]").filter((_, td) => $(td).attr("col_id") === id).first();
+      return cell.length ? readValue(cell) : null;
+    }));
+    if (rows.length) tables.push({ columns, rows });
+  });
+  return { title, fields, tables };
+}
+
+// Deliberately collect raw modal contents first; interpretation/structuring is a separate step.
+// Never probe submission, destructive actions, download links, or cross-page navigation.
+const MODAL_SELECTOR = '[role="dialog"], dialog[open], [aria-modal="true"], .modal.show, .modal.in, .ui-dialog, .w2ui-popup, .popup-layer, .layer-popup, .layerPopup, [class*="modal"][style*="display: block"]';
+
+const CLICK_SELECTOR = 'a, button, [role="button"], [onclick], input[type="button"], input[type="image"]';
+type DialogSnapshot = { id: string; title: string | null; text: string; html: string };
+type Candidate = { index: number; id: string; tag: string; label: string; value: string; sectionHint: string | null; html: string; skip: boolean };
+
+async function visibleDialogs(page: import("playwright-core").Page): Promise<DialogSnapshot[]> {
+  return page.locator(MODAL_SELECTOR).evaluateAll((nodes) => nodes.flatMap((node) => {
+    const element = node as HTMLElement;
+    const style = window.getComputedStyle(element);
+    if (!element.getClientRects().length || style.visibility === "hidden" || style.display === "none") return [];
+    if (!(element.innerText || "").trim() && !element.querySelector("td[data-title],td[col_id]")) return [];
+    const clone = element.cloneNode(true) as HTMLElement;
+    const liveControls = element.querySelectorAll("input,textarea,select");
+    const clonedControls = clone.querySelectorAll("input,textarea,select");
+    liveControls.forEach((control, index) => {
+      const target = clonedControls[index];
+      if (!target) return;
+      if (control instanceof HTMLInputElement && target instanceof HTMLInputElement) target.setAttribute("value", control.value);
+      if (control instanceof HTMLTextAreaElement && target instanceof HTMLTextAreaElement) target.textContent = control.value;
+      if (control instanceof HTMLSelectElement && target instanceof HTMLSelectElement) {
+        Array.from(target.options).forEach((option, i) => option.selected = control.options[i]?.selected || false);
+      }
+    });
+    return [{ id: element.id, title: element.querySelector("[id$='_header_title'],.w2window_header_title,h1,h2,h3")?.textContent?.trim() || null,
+      text: (element.innerText || "").trim(), html: clone.outerHTML }];
+  }));
+}
+
+async function clickCandidates(page: import("playwright-core").Page, dialogId: string | null): Promise<Candidate[]> {
+  const root = dialogId ? page.locator(`[id=${JSON.stringify(dialogId)}]`) : page.locator("body");
+  return root.locator(CLICK_SELECTOR).evaluateAll((nodes, { dialogId, modalSelector }) => nodes.map((node, index) => {
+    const element = node as HTMLElement;
+    const owner = element.closest(modalSelector);
+    const style = window.getComputedStyle(element);
+    const visible = !!element.getClientRects().length && style.visibility !== "hidden" && style.display !== "none";
+    const value = (element.innerText || element.getAttribute("aria-label") || element.getAttribute("title") ||
+      (element as HTMLInputElement).value || "").replace(/\s+/g, " ").trim();
+    const cell = element.closest("td");
+    const th = cell?.previousElementSibling?.matches("th") ? cell.previousElementSibling : cell?.closest("tr")?.querySelector("th");
+    const label = (cell?.getAttribute("data-title") || th?.textContent || value).replace(/\s+/g, " ").trim();
+    const anchor = element.closest("a") as HTMLAnchorElement | null;
+    const href = anchor?.getAttribute("href") || "";
+    const type = element.getAttribute("type") || "";
+    const actionControl = element.matches("button,input,[role='button']") && !anchor;
+    const inlineAction = [...element.attributes].some((attribute) => /^on/i.test(attribute.name));
+    const readOnlyLabel = /조회|상세|정보|안내|보기|열기|공지|계획|금액/.test(`${label} ${value}`);
+    const safeAnchor = !anchor || !href || href === "#" || /^javascript:void\((?:null|0)\);?$/i.test(href.trim());
+    const preceding = Array.from(document.querySelectorAll("h2,h3,h4,h5,legend,.title,.tit"))
+      .filter(h => h.compareDocumentPosition(element) & Node.DOCUMENT_POSITION_FOLLOWING);
+    const headings = ["공고일반", "입찰자격", "입찰진행정보", "가격", "기초금액공개", "기관담당자정보", "연관정보", "파일첨부 관련 안내사항", "파일첨부"];
+    const sectionHint = preceding.map(h => (h.textContent || "").trim()).filter(t => headings.includes(t)).pop() || null;
+    const skip = !visible || !value || (owner?.id || null) !== dialogId || element.hasAttribute("disabled") ||
+      element.getAttribute("aria-disabled") === "true" || !!element.closest("nav,header,footer,[id*='navigation']") ||
+      !!element.closest("td[data-title='관련공고']") || /^(submit|reset|file)$/i.test(type) ||
+      !!anchor?.hasAttribute("download") || !safeAnchor || inlineAction || element.hasAttribute("formaction") ||
+      !!anchor?.getAttribute("target") || (actionControl && !readOnlyLabel) ||
+      /\.(pdf|hwp|hwpx|docx?|xlsx?|zip)(\?|$)/i.test(href) ||
+      /sort|filter|toggle|download|print|close|help|checkbox|selectall/i.test(`${element.className} ${element.id}`) ||
+      /^(매뉴얼|온라인 매뉴얼|도움말|목록|이전|다음|저장|등록|수정|삭제|제출|투찰|신청|결제|로그인|로그아웃|인쇄|출력|다운로드|닫기|전체선택|선택해제|오름차순|내림차순)/i.test(value) ||
+      /^(확인|처리|실행|승인|확정|취소|변경)(?:\s|$)/.test(value) ||
+      /매뉴얼|도움말/.test(label) ||
+      /^(저장|등록|수정|삭제|제출|투찰|신청|결제|취소|확정|승인)/i.test(value) && actionControl;
+    return { index, id: element.id, tag: element.tagName.toLowerCase(), label, value, sectionHint,
+      html: element.outerHTML.slice(0, 3000), skip };
+  }).filter((candidate) => !candidate.skip), { dialogId, modalSelector: MODAL_SELECTOR });
+}
+
+export async function collectModalContents(page: import("playwright-core").Page): Promise<{
+  captures: ModalCapture[];
+  discovery: NonNullable<ScrapedDetail["modalDiscovery"]>;
+}> {
+  const captures: ModalCapture[] = [];
+  const failures: string[] = [];
+  const visited = new Set<string>();
+  let candidates = 0;
+  let attempted = 0;
+  const explore = async (dialogId: string | null, parentModalTitle: string | null, depth: number): Promise<void> => {
+    if (depth > 4 || attempted >= 60) return;
+    const found = await clickCandidates(page, dialogId);
+    candidates += found.length;
+    const root = dialogId ? page.locator(`[id=${JSON.stringify(dialogId)}]`) : page.locator("body");
+    for (const candidate of found) {
+      if (attempted >= 60) break;
+      const visitKey = `${dialogId || "page"}:${candidate.id || candidate.index}`;
+      if (visited.has(visitKey)) continue;
+      visited.add(visitKey);
+      const control = root.locator(CLICK_SELECTOR).nth(candidate.index);
+      if (!(await control.isVisible().catch(() => false))) continue;
+      const before = await visibleDialogs(page);
+      const beforeUrl = page.url();
+      attempted++;
+      try {
+        // WebSquare can leave a process overlay over readable controls. Dispatch only
+        // after the read-only candidate filter, so the overlay cannot intercept it.
+        await control.dispatchEvent("click", undefined, { timeout: 2500 });
+        await page.waitForFunction(({ selector, before }) => [...document.querySelectorAll(selector)].some((node) => {
+          const element = node as HTMLElement;
+          const style = window.getComputedStyle(element);
+          if (!element.getClientRects().length || style.visibility === "hidden" || style.display === "none") return false;
+          const old = before.find((item) => item.id === element.id);
+          if (old && (element.innerText || "").trim() === old.text) return false;
+          const title = element.querySelector("[id$='_header_title'],.w2window_header_title,h1,h2,h3")?.textContent?.trim() || "";
+          const bodyText = (element.innerText || "").replace(title, "").trim();
+          const fields = [...element.querySelectorAll("td[data-title]")].some((cell) => (cell.textContent || "").trim());
+          return fields || bodyText.length > 20;
+        }), { selector: MODAL_SELECTOR, before: before.map((item) => ({ id: item.id, text: item.text })) }, { timeout: 8000 }).catch(() => undefined);
+        if (page.url() !== beforeUrl) throw new Error("클릭 후 페이지가 이동했습니다.");
+        await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => undefined);
+        const after = await visibleDialogs(page);
+        const fresh = after.find((item) => !before.some((old) => old.id === item.id));
+        if (fresh) {
+          const structured = extractModalStructure(fresh.html);
+          const hasData = structured.fields.some((field) => field.value) ||
+            structured.tables.some((table) => table.rows.some((row) => row.some(Boolean))) ||
+            fresh.text.replace(fresh.title || "", "").trim().length > 20;
+          if (hasData) {
+            captures.push({ trigger: { index: candidate.index, tag: candidate.tag, label: candidate.label,
+              value: candidate.value, sectionHint: candidate.sectionHint, html: candidate.html, parentModalTitle },
+              modal: { text: fresh.text, html: fresh.html, ...structured } });
+            if (fresh.id) await explore(fresh.id, fresh.title, depth + 1);
+          }
+        }
+      } catch (error) {
+        failures.push(`${candidate.index} ${candidate.label.slice(0, 60)} ${candidate.html.slice(0, 200)}: ${error instanceof Error ? error.message.slice(0, 800) : String(error)}`);
+      } finally {
+        const opened = (await visibleDialogs(page)).filter((item) => !before.some((old) => old.id === item.id));
+        for (const item of opened.reverse()) {
+          const dialog = item.id ? page.locator(`[id=${JSON.stringify(item.id)}]`) : page.locator(MODAL_SELECTOR).filter({ hasText: item.text }).last();
+          const close = dialog.locator("button.w2window_close,button[aria-label*='닫기'],[data-close]").first();
+          try {
+            if (await close.isVisible().catch(() => false)) await close.dispatchEvent("click", undefined, { timeout: 2500 });
+            else await page.keyboard.press("Escape");
+            await dialog.waitFor({ state: "hidden", timeout: 2500 });
+          } catch (error) {
+            failures.push(`${candidate.label.slice(0, 60)} 모달 복귀 실패: ${error instanceof Error ? error.message.slice(0, 120) : String(error)}`);
+          }
+        }
+      }
+    }
+  };
+  await explore(null, null, 0);
+  return { captures, discovery: { candidates, attempted, captured: captures.length,
+    skipped: Math.max(0, candidates - attempted), failures } };
+}
+
+export type ScrapeResult = { detail: ScrapedDetail; relatedNoticeKeys: string[] };
+
+export async function scrapeDetailPage(url: string): Promise<ScrapeResult> {
   assertG2bUrl(url);
   const browser = await chromium.launch({ channel: "chrome", executablePath: process.env.G2B_CHROME_PATH || undefined, headless: true });
   try {
@@ -172,6 +409,18 @@ export async function scrapeDetailPage(url: string): Promise<ScrapedDetail> {
       });
       return document.documentElement.outerHTML;
     });
-    return extractDetailPage(html, url, metadata);
+    const detail = extractDetailPage(html, url, metadata);
+    const relatedNoticeKeys = extractRelatedNoticeKeys(html);
+    // Preserve the original extraction independently of modal exploration failures.
+    try {
+      const { captures, discovery } = await collectModalContents(page);
+      detail.modalCaptures = captures;
+      detail.modalDiscovery = discovery;
+    } catch (error) {
+      detail.modalCaptures = [];
+      detail.modalDiscovery = { candidates: 0, attempted: 0, captured: 0, skipped: 0,
+        failures: [error instanceof Error ? error.message : String(error)] };
+    }
+    return { detail, relatedNoticeKeys };
   } finally { await browser.close(); }
 }
