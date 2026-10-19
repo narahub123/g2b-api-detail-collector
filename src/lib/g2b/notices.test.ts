@@ -78,11 +78,11 @@ describe("saved notices", () => {
       orderPlanNumbers: ["R26DD1"], preSpecificationNumbers: ["R26BD1"]
     }));
     await writeFile(join(dir, "order-plans", "R26DD1.json"), JSON.stringify({
-      schemaVersion: 1, number: "R26DD1", title: "발주계획상세조회", fields: [], tables: [], text: "계획",
+      schemaVersion: 1, number: "R26DD1", title: "발주계획상세조회", fields: [], tables: [],
       capturedAt: "2026-10-19T00:00:00Z", sourceNoticeKey: "R26BK1--000"
     }));
     const record = await getNoticeRecord("R26BK1--000", dir);
-    expect(record?.orderPlans[0].detail?.text).toBe("계획");
+    expect(record?.orderPlans[0].detail?.number).toBe("R26DD1");
     expect(record?.preSpecifications).toEqual([{ number: "R26BD1", detail: null }]);
   });
 });

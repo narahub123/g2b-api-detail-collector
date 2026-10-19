@@ -24,7 +24,7 @@ describe("NoticeComparison", () => {
   it("shows resolved independent details and an unresolved reference", () => {
     render(<NoticeComparison api={null} detail={detail} orderPlans={[{ number: "R26DD1", detail: {
       schemaVersion: 1, number: "R26DD1", title: "발주계획상세조회", fields: [{ label: "발주계획번호", value: "R26DD1" }],
-      tables: [], text: "발주계획 본문", capturedAt: "2026-10-19T00:00:00Z", sourceNoticeKey: "R26BK1--000"
+      tables: [], capturedAt: "2026-10-19T00:00:00Z", sourceNoticeKey: "R26BK1--000"
     } }]} preSpecifications={[{ number: "R26BD1", detail: null }]} />);
     expect(screen.getByText("발주계획 · R26DD1")).toBeInTheDocument();
     expect(screen.getByText("사전규격 · R26BD1")).toBeInTheDocument();

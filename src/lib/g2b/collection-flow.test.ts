@@ -73,7 +73,8 @@ describe("collection flow", () => {
     expect(state?.status, state?.errors.join(" | ")).toBe("completed");
     expect(await readdir(join(dataDir, "order-plans"))).toEqual(["R26DD1.json"]);
     const plan = JSON.parse(await readFile(join(dataDir, "order-plans", "R26DD1.json"), "utf8"));
-    expect(plan.text).toBe("최신");
+    expect(plan).not.toHaveProperty("text");
+    expect(plan.capturedAt).toBe("2026-10-19T02:00:00Z");
     for (const order of ["000", "001"]) {
       const notice = JSON.parse(await readFile(join(dataDir, "notices", `R26BK1--${order}.json`), "utf8"));
       expect(notice.orderPlanNumbers).toEqual(["R26DD1"]);

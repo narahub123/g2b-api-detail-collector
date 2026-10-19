@@ -108,8 +108,7 @@ export function NoticeComparison({ api, detail, orderPlans = [], preSpecificatio
           {independent.map((item) => <details className="comparison-card" key={`${item.kind}-${item.number}`} open>
             <summary>{item.kind} · {item.number}</summary>
             {item.detail ? <><FieldList fields={item.detail.fields} />
-              <TableList tables={item.detail.tables} group={`${item.kind} ${item.number}`} />
-              {item.detail.text && <div className="comparison-text-block"><h4>팝업 본문</h4><p>{item.detail.text}</p></div>}</>
+              <TableList tables={item.detail.tables} group={`${item.kind} ${item.number}`} /></>
               : <p className="muted comparison-empty">참조한 상세 정보가 없습니다.</p>}
           </details>)}
         </section>}

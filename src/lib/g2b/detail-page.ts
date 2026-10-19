@@ -6,9 +6,10 @@ export type Attachment = { name: string; url: string | null };
 export type AttachmentMetadata = { orgnlAtchFileNm: string; atchFileSqno: number; scrnIndtYn?: string };
 export type StructuredField = { label: string; value: string | null; visible?: boolean };
 export type StructuredTable = { columns: string[]; rows: (string | null)[][] };
-export type StructuredSection = { title: string; fields: StructuredField[]; tables: StructuredTable[]; visible?: boolean };
+export type StructuredSection = { title: string; fields: StructuredField[]; tables: StructuredTable[];
+  details?: { title: string; fields: StructuredField[]; tables: StructuredTable[] }[]; visible?: boolean };
 export type ModalCapture = {
-  trigger: { index: number; tag: string; label: string; value: string; sectionHint: string | null; html: string; parentModalTitle?: string | null };
+  trigger: { index: number; tag: string; label: string; value: string; sectionHint?: string | null; html: string; parentModalTitle?: string | null };
   modal: { text: string; html?: string; title: string | null; fields: StructuredField[]; tables: StructuredTable[] };
   settling?: { status: "settled" | "timeout"; elapsedMs: number };
 };
