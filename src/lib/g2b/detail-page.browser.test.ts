@@ -1,6 +1,6 @@
 import { chromium } from "playwright-core";
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { collectModalContents } from "./detail-page";
+import { collectClickDownloads, collectModalContents } from "./detail-page";
 
 let browser: Awaited<ReturnType<typeof chromium.launch>>;
 beforeAll(async () => {
@@ -8,6 +8,23 @@ beforeAll(async () => {
 });
 afterAll(async () => {
   await browser?.close();
+});
+
+it("discovers clickable attachment identity from any WebSquare file grid", async () => {
+  const page = await browser.newPage();
+  try {
+    await page.setContent(`<table id="anotherGrid_body_table"><tbody><tr><td id="anotherGrid_cell_0_2" col_id="orgnlAtchFileNm"><a>같은 이름.hwpx</a></td></tr>
+      <tr><td id="anotherGrid_cell_1_2" col_id="orgnlAtchFileNm"><a>같은 이름.hwpx</a></td></tr>
+      <tr><td id="anotherGrid_cell_2_2" col_id="orgnlAtchFileNm"><a href="javascript:void(0)">다른 파일.hwpx</a></td></tr></tbody></table>
+      <script>window.$w = { getComponentById: () => ({ getRowCount: () => 3, getRowJSON: (i) => ({
+        rfpUntyAtchFileNo: i ? 'de557b90-5d96-430d-9dd4-06b2d7b3627d' : 'de557b90-5d96-430d-9dd4-06b2d7b3627c',
+        rfpAtchFileSqno: i === 2 ? 2 : 1 }) }) };</script>`);
+    expect(await collectClickDownloads(page)).toEqual([
+      { cellId: "anotherGrid_cell_0_2", name: "같은 이름.hwpx", fileNo: "de557b90-5d96-430d-9dd4-06b2d7b3627c", seq: 1 },
+      { cellId: "anotherGrid_cell_1_2", name: "같은 이름.hwpx", fileNo: "de557b90-5d96-430d-9dd4-06b2d7b3627d", seq: 1 },
+      { cellId: "anotherGrid_cell_2_2", name: "다른 파일.hwpx", fileNo: "de557b90-5d96-430d-9dd4-06b2d7b3627d", seq: 2 }
+    ]);
+  } finally { await page.close(); }
 });
 
 it("assigns modal triggers to their structural section, or null when none owns them", async () => {

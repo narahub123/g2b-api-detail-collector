@@ -3,6 +3,7 @@ import type { ScrapedDetail, StructuredField, StructuredTable } from "@/lib/g2b/
 import { apiFieldDisplayName } from "@/lib/g2b/api-field-labels";
 import type { IndependentReference } from "@/lib/g2b/notices";
 import { tableForDisplay } from "@/lib/g2b/structured-table";
+import { safeAttachmentLink } from "@/lib/g2b/attachment-links";
 
 function safeLink(value: string): string | null {
   try {
@@ -88,7 +89,7 @@ export function NoticeComparison({ api, detail, orderPlans = [], preSpecificatio
         </div>
         <div className="comparison-group"><h3>첨부파일 · {detail.attachments.length}개</h3>
           {detail.attachments.length ? <ul className="comparison-links">{detail.attachments.map((file, index) => {
-            const href = file.url && safeLink(file.url);
+            const href = file.url && safeAttachmentLink(file.url);
             return <li key={`${file.name}-${index}`}>{href ? <a href={href} download>{file.name}</a> : file.name}</li>;
           })}</ul> : <p className="muted comparison-empty">수집된 첨부파일이 없습니다.</p>}
         </div>

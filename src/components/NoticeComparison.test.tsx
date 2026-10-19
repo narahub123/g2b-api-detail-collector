@@ -26,6 +26,17 @@ const detail: ScrapedDetail = {
 };
 
 describe("NoticeComparison", () => {
+  it("links direct and internal attachments but not unrelated paths", () => {
+    const internal = "/api/attachments/R26BK1--000?fileNo=de557b90-5d96-430d-9dd4-06b2d7b3627c&seq=1";
+    render(<NoticeComparison api={null} detail={{ ...detail, attachments: [
+      { name: "내부.hwpx", url: internal },
+      { name: "공고.pdf", url: "http://www.g2b.go.kr/file.pdf" },
+      { name: "거부.pdf", url: "/api/other/file" }
+    ] }} />);
+    expect(screen.getByRole("link", { name: "내부.hwpx" })).toHaveAttribute("href", internal);
+    expect(screen.getByRole("link", { name: "공고.pdf" })).toHaveAttribute("href", "http://www.g2b.go.kr/file.pdf");
+    expect(screen.queryByRole("link", { name: "거부.pdf" })).not.toBeInTheDocument();
+  });
   it("shows resolved independent details and an unresolved reference", () => {
     render(<NoticeComparison api={null} detail={detail} orderPlans={[{ number: "R26DD1", detail: {
       schemaVersion: 1, number: "R26DD1", title: "발주계획상세조회", fields: [{ label: "발주계획번호", value: "R26DD1" }],

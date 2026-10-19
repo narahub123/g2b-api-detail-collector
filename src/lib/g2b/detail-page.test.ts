@@ -342,6 +342,30 @@ describe("extractDetailPage", () => {
     expect(result.attachments[0].url).toContain("fileSeq=7");
   });
 
+  it("keeps same-named clickable files separate by attachment number and sequence", () => {
+    const html = `<table><tr><th>공고명</th><td>용역</td></tr></table>
+      <table><tr><td id="file_a" col_id="orgnlAtchFileNm"><a>같은 이름.hwpx</a></td></tr>
+      <tr><td id="file_b" col_id="orgnlAtchFileNm"><a>같은 이름.hwpx</a></td></tr></table>`;
+    const result = extractDetailPage(html, url, [], [
+      { cellId: "file_a", name: "같은 이름.hwpx", fileNo: "de557b90-5d96-430d-9dd4-06b2d7b3627c", seq: 1 },
+      { cellId: "file_b", name: "같은 이름.hwpx", fileNo: "de557b90-5d96-430d-9dd4-06b2d7b3627d", seq: 1 }
+    ]);
+    expect(result.attachments).toHaveLength(2);
+    expect(result.attachments[0].url).toContain("fileNo=de557b90-5d96-430d-9dd4-06b2d7b3627c");
+    expect(result.attachments[1].url).toContain("fileNo=de557b90-5d96-430d-9dd4-06b2d7b3627d");
+  });
+
+  it("does not borrow a bid attachment URL for an unidentified clickable file of the same name", () => {
+    const html = `<table><tr><th>공고명</th><td>용역</td></tr></table>
+      <table><tr><td id="click_file" col_id="orgnlAtchFileNm"><a>같은 이름.hwpx</a></td></tr>
+      <tr><td id="bid_file" col_id="orgnlAtchFileNm">같은 이름.hwpx</td></tr></table>`;
+    const result = extractDetailPage(html, url, [{ orgnlAtchFileNm: "같은 이름.hwpx", atchFileSqno: 2 }]);
+    expect(result.attachments).toEqual([
+      { name: "같은 이름.hwpx", url: null },
+      { name: "같은 이름.hwpx", url: expect.stringContaining("fileSeq=2") }
+    ]);
+  });
+
   it("matches HTML-encoded metadata filenames to rendered attachment names", () => {
     const html = `<table><tr><th>공고명</th><td>용역</td></tr></table>
       <table><tr><td col_id="orgnlAtchFileNm">(공고문) 유가공업 실태조사 용역.hwpx</td></tr></table>`;

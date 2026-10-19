@@ -56,6 +56,22 @@ describe("normalizeNotice", () => {
     expect(notice.servicePeriod.value).toBeNull();
   });
 
+  it("keeps G2B direct links and distinct internal downloads with the same filename", () => {
+    const base = "/api/attachments/R26BK1--000?fileNo=de557b90-5d96-430d-9dd4-06b2d7b3627c&seq=";
+    const notice = normalizeNotice(api, { sourceUrl: "https://www.g2b.go.kr/", sections: [], links: [], attachments: [
+      { name: "같은 이름.hwpx", url: `${base}1` },
+      { name: "같은 이름.hwpx", url: `${base}2` },
+      { name: "공고문.pdf", url: "http://www.g2b.go.kr/file.pdf" },
+      { name: "외부.pdf", url: "https://evil.example/file.pdf" },
+      { name: "다른경로.pdf", url: "/api/other/file" }
+    ] });
+    expect(notice.attachments).toEqual([
+      { name: "같은 이름.hwpx", url: `${base}1` },
+      { name: "같은 이름.hwpx", url: `${base}2` },
+      { name: "공고문.pdf", url: "http://www.g2b.go.kr/file.pdf" }
+    ]);
+  });
+
   it("reads actual industry qualification and rejects invalid dates", () => {
     const notice = normalizeNotice({ ...api, bidNtceDt: "2026-99-99 nonsense", bidClseDt: "invalid" }, {
       sourceUrl: "https://www.g2b.go.kr/", sections: [{ title: "입찰자격", fields: [

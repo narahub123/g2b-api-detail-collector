@@ -3,11 +3,13 @@ import { chromium } from "playwright-core";
 import { noticeKeyFromParts } from "./identity";
 import { extractDetailTable, extractModalGrid, isInlineVisible, tableHasValue } from "./structured-table";
 import type { StructuredTable } from "./structured-table";
+import { attachmentDownloadUrl, safeAttachmentLink } from "./attachment-links";
 
 export type { StructuredTable, StructuredTableCell, StructuredTableContent } from "./structured-table";
 
 export type Attachment = { name: string; url: string | null };
 export type AttachmentMetadata = { orgnlAtchFileNm: string; atchFileSqno: number; scrnIndtYn?: string };
+export type ClickDownload = { cellId: string; name: string; fileNo: string; seq: number };
 export type StructuredField = { label: string; value: string | null; visible?: boolean };
 export type StructuredSection = { title: string; fields: StructuredField[]; tables: StructuredTable[];
   details?: { title: string; fields: StructuredField[]; tables: StructuredTable[] }[]; visible?: boolean };
@@ -57,7 +59,7 @@ export function extractRelatedNoticeKeys(html: string): string[] {
   return [...new Set(keys)];
 }
 
-export function extractDetailPage(html: string, pageUrl: string, fileMetadata: AttachmentMetadata[] = []): ScrapedDetail {
+export function extractDetailPage(html: string, pageUrl: string, fileMetadata: AttachmentMetadata[] = [], clickDownloads: ClickDownload[] = []): ScrapedDetail {
   const url = assertG2bUrl(pageUrl);
   const $ = cheerio.load(html);
   $("script, style, option").remove();
@@ -137,20 +139,33 @@ export function extractDetailPage(html: string, pageUrl: string, fileMetadata: A
     download.searchParams.set("fileType", "");
     return download.toString();
   };
-  const seenAttachmentNames = new Set<string>();
+  const clickByCellId = new Map(clickDownloads.map((file) => [file.cellId, file]));
+  const seenAttachments = new Set<string>();
+  const addAttachment = (name: string, downloadUrl: string | null) => {
+    const identity = `${name}\u0000${downloadUrl || ""}`;
+    if (!name || seenAttachments.has(identity)) return;
+    attachments.push({ name, url: downloadUrl });
+    seenAttachments.add(identity);
+  };
   $("td[col_id='orgnlAtchFileNm']").each((_, cell) => {
     const name = clean($(cell).text());
-    if (!name || seenAttachmentNames.has(name)) return;
-    attachments.push({ name, url: attachmentUrl(sequenceByName.get(name)) });
-    seenAttachmentNames.add(name);
+    if (!name) return;
+    const click = clickByCellId.get($(cell).attr("id") || "");
+    const href = $(cell).find("a[href]").first().attr("href");
+    let direct: string | null = null;
+    if (href && !href.startsWith("#")) {
+      try { direct = safeAttachmentLink(new URL(href, pageUrl).toString()); } catch { /* invalid link */ }
+    }
+    const clickUrl = click && click.name === name ? attachmentDownloadUrl(`${number}--${order}`, click.fileNo, click.seq) : null;
+    const metadataUrl = $(cell).find("a").length && !direct ? null : attachmentUrl(sequenceByName.get(name));
+    addAttachment(name, direct || clickUrl || metadataUrl);
   });
   // The grid can still be rendering when its attachment-list response is complete.
   for (const file of fileMetadata) {
     if (file.scrnIndtYn === "N") continue;
     const name = clean(cheerio.load(file.orgnlAtchFileNm).text());
-    if (!name || seenAttachmentNames.has(name)) continue;
-    attachments.push({ name, url: attachmentUrl(file.atchFileSqno) });
-    seenAttachmentNames.add(name);
+    if (!name || attachments.some((item) => item.name === name)) continue;
+    addAttachment(name, attachmentUrl(file.atchFileSqno));
   }
   const links: ScrapedDetail["links"] = [];
   $("a[href]").each((_, anchor) => {
@@ -240,6 +255,41 @@ export function extractModalStructure(html: string): { title: string | null; fie
     if (table) tables.push(table);
   });
   return { title, fields, tables };
+}
+
+/** Read the file identity behind WebSquare's href-less download cells. */
+export async function collectClickDownloads(page: import("playwright-core").Page): Promise<ClickDownload[]> {
+  return page.locator("td[col_id='orgnlAtchFileNm']").evaluateAll((cells) => {
+    const results: ClickDownload[] = [];
+    for (const cell of cells) {
+      if (!(cell instanceof HTMLElement) || !cell.id) continue;
+      const action = cell.querySelector("a,button");
+      if (!action) continue;
+      const href = action.getAttribute("href");
+      if (href && !href.startsWith("#") && !/^javascript:/i.test(href)) continue;
+      const table = cell.closest("table[id$='_body_table']");
+      const rowMatch = /_cell_(\d+)_\d+$/.exec(cell.id);
+      if (!table || !rowMatch) continue;
+      const gridId = table.id.slice(0, -"_body_table".length);
+      const grid = (window as any).$w?.getComponentById?.(gridId);
+      const rowIndex = Number(rowMatch[1]);
+      if (!grid || rowIndex >= grid.getRowCount?.()) continue;
+      const row = grid.getRowJSON?.(rowIndex) as Record<string, unknown> | undefined;
+      if (!row) continue;
+      for (const key of Object.keys(row)) {
+        const match = /^(.*?)(?:UntyAtchFileNo|untyAtchFileNo)$/.exec(key);
+        if (!match) continue;
+        const fileNo = row[key];
+        const seq = row[`${match[1]}AtchFileSqno`] ?? row[`${match[1]}atchFileSqno`];
+        const number = Number(seq);
+        if (typeof fileNo !== "string" || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(fileNo) ||
+            !Number.isSafeInteger(number) || number <= 0) continue;
+        const name = cell.textContent?.replace(/\s+/g, " ").trim() || "";
+        if (name) results.push({ cellId: cell.id, name, fileNo, seq: number });
+      }
+    }
+    return results;
+  });
 }
 
 // Deliberately collect raw modal contents first; interpretation/structuring is a separate step.
@@ -458,13 +508,14 @@ export async function scrapeDetailPage(url: string): Promise<ScrapeResult> {
     await page.locator('table[id$="_grdFile_body_table"]').first().waitFor({ timeout: 20_000 });
     await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => undefined);
     const metadata = (await Promise.all(responses)).flat();
+    const clickDownloads = await collectClickDownloads(page);
     const html = await page.evaluate(() => {
       document.querySelectorAll("input,textarea,select").forEach((element) => {
         if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement) element.setAttribute("value", element.value);
       });
       return document.documentElement.outerHTML;
     });
-    const detail = extractDetailPage(html, url, metadata);
+    const detail = extractDetailPage(html, url, metadata, clickDownloads);
     const relatedNoticeKeys = extractRelatedNoticeKeys(html);
     // Preserve the original extraction independently of modal exploration failures.
     try {
