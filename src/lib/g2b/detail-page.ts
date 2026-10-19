@@ -6,7 +6,7 @@ export type Attachment = { name: string; url: string | null };
 export type AttachmentMetadata = { orgnlAtchFileNm: string; atchFileSqno: number; scrnIndtYn?: string };
 export type StructuredField = { label: string; value: string | null };
 export type StructuredTable = { columns: string[]; rows: (string | null)[][] };
-export type StructuredSection = { title: string; fields: StructuredField[]; tables: StructuredTable[] };
+export type StructuredSection = { title: string; fields: StructuredField[]; tables: StructuredTable[]; visible?: boolean };
 export type ModalCapture = {
   trigger: { index: number; tag: string; label: string; value: string; sectionHint: string | null; html: string; parentModalTitle?: string | null };
   modal: { text: string; html?: string; title: string | null; fields: StructuredField[]; tables: StructuredTable[] };
@@ -59,12 +59,27 @@ export function extractDetailPage(html: string, pageUrl: string, fileMetadata: A
   $("script, style, option").remove();
   const sections: StructuredSection[] = [];
   let active: StructuredSection | null = null;
-  const startSection = (title: string) => {
+  const startSection = (title: string, visible?: boolean) => {
     active = { title, fields: [], tables: [] };
+    if (visible !== undefined) active.visible = visible;
     sections.push(active);
     return active;
   };
   const target = () => active || startSection("미분류");
+  const isVisible = (node: any): boolean => {
+    for (let current = node; current; current = current.parent) {
+      if (current.type !== "tag") continue;
+      const declarations = ($(current).attr("style") || "").split(";");
+      for (const declaration of declarations) {
+        const separator = declaration.indexOf(":");
+        if (separator < 0) continue;
+        const name = declaration.slice(0, separator).trim().toLowerCase();
+        const value = declaration.slice(separator + 1).replace(/\s*!important\s*$/i, "").trim().toLowerCase();
+        if ((name === "display" && value === "none") || (name === "visibility" && value === "hidden")) return false;
+      }
+    }
+    return true;
+  };
   const readCell = (cell: any): string | null => {
     const input = cell.find("input:not([type='hidden']),textarea,select").first();
     return nonempty(input.length ? String(input.val() ?? cell.text()) : cell.text());
@@ -86,7 +101,7 @@ export function extractDetailPage(html: string, pageUrl: string, fileMetadata: A
     // WebSquare places each section title in a dfbox header, before its field/table containers.
     if (element.is(".dfbox > .fl > .df_tit")) {
       const title = clean(element.text());
-      if (title) { startSection(title); return; }
+      if (title) { startSection(title, isVisible(node)); return; }
     }
     if (element.is("table")) {
       const rows = element.find("tr").filter((_, row) => $(row).closest("table")[0] === node).toArray();

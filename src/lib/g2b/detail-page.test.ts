@@ -83,8 +83,23 @@ describe("extractDetailPage", () => {
     expect(result.sections?.[2].tables).toEqual([
       { columns: ["구분", "금액"], rows: [["숨긴 값", "5,000원"]] }
     ]);
-    expect(result.sections?.[3]).toEqual({ title: "빈 구역", fields: [], tables: [] });
+    expect(result.sections?.[3]).toEqual({ title: "빈 구역", fields: [], tables: [], visible: true });
     expect(result.sections?.[4].fields).toEqual([{ label: "안내값", value: "둘째 값" }]);
+    expect(result.sections?.map((section) => section.visible)).toEqual([true, true, false, true, true]);
+  });
+  it("checks display and visibility on a section heading and every ancestor", () => {
+    const html = `<main>
+      ${heading("공고일반")}<table><tr><th>공고명</th><td>용역</td></tr></table>
+      <div style="visibility: hidden">${heading("상위 visibility")}</div>
+      <div style="display:block"><div style="DISPLAY: none !important">${heading("상위 display")}</div></div>
+      <div class="w2group dfbox"><div class="w2group fl"><h4 class="df_tit" style="visibility:hidden">제목 visibility</h4></div></div>
+      <div class="w2group dfbox"><div class="w2group fl"><h4 class="df_tit" style="display:none">제목 display</h4></div></div>
+      ${heading("표시 구역")}</main>`;
+    const result = extractDetailPage(html, url);
+    expect(result.sections?.map((section) => [section.title, section.visible])).toEqual([
+      ["공고일반", true], ["상위 visibility", false], ["상위 display", false],
+      ["제목 visibility", false], ["제목 display", false], ["표시 구역", true]
+    ]);
   });
   it("places nested section data before the next outer section", () => {
     const html = `<main>${heading("공고일반")}
@@ -121,6 +136,7 @@ describe("extractDetailPage", () => {
   it("uses the attachment sequence returned by the page instead of its row position", () => {
     const html = `<table><tr><th>공고명</th><td>용역</td></tr></table><table><tr><td col_id="orgnlAtchFileNm">공고문.pdf</td></tr></table>`;
     const result = extractDetailPage(html, url, [{ orgnlAtchFileNm: "공고문.pdf", atchFileSqno: 7 }]);
+    expect(result.sections?.[0]).not.toHaveProperty("visible");
     expect(result.attachments[0].url).toContain("fileSeq=7");
   });
 
