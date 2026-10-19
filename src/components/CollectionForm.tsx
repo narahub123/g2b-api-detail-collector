@@ -69,7 +69,7 @@ export function CollectionForm({ fetcher = fetch }: { fetcher?: typeof fetch }) 
       <button type="submit" disabled={busy}>{busy ? "수집 중…" : "공고 수집 시작"}</button>
     </form>
     {error && <p role="alert" className="error-message">{error}</p>}
-    {job && <div className="job-progress" aria-live="polite">
+    {job && job.mode !== "refresh" && <div className="job-progress" aria-live="polite">
       <strong>{job.status === "running" ? "수집 진행 중" : job.status === "completed" ? "수집 완료" : "수집 중단"}</strong>
       <span>API {job.apiCount}건</span><span>상세 성공 {job.detailSucceeded}건</span><span>상세 실패 {job.detailFailed}건</span>
       {job.errors.length > 0 && <small>{job.errors.at(-1)}</small>}

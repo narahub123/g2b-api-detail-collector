@@ -8,14 +8,17 @@ import { noticeKey, noticeKeyFromParts } from "./identity";
 import { readJson, writeJsonAtomic } from "./json-store";
 import { normalizeNotice, type NormalizedNotice } from "./normalize";
 import type { StoredNotice } from "./notices";
+import { getNoticeRecord } from "./notices";
 import type { ApiNotice, PostedDateRange } from "./types";
 import { saveIndependentDetails, structureNoticeDetail } from "./structured-data";
 
 export type CollectionJob = {
   id: string;
+  mode?: "collection" | "refresh";
   status: "running" | "completed" | "failed" | "interrupted";
   phase: "api" | "detail" | "done";
-  range: PostedDateRange;
+  range: PostedDateRange | null;
+  results?: { key: string; status: "pending" | "succeeded" | "failed"; error?: string }[];
   apiCount: number;
   detailSucceeded: number;
   detailFailed: number;
@@ -172,7 +175,7 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies): 
   try {
     await recoverRelationIntents();
     await drainRelated();
-    for await (const page of fetchServiceNotices(job.range, deps.fetcher)) {
+    for await (const page of fetchServiceNotices(job.range!, deps.fetcher)) {
       await writeJsonAtomic(join(dir, "api", job.id, `${page.date}-${page.pageNo}.json`), page.raw);
       for (const item of page.items) {
         let key: string;
@@ -203,7 +206,7 @@ export async function startCollection(range: PostedDateRange, deps: CollectionDe
   if (!process.env.G2B_SERVICE_KEY) throw new Error("G2B_SERVICE_KEY 환경변수를 설정하세요.");
   if (jobRuntime.__g2bActiveJobId) throw new Error("이미 수집 작업이 진행 중입니다.");
   const job: CollectionJob = {
-    id: randomUUID(), status: "running", phase: "api", range,
+    id: randomUUID(), mode: "collection", status: "running", phase: "api", range,
     apiCount: 0, detailSucceeded: 0, detailFailed: 0, errors: [], startedAt: new Date().toISOString()
   };
   jobRuntime.__g2bActiveJobId = job.id;
@@ -211,6 +214,72 @@ export async function startCollection(range: PostedDateRange, deps: CollectionDe
   try {
     await saveJob(job, dir);
     void runCollection(job, deps);
+    return job;
+  } catch (error) {
+    jobRuntime.__g2bActiveJobId = null;
+    throw error;
+  }
+}
+
+async function runRefresh(job: CollectionJob, deps: CollectionDependencies): Promise<void> {
+  const dir = deps.dataDir || defaultDataDir();
+  const scrape = deps.scrape || scrapeDetailPage;
+  try {
+    for (const result of job.results || []) {
+      try {
+        const path = join(dir, "notices", `${result.key}.json`);
+        const record = await readJson<StoredNotice>(path);
+        const [number, order] = result.key.split("--");
+        const scraped = await scrape(serviceDetailUrl(number, order));
+        const structured = structureNoticeDetail(result.key, scraped.detail);
+        await saveIndependentDetails(dir, structured);
+        const updated: StoredNotice = { ...record, key: result.key, detail: structured.detail,
+          orderPlanNumbers: structured.orderPlanNumbers, preSpecificationNumbers: structured.preSpecificationNumbers,
+          detailError: null };
+        updated.normalized = normalizeNotice(updated.api, updated.detail, { number, order });
+        await writeJsonAtomic(path, updated);
+        result.status = "succeeded";
+        job.detailSucceeded++;
+        job.errors.push(...structured.warnings);
+      } catch (error) {
+        result.status = "failed";
+        result.error = error instanceof Error ? error.message : "상세 수집 오류";
+        job.detailFailed++;
+        job.errors.push(`${result.key}: ${result.error}`);
+      }
+      await saveJob(job, dir);
+    }
+    job.status = "completed";
+  } catch (error) {
+    job.status = "failed";
+    job.errors.push(error instanceof Error ? error.message : "재수집 오류");
+  } finally {
+    job.phase = "done";
+    job.finishedAt = new Date().toISOString();
+    await saveJob(job, dir);
+    jobRuntime.__g2bActiveJobId = null;
+  }
+}
+
+export async function startRefresh(keys: string[], deps: CollectionDependencies = {}): Promise<CollectionJob> {
+  if (jobRuntime.__g2bActiveJobId) throw new Error("이미 수집 작업이 진행 중입니다.");
+  if (!Array.isArray(keys) || keys.length === 0) throw new Error("재수집할 공고를 선택하세요.");
+  const unique = [...new Set(keys)];
+  const dir = deps.dataDir || defaultDataDir();
+  for (const key of unique) {
+    if (typeof key !== "string" || !/^[A-Za-z0-9_.%~-]+--[A-Za-z0-9_.%~-]+$/.test(key) || key.includes("..")) {
+      throw new Error(`잘못된 공고 키: ${key}`);
+    }
+    if (!await getNoticeRecord(key, dir)) throw new Error(`저장된 공고를 찾을 수 없습니다: ${key}`);
+  }
+  if (jobRuntime.__g2bActiveJobId) throw new Error("이미 수집 작업이 진행 중입니다.");
+  const job: CollectionJob = { id: randomUUID(), mode: "refresh", status: "running", phase: "detail", range: null,
+    results: unique.map((key) => ({ key, status: "pending" })), apiCount: 0,
+    detailSucceeded: 0, detailFailed: 0, errors: [], startedAt: new Date().toISOString() };
+  jobRuntime.__g2bActiveJobId = job.id;
+  try {
+    await saveJob(job, dir);
+    void runRefresh(job, deps);
     return job;
   } catch (error) {
     jobRuntime.__g2bActiveJobId = null;
