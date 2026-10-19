@@ -2,16 +2,18 @@ import { describe, expect, it } from "vitest";
 import { extractDetailPage, extractModalStructure, extractRelatedNoticeKeys } from "./detail-page";
 
 const url = "https://www.g2b.go.kr/link/PNPE027_01/single/?bidPbancNo=R26BK1&bidPbancOrd=000";
+const heading = (title: string, tag = "h4") =>
+  `<div class="w2group dfbox"><div class="w2group fl"><${tag} class="w2textbox df_tit fl">${title}</${tag}></div></div>`;
 
 describe("extractDetailPage", () => {
   it("keeps heading order and reads each WebSquare field only once", () => {
     const html = `<main>
-      <h3>공고일반</h3><table><tr><th>공고명</th><td data-title="공고명"><input value="실태조사 용역"></td></tr></table>
-      <h3>가격</h3><table><tr><th>예가방법</th><td data-title="예가방법"><input value="복수예가"></td></tr></table>
-      <h3>기초금액공개</h3><table id="price_grd"><tr><th>금액</th></tr><tr><td></td></tr></table>
+      ${heading("공고일반")}<table><tr><th>공고명</th><td data-title="공고명"><input value="실태조사 용역"></td></tr></table>
+      ${heading("가격")}<table><tr><th>예가방법</th><td data-title="예가방법"><input value="복수예가"></td></tr></table>
+      ${heading("기초금액공개")}<table id="price_grd"><tr><th>금액</th></tr><tr><td></td></tr></table>
       <table id="amount_grid"><tr><th>구분</th><th>금액</th></tr><tr><td>기초금액</td><td>1,000원</td></tr></table>
-      <h3>기관담당자정보</h3><table><tr><th>공고담당자</th><td data-title="공고담당자"><input value="홍길동"></td></tr></table>
-      <h3>가격</h3><table><tr><th>추정가격</th><td data-title="추정가격"><input value="1,000원"></td></tr></table>
+      ${heading("기관담당자정보")}<table><tr><th>공고담당자</th><td data-title="공고담당자"><input value="홍길동"></td></tr></table>
+      ${heading("가격")}<table><tr><th>추정가격</th><td data-title="추정가격"><input value="1,000원"></td></tr></table>
     </main>`;
     const result = extractDetailPage(html, url);
     expect(result.sections?.map((section) => section.title)).toEqual([
@@ -27,12 +29,12 @@ describe("extractDetailPage", () => {
   });
 
   it("separates named subareas and excludes navigation links", () => {
-    const html = `<main><h3>공고일반</h3><table><tr><th>공고명</th><td>용역</td></tr></table>
-      <h4>입찰자격</h4><h5>투찰제한 - 일반</h5><table><tr><th>지역제한</th><td>서울</td></tr></table>
-      <h4>입찰진행정보</h4><h5>제안발표순서</h5><p>발표 순서 안내</p>
-      <h5>제안요청정보</h5><p>요청 정보 안내</p><h5>협상에 의한 계약</h5><p>협상 안내</p>
-      <h4>기관담당자정보</h4><h5>수요기관담당자정보 목록</h5>
-      <h4>연관정보</h4><h5>파일첨부</h5>
+    const html = `<main>${heading("공고일반")}<table><tr><th>공고명</th><td>용역</td></tr></table>
+      ${heading("입찰자격")}${heading("투찰제한 - 일반", "div")}<table><tr><th>지역제한</th><td>서울</td></tr></table>
+      ${heading("입찰진행정보")}${heading("제안발표순서")}<p>발표 순서 안내</p>
+      ${heading("제안요청정보", "div")}<p>요청 정보 안내</p>${heading("협상에 의한 계약")}<p>협상 안내</p>
+      ${heading("기관담당자정보")}${heading("수요기관담당자정보 목록", "div")}
+      ${heading("연관정보")}${heading("파일첨부", "div")}
       <a href="#main">본문영역 바로가기</a><a href="https://www.g2b.go.kr/help">도움말</a></main>`;
     const result = extractDetailPage(html, url);
     expect(result.sections?.map((section) => section.title)).toEqual([
@@ -43,15 +45,15 @@ describe("extractDetailPage", () => {
     expect(result.links.map((link) => link.label)).toEqual(["도움말"]);
   });
   it("recognizes actual WebSquare subheadings and prefers a filled field over an empty duplicate", () => {
-    const html = `<main><h3>공고일반</h3><table>
+    const html = `<main>${heading("공고일반")}<table>
       <tr><th>공고명</th><td data-title="공고명">용역</td></tr>
       <tr><td data-title="공고담당자"></td></tr>
       <tr><td data-title="공고담당자">홍길동</td></tr></table>
-      <div class="w2textbox df_tit fl">투찰제한-일반</div><p>제한 안내</p>
-      <div class="w2textbox df_tit fl">제안요청정보</div><p>제안 안내</p>
-      <h4>협상에의한 계약</h4><p>협상 안내</p>
-      <div class="w2textbox df_tit fl">수요기관담당자정보 목록</div>
-      <div class="w2textbox df_tit fl">파일첨부</div></main>`;
+      ${heading("투찰제한-일반", "div")}<p>제한 안내</p>
+      ${heading("제안요청정보", "div")}<p>제안 안내</p>
+      ${heading("협상에의한 계약")}<p>협상 안내</p>
+      ${heading("수요기관담당자정보 목록", "div")}
+      ${heading("파일첨부", "div")}</main>`;
     const result = extractDetailPage(html, url);
     expect(result.sections?.map((section) => section.title)).toEqual([
       "공고일반", "투찰제한-일반", "제안요청정보", "협상에의한 계약",
@@ -61,11 +63,47 @@ describe("extractDetailPage", () => {
       { label: "공고명", value: "용역" }, { label: "공고담당자", value: "홍길동" }
     ]);
   });
+  it("keeps unknown, hidden, empty and repeated structural sections with their own data", () => {
+    const html = `<main><div class="w2group pop_contents">
+      <h2>상세 페이지 제목</h2>
+      ${heading("공고일반")}<div class="tbbox"><table><tr><th>공고명</th><td>용역</td></tr></table></div>
+      ${heading("새로운 안내", "div")}<div class="tbbox"><table><tr><th>안내값</th><td>첫 값</td></tr></table></div>
+      <div style="display: none" aria-hidden="true">${heading("숨긴 구역")}
+        <div class="gvwbox"><table id="hidden_grid"><tr><th>구분</th><th>금액</th></tr>
+          <tr><td>숨긴 값</td><td>5,000원</td></tr></table></div></div>
+      ${heading("빈 구역")}
+      ${heading("새로운 안내", "div")}<div class="tbbox"><table><tr><th>안내값</th><td>둘째 값</td></tr></table></div>
+      <h4 class="df_tit">장식 제목</h4>
+    </div></main>`;
+    const result = extractDetailPage(html, url);
+    expect(result.sections?.map((section) => section.title)).toEqual([
+      "공고일반", "새로운 안내", "숨긴 구역", "빈 구역", "새로운 안내"
+    ]);
+    expect(result.sections?.[1].fields).toEqual([{ label: "안내값", value: "첫 값" }]);
+    expect(result.sections?.[2].tables).toEqual([
+      { columns: ["구분", "금액"], rows: [["숨긴 값", "5,000원"]] }
+    ]);
+    expect(result.sections?.[3]).toEqual({ title: "빈 구역", fields: [], tables: [] });
+    expect(result.sections?.[4].fields).toEqual([{ label: "안내값", value: "둘째 값" }]);
+  });
+  it("places nested section data before the next outer section", () => {
+    const html = `<main>${heading("공고일반")}
+      <div class="tbbox"><table><tr><th>공고명</th><td>용역</td></tr></table></div>
+      <div class="w2group">${heading("중첩된 새 섹션", "div")}
+        <div class="tbbox"><table><tr><th>중첩 필드</th><td>중첩 값</td></tr></table></div></div>
+      ${heading("후속 섹션")}
+      <div class="tbbox"><table><tr><th>후속 필드</th><td>후속 값</td></tr></table></div></main>`;
+    const result = extractDetailPage(html, url);
+    expect(result.sections?.map((section) => section.title)).toEqual(["공고일반", "중첩된 새 섹션", "후속 섹션"]);
+    expect(result.sections?.map((section) => section.fields.map((field) => field.label))).toEqual([
+      ["공고명"], ["중첩 필드"], ["후속 필드"]
+    ]);
+  });
   it("collects rendered table fields and attachment metadata", () => {
-    const html = `<main><h2>입찰공고상세[일반용역]</h2><h3>공고일반</h3>
+    const html = `<main><h2>입찰공고상세[일반용역]</h2>${heading("공고일반")}
       <table><tr><th>공고명</th><td><span>실태조사 용역</span></td></tr>
       <tr><th>입찰자격</th><td><span>중소기업</span></td></tr></table>
-      <h3>파일첨부</h3><table><tr><td col_id="orgnlAtchFileNm">공고문.pdf</td></tr></table></main>`;
+      ${heading("파일첨부", "div")}<table><tr><td col_id="orgnlAtchFileNm">공고문.pdf</td></tr></table></main>`;
     const result = extractDetailPage(html, url);
     expect(result.sections?.[0].fields).toEqual([
       { label: "공고명", value: "실태조사 용역" },

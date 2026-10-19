@@ -43,7 +43,6 @@ function assertG2bUrl(value: string): URL {
 }
 const clean = (value: string) => value.replace(/\s+/g, " ").trim();
 const nonempty = (value: string): string | null => clean(value) || null;
-const SECTION_TITLES = ["공고일반", "입찰자격", "입찰진행정보", "가격", "기초금액공개", "기관담당자정보", "연관정보", "파일첨부 관련 안내사항", "파일첨부"];
 
 export function extractRelatedNoticeKeys(html: string): string[] {
   const $ = cheerio.load(html);
@@ -57,17 +56,15 @@ export function extractRelatedNoticeKeys(html: string): string[] {
 export function extractDetailPage(html: string, pageUrl: string, fileMetadata: AttachmentMetadata[] = []): ScrapedDetail {
   const url = assertG2bUrl(pageUrl);
   const $ = cheerio.load(html);
-  $("script, style, option, [aria-hidden='true'], [style*='display: none']").remove();
+  $("script, style, option").remove();
   const sections: StructuredSection[] = [];
-  const sectionTitles = new Set([...SECTION_TITLES, "투찰제한 - 일반", "투찰제한-일반", "제안발표순서", "제안요청정보",
-    "협상에 의한 계약", "협상에의한 계약", "수요기관담당자정보 목록"]);
   let active: StructuredSection | null = null;
   const startSection = (title: string) => {
     active = { title, fields: [], tables: [] };
     sections.push(active);
     return active;
   };
-  const target = () => active || startSection("공고일반");
+  const target = () => active || startSection("미분류");
   const readCell = (cell: any): string | null => {
     const input = cell.find("input:not([type='hidden']),textarea,select").first();
     return nonempty(input.length ? String(input.val() ?? cell.text()) : cell.text());
@@ -86,9 +83,10 @@ export function extractDetailPage(html: string, pageUrl: string, fileMetadata: A
   const walk = (node: any): void => {
     if (node.type !== "tag") return;
     const element = $(node);
-    if (element.is("h2,h3,h4,h5,legend,.title,.tit,.df_tit")) {
+    // WebSquare places each section title in a dfbox header, before its field/table containers.
+    if (element.is(".dfbox > .fl > .df_tit")) {
       const title = clean(element.text());
-      if (sectionTitles.has(title)) { startSection(title); return; }
+      if (title) { startSection(title); return; }
     }
     if (element.is("table")) {
       const rows = element.find("tr").filter((_, row) => $(row).closest("table")[0] === node).toArray();
