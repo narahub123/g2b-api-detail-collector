@@ -1,10 +1,10 @@
 import * as cheerio from "cheerio";
 import { chromium } from "playwright-core";
 import { noticeKeyFromParts } from "./identity";
-import { extractDetailTable, extractModalGrid, tableHasValue } from "./structured-table";
+import { extractDetailTable, extractModalGrid, isInlineVisible, tableHasValue } from "./structured-table";
 import type { StructuredTable } from "./structured-table";
 
-export type { StructuredTable, StructuredTableCell } from "./structured-table";
+export type { StructuredTable, StructuredTableCell, StructuredTableContent } from "./structured-table";
 
 export type Attachment = { name: string; url: string | null };
 export type AttachmentMetadata = { orgnlAtchFileNm: string; atchFileSqno: number; scrnIndtYn?: string };
@@ -70,20 +70,7 @@ export function extractDetailPage(html: string, pageUrl: string, fileMetadata: A
     return active;
   };
   const target = () => active || startSection("미분류");
-  const isVisible = (node: any): boolean => {
-    for (let current = node; current; current = current.parent) {
-      if (current.type !== "tag") continue;
-      const declarations = ($(current).attr("style") || "").split(";");
-      for (const declaration of declarations) {
-        const separator = declaration.indexOf(":");
-        if (separator < 0) continue;
-        const name = declaration.slice(0, separator).trim().toLowerCase();
-        const value = declaration.slice(separator + 1).replace(/\s*!important\s*$/i, "").trim().toLowerCase();
-        if ((name === "display" && value === "none") || (name === "visibility" && value === "hidden")) return false;
-      }
-    }
-    return true;
-  };
+  const isVisible = (node: any): boolean => isInlineVisible($, node);
   const readCell = (cell: any): string | null => {
     const input = cell.find("input:not([type='hidden']),textarea,select").first();
     return nonempty(input.length ? String(input.val() ?? cell.text()) : cell.text());

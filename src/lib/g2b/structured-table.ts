@@ -1,17 +1,56 @@
 import type * as cheerio from "cheerio";
 
-export type StructuredTableCell = { value: string | null; column: number; rowspan: number; colspan: number };
-export type StructuredTable = { headerRows: StructuredTableCell[][]; bodyRows: StructuredTableCell[][] };
+export type StructuredTableContent = { value: string; visible: boolean };
+export type StructuredTableCell = { value: string | null; column: number; rowspan: number; colspan: number;
+  visible?: boolean; contents?: StructuredTableContent[] };
+export type StructuredTable = { headerRows: StructuredTableCell[][]; bodyRows: StructuredTableCell[][];
+  visible?: boolean; headerRowVisibility?: boolean[]; bodyRowVisibility?: boolean[] };
 export type LegacyStructuredTable = { columns: string[]; rows: (string | null)[][] };
 
 const clean = (value: string) => value.replace(/\s+/g, " ").trim();
 const nonempty = (value: string) => clean(value) || null;
 
+/** Match the existing section/field rule: inline styles on the node or any ancestor. */
+export function isInlineVisible($: cheerio.CheerioAPI, node: any): boolean {
+  for (let current = node; current; current = current.parent) {
+    if (current.type !== "tag") continue;
+    for (const declaration of ($(current).attr("style") || "").split(";")) {
+      const separator = declaration.indexOf(":");
+      if (separator < 0) continue;
+      const name = declaration.slice(0, separator).trim().toLowerCase();
+      const value = declaration.slice(separator + 1).replace(/\s*!important\s*$/i, "").trim().toLowerCase();
+      if ((name === "display" && value === "none") || (name === "visibility" && value === "hidden")) return false;
+    }
+  }
+  return true;
+}
+
+function cellContents($: cheerio.CheerioAPI, cell: any): StructuredTableContent[] {
+  const contents: StructuredTableContent[] = [];
+  const append = (value: string | null, node: any) => {
+    if (value) contents.push({ value, visible: isInlineVisible($, node) });
+  };
+  const visit = (node: any): void => {
+    if (node.type === "text") { append(nonempty(node.data || ""), node.parent); return; }
+    if (node.type !== "tag") return;
+    const element = $(node);
+    if (element.is("script,style,option")) return;
+    if (element.is("input,textarea,select")) {
+      append(nonempty(String(element.val() ?? element.attr("value") ?? "")), node);
+      return;
+    }
+    for (const child of node.children || []) visit(child);
+  };
+  for (const child of cell.children || []) visit(child);
+  return contents;
+}
+
 /** WebSquare pads grids with empty rows; retain gaps and rows covered by actual values. */
-function withoutTrailingEmptyRows(rows: StructuredTableCell[][]): StructuredTableCell[][] {
+function withoutTrailingEmptyRows(rows: StructuredTableCell[][], isPaddingRow: (index: number) => boolean = () => false): StructuredTableCell[][] {
   let lastDataRow = -1;
   rows.forEach((row, index) => row.forEach((cell) => {
     if (cell.value !== null && cell.value.trim()) lastDataRow = Math.max(lastDataRow, index + cell.rowspan - 1);
+    if (cell.visible === false && !isPaddingRow(index)) lastDataRow = Math.max(lastDataRow, index + cell.rowspan - 1);
   }));
   return rows.slice(0, lastDataRow + 1);
 }
@@ -33,7 +72,8 @@ function positionedRows($: cheerio.CheerioAPI, sourceRows: any[], readCell: (cel
       const rowspan = readSpan("rowspan");
       const colspan = readSpan("colspan");
       while (Array.from({ length: colspan }, (_, offset) => occupied.has(`${rowIndex}:${column + offset}`)).some(Boolean)) column++;
-      const placed = { value: readCell($(cell)), column, rowspan, colspan };
+      const placed = { value: readCell($(cell)), column, rowspan, colspan,
+        visible: isInlineVisible($, cell), contents: cellContents($, cell) };
       for (let rowOffset = 0; rowOffset < rowspan; rowOffset++) {
         for (let columnOffset = 0; columnOffset < colspan; columnOffset++) {
           occupied.add(`${rowIndex + rowOffset}:${column + columnOffset}`);
@@ -53,6 +93,7 @@ export function extractDetailTable($: cheerio.CheerioAPI, table: cheerio.Cheerio
   const hasColId = rows.some((row) => $(row).children("th[col_id],td[col_id]").length > 0);
   const hasThead = rows.some((row) => $(row).closest("thead")[0]?.parent === table[0]);
   const isGrid = /grd|grid/i.test(table.attr("id") || "") || hasColId || hasThead ||
+    table.find("td[data-title]").length > 0 ||
     (rows.length > 1 && first.length > 0 && first.filter("th").length === first.length);
   if (!isGrid) return null;
 
@@ -65,9 +106,14 @@ export function extractDetailTable($: cheerio.CheerioAPI, table: cheerio.Cheerio
     });
     if (headerLength < 0) headerLength = rows.length;
   }
-  const headerRows = positionedRows($, rows.slice(0, headerLength), (cell) => nonempty(cell.text()));
-  const bodyRows = withoutTrailingEmptyRows(positionedRows($, rows.slice(headerLength), readCell));
-  return bodyRows.length ? { headerRows, bodyRows } : null;
+  const headerNodes = rows.slice(0, headerLength);
+  const bodyNodes = rows.slice(headerLength);
+  const headerRows = positionedRows($, headerNodes, (cell) => nonempty(cell.text()));
+  const bodyRows = withoutTrailingEmptyRows(positionedRows($, bodyNodes, readCell),
+    (index) => $(bodyNodes[index]).hasClass("w2grid_hidedRow"));
+  return bodyRows.length ? { headerRows, bodyRows, visible: isInlineVisible($, table[0]),
+    headerRowVisibility: headerNodes.map((row) => isInlineVisible($, row)),
+    bodyRowVisibility: bodyNodes.slice(0, bodyRows.length).map((row) => isInlineVisible($, row)) } : null;
 }
 
 /** Modal WebSquare grids identify columns by col_id, which need not match their HTML row positions. */
@@ -83,15 +129,21 @@ export function extractModalGrid($: cheerio.CheerioAPI, table: cheerio.Cheerio<a
     ? positionedRows($, headerNodes, (cell) => nonempty(cell.text()))
     : [ids.map((id, column) => {
       const header = table.find("th[col_id]").filter((_, th) => $(th).attr("col_id") === id).first();
-      return { value: nonempty(header.text()) || id, column, rowspan: 1, colspan: 1 };
+      return { value: nonempty(header.text()) || id, column, rowspan: 1, colspan: 1,
+        visible: isInlineVisible($, header[0] || table[0]), contents: header.length ? cellContents($, header[0]) : [] };
     })];
   const mergedBody = dataRows.toArray().some((row) => $(row).children("td[col_id]").toArray().some((cell) =>
     Number($(cell).attr("rowspan") || 1) !== 1 || Number($(cell).attr("colspan") || 1) !== 1));
   const bodyRows = mergedBody ? positionedRows($, dataRows.toArray(), readCell) : dataRows.toArray().map((row) => ids.flatMap((id, column) => {
     const cell = $(row).children("td[col_id]").filter((_, td) => $(td).attr("col_id") === id).first();
-    return cell.length ? [{ value: readCell(cell), column, rowspan: 1, colspan: 1 }] : [];
+    return cell.length ? [{ value: readCell(cell), column, rowspan: 1, colspan: 1,
+      visible: isInlineVisible($, cell[0]), contents: cellContents($, cell[0]) }] : [];
   }));
-  return { headerRows, bodyRows: withoutTrailingEmptyRows(bodyRows) };
+  const retainedBodyRows = withoutTrailingEmptyRows(bodyRows,
+    (index) => $(dataRows[index]).hasClass("w2grid_hidedRow"));
+  return { headerRows, bodyRows: retainedBodyRows, visible: isInlineVisible($, table[0]),
+    headerRowVisibility: headerNodes.length ? headerNodes.map((row) => isInlineVisible($, row)) : [isInlineVisible($, table[0])],
+    bodyRowVisibility: dataRows.toArray().slice(0, retainedBodyRows.length).map((row) => isInlineVisible($, row)) };
 }
 
 export function tableHasValue(table: StructuredTable): boolean {
@@ -101,7 +153,8 @@ export function tableHasValue(table: StructuredTable): boolean {
 /** Old JSON had already lost spans; this only keeps it readable without changing saved files. */
 export function tableForDisplay(table: StructuredTable | LegacyStructuredTable): StructuredTable {
   if ("headerRows" in table && "bodyRows" in table) {
-    return { ...table, bodyRows: withoutTrailingEmptyRows(table.bodyRows) };
+    const bodyRows = withoutTrailingEmptyRows(table.bodyRows, () => true);
+    return { ...table, bodyRows, bodyRowVisibility: table.bodyRowVisibility?.slice(0, bodyRows.length) };
   }
   const width = Math.max(table.columns.length, ...table.rows.map((row) => row.length));
   return {

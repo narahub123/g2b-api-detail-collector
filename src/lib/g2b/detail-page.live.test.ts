@@ -31,11 +31,11 @@ it.skipIf(!process.env.LIVE_G2B)("aligns the purchase-item grid from the rendere
     expect(table).not.toHaveProperty("rows");
     expect(table?.headerRows).toHaveLength(2);
     expect(table?.bodyRows.length).toBeGreaterThanOrEqual(2);
-    expect(table?.headerRows?.[0][2]).toEqual({ value: "수요기관", column: 2, rowspan: 1, colspan: 3 });
-    expect(table?.headerRows?.[1][2]).toEqual({ value: "추정단가(원)", column: 4, rowspan: 1, colspan: 1 });
-    expect(table?.bodyRows?.[0][0]).toEqual({ value: "1", column: 0, rowspan: 2, colspan: 1 });
-    expect(table?.bodyRows?.[0][2]).toEqual({ value: "한국영유아보육·교육진흥원", column: 2, rowspan: 1, colspan: 3 });
-    expect(table?.bodyRows?.[1][2]).toEqual({ value: "648,000,000", column: 4, rowspan: 1, colspan: 1 });
+    expect(table?.headerRows?.[0][2]).toMatchObject({ value: "수요기관", column: 2, rowspan: 1, colspan: 3 });
+    expect(table?.headerRows?.[1][2]).toMatchObject({ value: "추정단가(원)", column: 4, rowspan: 1, colspan: 1 });
+    expect(table?.bodyRows?.[0][0]).toMatchObject({ value: "1", column: 0, rowspan: 2, colspan: 1 });
+    expect(table?.bodyRows?.[0][2]).toMatchObject({ value: "한국영유아보육·교육진흥원", column: 2, rowspan: 1, colspan: 3 });
+    expect(table?.bodyRows?.[1][2]).toMatchObject({ value: "648,000,000", column: 4, rowspan: 1, colspan: 1 });
 
     const css = await readFile(join(process.cwd(), "src/app/source-comparison.css"), "utf8");
     await page.setViewportSize({ width: 1800, height: 900 });
@@ -51,6 +51,29 @@ it.skipIf(!process.env.LIVE_G2B)("aligns the purchase-item grid from the rendere
       return header && value ? Math.abs(header.getBoundingClientRect().left - value.getBoundingClientRect().left) : Infinity;
     });
     expect(aligned).toBeLessThan(2);
+  } finally {
+    await browser.close();
+  }
+}, 60_000);
+
+it.skipIf(!process.env.LIVE_G2B)("preserves mixed list and hidden row visibility from R26BK01774570--002", async () => {
+  const browser = await chromium.launch({ channel: "chrome", headless: true });
+  try {
+    const page = await browser.newPage();
+    const url = serviceDetailUrl("R26BK01774570", "002");
+    await page.goto(url, { waitUntil: "domcontentloaded" });
+    await page.locator("td[data-title='발표순서 확인'] li[style*='display: none']").first().waitFor({ state: "attached" });
+    const section = extractDetailPage(await page.content(), url).sections?.find((item) => item.title === "제안발표순서");
+    const table = section?.tables.find((item) => item.bodyRows.some((row) =>
+      row.some((cell) => cell.value === "발표순서 확인")));
+    const listCell = table?.bodyRows.flat().find((cell) => cell.value?.includes("계약담당공무원의 평가일정"));
+    expect(listCell?.contents?.map((item) => item.visible)).toEqual([false, true]);
+    expect(listCell?.contents?.[0].value).toContain("계약담당공무원의 평가일정");
+    expect(listCell?.contents?.[1].value).toContain("문의하시기 바랍니다");
+    const hiddenRow = table?.bodyRows.findIndex((row) => row.some((cell) => cell.value === "유의사항"));
+    expect(hiddenRow).toBeGreaterThanOrEqual(0);
+    expect(table?.bodyRowVisibility?.[hiddenRow!]).toBe(false);
+    expect(table?.bodyRows[hiddenRow!].every((cell) => cell.visible === false)).toBe(true);
   } finally {
     await browser.close();
   }

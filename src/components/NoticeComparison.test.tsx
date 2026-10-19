@@ -161,6 +161,24 @@ describe("NoticeComparison", () => {
     expect(structured.bodyRows).toHaveLength(5);
   });
 
+  it("does not render trailing empty rows from a previously stored visibility-aware grid", () => {
+    const structured = {
+      visible: true,
+      headerRows: [[{ value: "값", column: 0, rowspan: 1, colspan: 1, visible: true, contents: [{ value: "값", visible: true }] }]],
+      bodyRows: [
+        [{ value: "내용", column: 0, rowspan: 1, colspan: 1, visible: true, contents: [{ value: "내용", visible: true }] }],
+        [{ value: null, column: 0, rowspan: 1, colspan: 1, visible: false, contents: [] }],
+        [{ value: null, column: 0, rowspan: 1, colspan: 1, visible: false, contents: [] }]
+      ],
+      headerRowVisibility: [true], bodyRowVisibility: [true, false, false]
+    };
+    const withTable = { ...detail, sections: [{ ...detail.sections![0], tables: [structured] }] } as ScrapedDetail;
+    render(<NoticeComparison api={null} detail={withTable} />);
+    const table = screen.getByRole("table", { name: "가격 표 1" });
+    expect(table.querySelectorAll("tbody tr")).toHaveLength(1);
+    expect(structured.bodyRows).toHaveLength(3);
+  });
+
   it("shows detail when the related notice has no API response yet", () => {
     render(<NoticeComparison api={null} detail={detail} />);
     expect(screen.getByRole("region", { name: "API 응답 정보" })).toHaveTextContent("API 응답이 아직 없습니다.");

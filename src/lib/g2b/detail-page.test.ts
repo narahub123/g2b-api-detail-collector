@@ -10,6 +10,70 @@ const simpleTable = (columns: string[], rows: (string | null)[][]) => ({
 });
 
 describe("extractDetailPage", () => {
+  it("preserves table, row, cell and mixed content visibility in a form table", () => {
+    const html = `<main>${heading("공고일반")}<table><tr><th>공고명</th><td>용역</td></tr></table>
+      ${heading("제안발표순서")}<table><tbody>
+        <tr><th>발표순서 확인</th><td data-title="발표순서 확인"><ul>
+          <li style="display:none"><span>숨긴 안내</span></li><li><span>표시 안내</span></li>
+        </ul></td></tr>
+        <tr style="visibility:hidden"><th>유의사항</th><td data-title="유의사항">숨긴 행의 값</td></tr>
+      </tbody></table></main>`;
+    const section = extractDetailPage(html, url).sections?.[1];
+    expect(section?.fields.find((field) => field.label === "발표순서 확인")?.value).toBe("숨긴 안내표시 안내");
+    expect(section?.tables).toHaveLength(1);
+    expect(section?.tables[0]).toMatchObject({
+      visible: true,
+      bodyRowVisibility: [true, false],
+      bodyRows: [
+        [
+          { value: "발표순서 확인", visible: true },
+          { value: "숨긴 안내표시 안내", visible: true, contents: [
+            { value: "숨긴 안내", visible: false }, { value: "표시 안내", visible: true }
+          ] }
+        ],
+        [{ value: "유의사항", visible: false }, { value: "숨긴 행의 값", visible: false,
+          contents: [{ value: "숨긴 행의 값", visible: false }] }]
+      ]
+    });
+  });
+
+  it("propagates hidden table and cell ancestors without changing merged positions", () => {
+    const html = `<main>${heading("공고일반")}<table><tr><th>공고명</th><td>용역</td></tr></table>
+      ${heading("숨긴 표")}<div style="display:none"><table id="amount_grid"><thead>
+        <tr><th rowspan="2">번호</th><th colspan="2">내역</th></tr>
+        <tr><th>항목</th><th>금액</th></tr></thead><tbody>
+        <tr><td>1</td><td>기초금액</td><td style="visibility:hidden">1,000원</td></tr>
+      </tbody></table></div></main>`;
+    const table = extractDetailPage(html, url).sections?.[1].tables[0];
+    expect(table?.visible).toBe(false);
+    expect(table?.headerRowVisibility).toEqual([false, false]);
+    expect(table?.bodyRowVisibility).toEqual([false]);
+    expect(table?.headerRows[0][0]).toMatchObject({ value: "번호", column: 0, rowspan: 2, colspan: 1, visible: false });
+    expect(table?.headerRows[0][1]).toMatchObject({ value: "내역", column: 1, rowspan: 1, colspan: 2, visible: false });
+    expect(table?.bodyRows[0][2]).toMatchObject({ value: "1,000원", column: 2, visible: false,
+      contents: [{ value: "1,000원", visible: false }] });
+  });
+
+  it("retains a hidden empty row while removing visible grid padding", () => {
+    const html = `<main>${heading("공고일반")}<table><tr><th>공고명</th><td>용역</td></tr></table>
+      ${heading("표 구역")}<table id="generic_grid"><thead><tr><th>값</th></tr></thead><tbody>
+        <tr><td>내용</td></tr><tr style="display:none"><td></td></tr><tr><td></td></tr>
+      </tbody></table></main>`;
+    const table = extractDetailPage(html, url).sections?.[1].tables[0];
+    expect(table?.bodyRows).toHaveLength(2);
+    expect(table?.bodyRowVisibility).toEqual([true, false]);
+    expect(table?.bodyRows[1][0]).toMatchObject({ value: null, visible: false, contents: [] });
+  });
+
+  it("does not restore empty WebSquare padding rows merely because they are hidden", () => {
+    const html = `<main>${heading("공고일반")}<table><tr><th>공고명</th><td>용역</td></tr></table>
+      ${heading("표 구역")}<table id="generic_grid"><thead><tr><th>값</th></tr></thead><tbody>
+        <tr><td>내용</td></tr><tr class="w2grid_hidedRow" style="display:none"><td></td></tr>
+      </tbody></table></main>`;
+    const table = extractDetailPage(html, url).sections?.[1].tables[0];
+    expect(table?.bodyRows).toHaveLength(1);
+    expect(table?.bodyRowVisibility).toEqual([true]);
+  });
   it("collects only headed detail content within the rendered notice container", () => {
     const html = `<body>
       <nav><table><tr><td data-title="단계구분">공통 탐색</td></tr></table></nav>
@@ -27,7 +91,7 @@ describe("extractDetailPage", () => {
       <footer><table><tr><td data-title="공통 하단">안내</td></tr></table></footer>
     </body>`;
     const result = extractDetailPage(html, url);
-    expect(result.sections).toEqual([
+    expect(result.sections).toMatchObject([
       { title: "공지사항", fields: [], tables: [], visible: true },
       { title: "공고일반", fields: [
         { label: "공고명", value: "용역", visible: true },
@@ -60,7 +124,9 @@ describe("extractDetailPage", () => {
       { label: "숨긴 단일 셀", value: "단일 셀 값", visible: false },
       { label: "숨긴 상위", value: "상위 값", visible: false }
     ]);
-    expect(section?.tables).toEqual([simpleTable(["구분", "금액"], [["기초금액", "1,000원"]])]);
+    expect(section?.tables).toHaveLength(2);
+    expect(section?.tables[0].bodyRowVisibility).toEqual([true, false, true, true, true]);
+    expect(section?.tables[1]).toMatchObject(simpleTable(["구분", "금액"], [["기초금액", "1,000원"]]));
   });
   it("keeps heading order and reads each WebSquare field only once", () => {
     const html = `<main>
@@ -76,7 +142,7 @@ describe("extractDetailPage", () => {
       "공고일반", "가격", "기초금액공개", "기관담당자정보", "가격"
     ]);
     expect(result.sections?.[1].fields).toEqual([{ label: "예가방법", value: "복수예가", visible: true }]);
-    expect(result.sections?.[2].tables).toEqual([
+    expect(result.sections?.[2].tables).toMatchObject([
       simpleTable(["구분", "금액"], [["기초금액", "1,000원"]])
     ]);
     expect(result).not.toHaveProperty("fields");
@@ -87,14 +153,14 @@ describe("extractDetailPage", () => {
     const html = `<main>${heading("공고일반")}<table><tr><th>공고명</th><td>용역</td></tr></table>
       ${heading("진행정보")}<table id="progress_grid"><thead><tr><th>No</th><th>진행명</th></tr></thead>
       <tbody><tr><td>1</td><td>공고게시</td></tr><tr><td>2</td><td>개찰</td></tr></tbody></table></main>`;
-    expect(extractDetailPage(html, url).sections?.[1].tables).toEqual([
+    expect(extractDetailPage(html, url).sections?.[1].tables).toMatchObject([
       simpleTable(["No", "진행명"], [["1", "공고게시"], ["2", "개찰"]])
     ]);
   });
   it("recognizes a one-column HTML table without a grid id", () => {
     const html = `<main>${heading("공고일반")}<table><tr><th>공고명</th><td>용역</td></tr></table>
       ${heading("안내 목록")}<table><tr><th>안내</th></tr><tr><td>첫째</td></tr><tr><td>둘째</td></tr></table></main>`;
-    expect(extractDetailPage(html, url).sections?.[1].tables).toEqual([
+    expect(extractDetailPage(html, url).sections?.[1].tables).toMatchObject([
       simpleTable(["안내"], [["첫째"], ["둘째"]])
     ]);
   });
@@ -110,12 +176,12 @@ describe("extractDetailPage", () => {
     const table = extractDetailPage(html, url).sections?.[1].tables[0];
     expect(table).not.toHaveProperty("columns");
     expect(table).not.toHaveProperty("rows");
-    expect(table?.headerRows).toEqual([
+    expect(table?.headerRows).toMatchObject([
       [{ value: "No", column: 0, rowspan: 2, colspan: 1 }, { value: "물품", column: 1, rowspan: 1, colspan: 2 },
         { value: "금액", column: 3, rowspan: 2, colspan: 1 }],
       [{ value: "세부품명", column: 1, rowspan: 1, colspan: 1 }, { value: "규격", column: 2, rowspan: 1, colspan: 1 }]
     ]);
-    expect(table?.bodyRows).toEqual([
+    expect(table?.bodyRows).toMatchObject([
       [{ value: "1", column: 0, rowspan: 2, colspan: 1 }, { value: "노트북", column: 1, rowspan: 1, colspan: 2 },
         { value: "100", column: 3, rowspan: 1, colspan: 1 }],
       [{ value: "업무용", column: 1, rowspan: 1, colspan: 1 }, { value: "13인치", column: 2, rowspan: 1, colspan: 1 },
@@ -139,11 +205,11 @@ describe("extractDetailPage", () => {
     expect(table).not.toHaveProperty("columns");
     expect(table).not.toHaveProperty("rows");
     expect(table?.bodyRows).toHaveLength(2);
-    expect(table?.headerRows?.[0][2]).toEqual({ value: "수요기관", column: 2, rowspan: 1, colspan: 3 });
-    expect(table?.bodyRows?.[0][0]).toEqual({ value: "1", column: 0, rowspan: 2, colspan: 1 });
-    expect(table?.bodyRows?.[1][0]).toEqual({ value: "1", column: 2, rowspan: 1, colspan: 1 });
-    expect(table?.bodyRows?.[1][2]).toEqual({ value: "648,000,000", column: 4, rowspan: 1, colspan: 1 });
-    expect(table?.bodyRows?.[1][4]).toEqual({ value: null, column: 6, rowspan: 1, colspan: 1 });
+    expect(table?.headerRows?.[0][2]).toMatchObject({ value: "수요기관", column: 2, rowspan: 1, colspan: 3 });
+    expect(table?.bodyRows?.[0][0]).toMatchObject({ value: "1", column: 0, rowspan: 2, colspan: 1 });
+    expect(table?.bodyRows?.[1][0]).toMatchObject({ value: "1", column: 2, rowspan: 1, colspan: 1 });
+    expect(table?.bodyRows?.[1][2]).toMatchObject({ value: "648,000,000", column: 4, rowspan: 1, colspan: 1 });
+    expect(table?.bodyRows?.[1][4]).toMatchObject({ value: null, column: 6, rowspan: 1, colspan: 1 });
   });
 
   it("keeps blank rows inside data and rows covered by a populated rowspan", () => {
@@ -155,12 +221,12 @@ describe("extractDetailPage", () => {
       </tbody></table></main>`;
     const rows = extractDetailPage(html, url).sections?.[1].tables[0].bodyRows;
     expect(rows).toHaveLength(5);
-    expect(rows?.[1]).toEqual([
+    expect(rows?.[1]).toMatchObject([
       { value: null, column: 0, rowspan: 1, colspan: 1 },
       { value: null, column: 1, rowspan: 1, colspan: 1 }
     ]);
-    expect(rows?.[3][0]).toEqual({ value: "셋째", column: 0, rowspan: 2, colspan: 1 });
-    expect(rows?.[4]).toEqual([{ value: null, column: 1, rowspan: 1, colspan: 1 }]);
+    expect(rows?.[3][0]).toMatchObject({ value: "셋째", column: 0, rowspan: 2, colspan: 1 });
+    expect(rows?.[4]).toMatchObject([{ value: null, column: 1, rowspan: 1, colspan: 1 }]);
   });
 
   it("separates named subareas and excludes navigation links", () => {
@@ -215,7 +281,7 @@ describe("extractDetailPage", () => {
       "공고일반", "새로운 안내", "숨긴 구역", "빈 구역", "새로운 안내"
     ]);
     expect(result.sections?.[1].fields).toEqual([{ label: "안내값", value: "첫 값", visible: true }]);
-    expect(result.sections?.[2].tables).toEqual([
+    expect(result.sections?.[2].tables).toMatchObject([
       simpleTable(["구분", "금액"], [["숨긴 값", "5,000원"]])
     ]);
     expect(result.sections?.[3]).toEqual({ title: "빈 구역", fields: [], tables: [], visible: true });
@@ -318,7 +384,7 @@ describe("extractModalStructure", () => {
       <table><tr><th class="w2tb_th">발주계획번호</th><td data-title="발주계획번호"><input value="R26DD12345678"></td></tr>
       <tr><th class="w2tb_th">비고</th><td data-title="비고"><textarea>추가 설명</textarea></td></tr>
       <tr><th class="w2tb_th">담당자</th><td>홍길동</td></tr></table></div>`;
-    expect(extractModalStructure(html)).toEqual({
+    expect(extractModalStructure(html)).toMatchObject({
       title: "발주계획상세조회",
       fields: [
         { label: "발주계획번호", value: "R26DD12345678" },
@@ -335,7 +401,7 @@ describe("extractModalStructure", () => {
       <tr><td col_id="seq" data-title="순번">1</td><td col_id="price" data-title="가격">1,000원</td></tr>
       <tr><td col_id="seq" data-title="순번">2</td><td col_id="price" data-title="가격">2,000원</td></tr>
     </table></div>`;
-    expect(extractModalStructure(html)).toEqual({
+    expect(extractModalStructure(html)).toMatchObject({
       title: null,
       fields: [],
       tables: [simpleTable(["순번", "가격"], [["1", "1,000원"], ["2", "2,000원"]])]
@@ -349,7 +415,16 @@ describe("extractModalStructure", () => {
       <tr><td col_id="seq"></td><td col_id="price"></td></tr>
       <tr><td col_id="seq"></td><td col_id="price"></td></tr>
     </table></div>`;
-    expect(extractModalStructure(html).tables).toEqual([simpleTable(["순번", "가격"], [["1", "1,000원"]])]);
+    expect(extractModalStructure(html).tables).toMatchObject([simpleTable(["순번", "가격"], [["1", "1,000원"]])]);
+  });
+
+  it("aligns visibility metadata with a modal grid's generated header", () => {
+    const html = `<div role="dialog"><table><tr><td col_id="amount">1,000원</td></tr></table></div>`;
+    const table = extractModalStructure(html).tables[0];
+    expect(table.headerRows).toHaveLength(1);
+    expect(table.headerRowVisibility).toEqual([true]);
+    expect(table.bodyRowVisibility).toEqual([true]);
+    expect(table.bodyRows[0][0]).toMatchObject({ value: "1,000원", visible: true });
   });
 
   it("retains a modal grid's actual multilevel header and merged body cells", () => {
@@ -359,7 +434,7 @@ describe("extractModalStructure", () => {
       <tr><td rowspan="2" col_id="seq">1</td><td colspan="2" col_id="name">노트북</td></tr>
       <tr><td col_id="name">업무용</td><td col_id="spec">13인치</td></tr>
     </tbody></table></div>`;
-    expect(extractModalStructure(html).tables).toEqual([{
+    expect(extractModalStructure(html).tables).toMatchObject([{
       headerRows: [
         [{ value: "No", column: 0, rowspan: 2, colspan: 1 }, { value: "물품", column: 1, rowspan: 1, colspan: 2 }],
         [{ value: "품명", column: 1, rowspan: 1, colspan: 1 }, { value: "규격", column: 2, rowspan: 1, colspan: 1 }]
