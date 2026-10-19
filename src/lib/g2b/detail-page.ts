@@ -131,7 +131,16 @@ export function extractDetailPage(html: string, pageUrl: string, fileMetadata: A
     }
     for (const child of node.children || []) walk(child);
   };
-  walk($("body")[0]);
+  // The rendered notice lives in the sub-contents pane; body also contains navigation tables.
+  const detailRoot = $(".pop_contents > .sub_contents").filter((_, node) =>
+    $(node).find(".dfbox > .fl > .df_tit").length > 0).first();
+  if (detailRoot.length) {
+    for (const child of detailRoot.children().toArray()) {
+      if ($(child).find(".dfbox > .fl > .df_tit").length) walk(child);
+    }
+  } else {
+    walk($("body")[0]);
+  }
   const number = url.searchParams.get("bidPbancNo") || "";
   const order = url.searchParams.get("bidPbancOrd") || "";
   const attachments: Attachment[] = [];

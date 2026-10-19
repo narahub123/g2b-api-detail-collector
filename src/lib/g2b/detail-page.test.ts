@@ -6,6 +6,34 @@ const heading = (title: string, tag = "h4") =>
   `<div class="w2group dfbox"><div class="w2group fl"><${tag} class="w2textbox df_tit fl">${title}</${tag}></div></div>`;
 
 describe("extractDetailPage", () => {
+  it("collects only headed detail content within the rendered notice container", () => {
+    const html = `<body>
+      <nav><table><tr><td data-title="단계구분">공통 탐색</td></tr></table></nav>
+      <div class="pop_contents"><div class="sub_contents">
+        <div class="stepbar"><table><tr><td data-title="진행단계">공통 단계</td></tr></table></div>
+        <div class="notice-frame">${heading("공지사항")}</div>
+        <div class="main-frame"><div class="pop_contents">
+          ${heading("공고일반")}<table><tr><th>공고명</th><td>용역</td></tr>
+            <tr style="display:none"><th>숨긴 필드</th><td>숨긴 값</td></tr></table>
+          ${heading("새 섹션")}<table id="detail_grid"><tr><th>구분</th><th>금액</th></tr>
+            <tr><td>기초금액</td><td>1,000원</td></tr></table>
+        </div></div>
+        <div class="btnbox_all"><table><tr><td data-title="공통 버튼">저장</td></tr></table></div>
+      </div></div>
+      <footer><table><tr><td data-title="공통 하단">안내</td></tr></table></footer>
+    </body>`;
+    const result = extractDetailPage(html, url);
+    expect(result.sections).toEqual([
+      { title: "공지사항", fields: [], tables: [], visible: true },
+      { title: "공고일반", fields: [
+        { label: "공고명", value: "용역", visible: true },
+        { label: "숨긴 필드", value: "숨긴 값", visible: false }
+      ], tables: [], visible: true },
+      { title: "새 섹션", fields: [], tables: [
+        { columns: ["구분", "금액"], rows: [["기초금액", "1,000원"]] }
+      ], visible: true }
+    ]);
+  });
   it("records inline visibility for each field without dropping hidden values", () => {
     const html = `<main>${heading("공고일반")}
       <table>
