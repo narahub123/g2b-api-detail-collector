@@ -36,6 +36,14 @@ function matchesNotice(capture: ModalCapture, key: string): boolean {
   return !capturedOrder || capturedOrder === order;
 }
 
+// A section is empty only when neither its own data nor linked modal details have values.
+// Header-only tables and fields with null/blank values do not count as content.
+const hasFieldContent = (fields: StructuredField[]) => fields.some((field) => Boolean(field.value?.trim()));
+const hasTableContent = (tables: StructuredTable[]) => tables.some((table) =>
+  table.bodyRows.some((row) => row.some((cell) => Boolean(cell.value?.trim()))));
+const hasContent = (fields: StructuredField[], tables: StructuredTable[]) =>
+  hasFieldContent(fields) || hasTableContent(tables);
+
 export function structureNoticeDetail(key: string, detail: ScrapedDetail): StructuredNoticeDetail {
   const orderPlans: IndependentDetail[] = [];
   const preSpecifications: IndependentDetail[] = [];
@@ -44,6 +52,9 @@ export function structureNoticeDetail(key: string, detail: ScrapedDetail): Struc
   const sections = detail.sections?.map((section) => ({ ...section, details: [...(section.details || [])] }));
   const modalCaptures: ModalCapture[] = [];
   const warnings: string[] = [];
+  // Preserve an empty section when a modal belonging to it could not be linked.
+  // Such a section is not confirmed empty, even if its visible fields have no values.
+  const unresolvedSectionTitles = new Set<string>();
   for (const original of [...(detail.modalCaptures || []), ...(detail.baseAmountCaptures || []),
     ...(detail.changeNoticeCaptures || [])]) {
     const sectionHint = original.trigger.sectionHint;
@@ -58,12 +69,14 @@ export function structureNoticeDetail(key: string, detail: ScrapedDetail): Struc
     if (!(isPlan || isPreSpec || isAmount || isNotice)) { modalCaptures.push(capture); continue; }
     if ((isAmount || isNotice) && !matchesNotice(capture, key)) {
       warnings.push(`${key}: ${title}의 공고 식별자가 일치하지 않습니다.`);
+      if (sectionHint) unresolvedSectionTitles.add(sectionHint);
       modalCaptures.push(capture);
       continue;
     }
     if (isAmount || isNotice) {
       if (!capture.modal.fields.length && !capture.modal.tables.length) {
         warnings.push(`${key}: ${title}에 구조화된 필드나 표가 없습니다.`);
+        if (sectionHint) unresolvedSectionTitles.add(sectionHint);
         modalCaptures.push(capture);
         continue;
       }
@@ -71,6 +84,7 @@ export function structureNoticeDetail(key: string, detail: ScrapedDetail): Struc
       const owners = sections?.filter((section) => section.title === targetTitle) || [];
       if (sectionHint !== targetTitle || owners.length !== 1) {
         warnings.push(`${key}: ${title}의 소속 섹션을 확인할 수 없습니다.`);
+        if (sectionHint) unresolvedSectionTitles.add(sectionHint);
         modalCaptures.push(capture);
         continue;
       }
@@ -93,7 +107,23 @@ export function structureNoticeDetail(key: string, detail: ScrapedDetail): Struc
       preSpecifications.push(entity);
     }
   }
-  const structured: ScrapedDetail = { ...detail, sections, modalCaptures };
+  const nonemptySections = sections?.filter((section) =>
+    hasContent(section.fields, section.tables) ||
+    section.details.some((linked) => hasContent(linked.fields, linked.tables)) ||
+    unresolvedSectionTitles.has(section.title));
+  const structured: ScrapedDetail = { ...detail, sections: nonemptySections, modalCaptures };
+  if (structured.summary && nonemptySections) {
+    structured.summary = {
+      ...structured.summary,
+      sectionCount: nonemptySections.length,
+      fieldCount: nonemptySections.reduce((count, section) => count + section.fields.length, 0),
+      nonemptyFieldCount: nonemptySections.reduce((count, section) =>
+        count + section.fields.filter((field) => field.value !== null).length, 0),
+      tableCount: nonemptySections.reduce((count, section) => count + section.tables.length, 0),
+      tableRowCount: nonemptySections.reduce((count, section) =>
+        count + section.tables.reduce((rows, table) => rows + table.bodyRows.length, 0), 0)
+    };
+  }
   delete structured.baseAmountCaptures;
   delete structured.changeNoticeCaptures;
   delete structured.text;
