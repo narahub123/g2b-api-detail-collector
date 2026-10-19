@@ -168,13 +168,18 @@ export function extractDetailPage(html: string, pageUrl: string, fileMetadata: A
     addAttachment(name, attachmentUrl(file.atchFileSqno));
   }
   const links: ScrapedDetail["links"] = [];
-  $("a[href]").each((_, anchor) => {
-    try {
-      const href = new URL($(anchor).attr("href") || "", pageUrl);
-      const label = clean($(anchor).text());
-      if (["http:", "https:"].includes(href.protocol) && label &&
-        !($(anchor).attr("href") || "").startsWith("#") && label !== "본문영역 바로가기") links.push({ label, url: href.toString() });
-    } catch { /* ignore */ }
+  // Match the section traversal scope: only heading-bearing children of the notice pane.
+  // Do not fall back to the whole body, which would collect global navigation links.
+  if (detailRoot.length) detailRoot.children().each((_, child) => {
+    if (!$(child).find(".dfbox > .fl > .df_tit").length) return;
+    $(child).find("a[href]").each((_, anchor) => {
+      try {
+        const href = new URL($(anchor).attr("href") || "", pageUrl);
+        const label = clean($(anchor).text());
+        if (["http:", "https:"].includes(href.protocol) && label &&
+          !($(anchor).attr("href") || "").startsWith("#") && label !== "본문영역 바로가기") links.push({ label, url: href.toString() });
+      } catch { /* ignore */ }
+    });
   });
   const fullText = clean($("main").text() || $("body").text());
   if (!sections.some((section) => section.fields.some((field) => field.label === "공고명" && field.value))) {

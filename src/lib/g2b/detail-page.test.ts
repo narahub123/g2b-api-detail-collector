@@ -229,6 +229,36 @@ describe("extractDetailPage", () => {
     expect(rows?.[4]).toMatchObject([{ value: null, column: 1, rowspan: 1, colspan: 1 }]);
   });
 
+  it("collects only links inside heading-bearing detail sections", () => {
+    const html = `<header><a href="/">나라장터</a><a href="/reserve">비축</a>
+      <a href="/accounting">회계</a><a href="/legalScreening">법무심사</a>
+      <a href="/ppsOperation">조달청 기관운영</a></header>
+      <div class="pop_contents"><div class="sub_contents">
+        <div><a href="/unrelated">섹션 밖 링크</a></div>
+        <div>${heading("공고일반")}
+          <table><tr><th>공고명</th><td>용역</td></tr></table>
+          <a href="/notice/related">관련 자료</a>
+          <a href="#section">이동</a>
+        </div>
+        <div>${heading("연관정보")}<a href="https://example.com/info">외부 안내</a></div>
+      </div></div><footer><a href="/help">도움말</a></footer>`;
+    const result = extractDetailPage(html, url);
+    expect(result.links).toEqual([
+      { label: "관련 자료", url: "https://www.g2b.go.kr/notice/related" },
+      { label: "외부 안내", url: "https://example.com/info" }
+    ]);
+    expect(result.summary?.linkCount).toBe(2);
+  });
+
+  it("does not fall back to body-wide links when the detail root is missing", () => {
+    const html = `<main>${heading("공고일반")}<table><tr><th>공고명</th><td>용역</td></tr></table>
+      <a href="/reserve">비축</a><a href="/notice/related">관련 자료</a></main>`;
+    const result = extractDetailPage(html, url);
+    expect(result.sections?.[0].fields.some((field) => field.label === "공고명")).toBe(true);
+    expect(result.links).toEqual([]);
+    expect(result.summary?.linkCount).toBe(0);
+  });
+
   it("separates named subareas and excludes navigation links", () => {
     const html = `<main>${heading("공고일반")}<table><tr><th>공고명</th><td>용역</td></tr></table>
       ${heading("입찰자격")}${heading("투찰제한 - 일반", "div")}<table><tr><th>지역제한</th><td>서울</td></tr></table>
@@ -243,7 +273,7 @@ describe("extractDetailPage", () => {
       "제안요청정보", "협상에 의한 계약", "기관담당자정보", "수요기관담당자정보 목록", "연관정보", "파일첨부"
     ]);
     expect(result.sections?.[2].fields).toEqual([{ label: "지역제한", value: "서울", visible: true }]);
-    expect(result.links.map((link) => link.label)).toEqual(["도움말"]);
+    expect(result.links).toEqual([]);
   });
   it("recognizes actual WebSquare subheadings and prefers a filled field over an empty duplicate", () => {
     const html = `<main>${heading("공고일반")}<table>
