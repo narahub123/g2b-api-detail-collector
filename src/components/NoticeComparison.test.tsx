@@ -2,13 +2,18 @@
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { NoticeComparison } from "./NoticeComparison";
-import type { ScrapedDetail } from "@/lib/g2b/detail-page";
+import type { ScrapedDetail, StructuredTable } from "@/lib/g2b/detail-page";
+
+const simpleTable = (columns: string[], rows: (string | null)[][]): StructuredTable => ({
+  headerRows: [columns.map((value, column) => ({ value, column, rowspan: 1, colspan: 1 }))],
+  bodyRows: rows.map((row) => row.map((value, column) => ({ value, column, rowspan: 1, colspan: 1 })))
+});
 
 const detail: ScrapedDetail = {
   sourceUrl: "https://www.g2b.go.kr/", text: "상세 원문 샘플",
   attachments: [], links: [],
   sections: [{ title: "가격", fields: [{ label: "공고명", value: "조사 용역" }, { label: "기초금액", value: "3,000원" }],
-    tables: [{ columns: ["구분", "금액"], rows: [["기초금액", "3,000원"], [null, null]] }] }],
+    tables: [simpleTable(["구분", "금액"], [["기초금액", "3,000원"], [null, null]])] }],
   modalCaptures: [
     { trigger: { index: 1, tag: "button", label: "기초금액조회", value: "기초금액조회", sectionHint: "가격", html: "<button>기초금액조회</button>" },
       modal: { title: "기초가격상세조회", text: "기초금액 안내", html: "<div></div>",
@@ -16,7 +21,7 @@ const detail: ScrapedDetail = {
     { trigger: { index: 2, tag: "a", label: "발주계획번호", value: "R26DD1", sectionHint: "연관정보", html: "<a>R26DD1</a>" },
       modal: { title: "발주계획상세조회", text: "발주계획 본문", html: "<div></div>",
         fields: [{ label: "계약방법", value: "제한경쟁" }],
-        tables: [{ columns: ["파일명", "크기"], rows: [["계획서.hwp", "12 KB"]] }] } }
+        tables: [simpleTable(["파일명", "크기"], [["계획서.hwp", "12 KB"]])] } }
   ]
 };
 
@@ -34,7 +39,7 @@ describe("NoticeComparison", () => {
   it("shows every section detail beneath its section fields and tables", () => {
     const withDetails: ScrapedDetail = { ...detail, sections: [{ ...detail.sections![0], details: [
       { title: "기초가격상세조회", fields: [{ label: "기초금액", value: "3,100원" }],
-        tables: [{ columns: ["차수", "금액"], rows: [["1", "3,100원"]] }] },
+        tables: [simpleTable(["차수", "금액"], [["1", "3,100원"]])] },
       { title: "기초가격상세조회", fields: [{ label: "기초금액", value: "3,200원" }], tables: [] }
     ] }] };
     render(<NoticeComparison api={null} detail={withDetails} />);
@@ -111,10 +116,49 @@ describe("NoticeComparison", () => {
       ...detail,
       sections: [{ ...detail.sections![0], tables: [{ columns: ["구분", "금액"], rows: [["기초금액", "3,000원", "추가 내용"]] }] }],
     };
-    render(<NoticeComparison api={{ bidNtceNo: "R26BK1" }} detail={detailWithWideRow} />);
+    render(<NoticeComparison api={{ bidNtceNo: "R26BK1" }} detail={detailWithWideRow as unknown as ScrapedDetail} />);
     const table = screen.getByRole("table", { name: "가격 표 1" });
     expect(table).toHaveTextContent("추가 내용");
     expect(within(table).getByRole("columnheader", { name: "열 3" })).toBeInTheDocument();
+  });
+
+  it("renders multilevel headers and merged body cells without inserting placeholders", () => {
+    const structured = { headerRows: [
+      [{ value: "No", column: 0, rowspan: 2, colspan: 1 }, { value: "물품", column: 1, rowspan: 1, colspan: 2 }],
+      [{ value: "세부품명", column: 1, rowspan: 1, colspan: 1 }, { value: "규격", column: 2, rowspan: 1, colspan: 1 }]
+    ], bodyRows: [
+      [{ value: "1", column: 0, rowspan: 2, colspan: 1 }, { value: "노트북", column: 1, rowspan: 1, colspan: 2 }],
+      [{ value: "업무용", column: 1, rowspan: 1, colspan: 1 }, { value: "13인치", column: 2, rowspan: 1, colspan: 1 }]
+    ] };
+    const withTable = { ...detail, sections: [{ ...detail.sections![0], tables: [structured] }] } as ScrapedDetail;
+    render(<NoticeComparison api={null} detail={withTable} />);
+    const table = screen.getByRole("table", { name: "가격 표 1" });
+    expect(table.querySelectorAll("thead tr")).toHaveLength(2);
+    expect(table.querySelectorAll("tbody tr")).toHaveLength(2);
+    expect(within(table).getByRole("columnheader", { name: "No" })).toHaveAttribute("rowspan", "2");
+    expect(within(table).getByRole("columnheader", { name: "물품" })).toHaveAttribute("colspan", "2");
+    expect(within(table).getByRole("cell", { name: "1" })).toHaveAttribute("rowspan", "2");
+    expect(within(table).getByRole("cell", { name: "노트북" })).toHaveAttribute("colspan", "2");
+    expect(table.querySelectorAll("tbody tr:first-child td")).toHaveLength(2);
+    expect(table.querySelectorAll("tbody tr:last-child td")).toHaveLength(2);
+  });
+
+  it("hides trailing empty grid padding in stored structured tables without mutating the data", () => {
+    const empty = { value: null, column: 0, rowspan: 1, colspan: 1 };
+    const structured = {
+      headerRows: [[{ value: "값", column: 0, rowspan: 1, colspan: 1 }]],
+      bodyRows: [
+        [{ value: "첫째", column: 0, rowspan: 1, colspan: 1 }],
+        [empty],
+        [{ value: "둘째", column: 0, rowspan: 1, colspan: 1 }],
+        [empty], [empty]
+      ]
+    };
+    const withTable = { ...detail, sections: [{ ...detail.sections![0], tables: [structured] }] } as ScrapedDetail;
+    render(<NoticeComparison api={null} detail={withTable} />);
+    const table = screen.getByRole("table", { name: "가격 표 1" });
+    expect(table.querySelectorAll("tbody tr")).toHaveLength(3);
+    expect(structured.bodyRows).toHaveLength(5);
   });
 
   it("shows detail when the related notice has no API response yet", () => {

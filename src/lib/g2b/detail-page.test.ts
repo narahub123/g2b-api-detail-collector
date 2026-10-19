@@ -4,6 +4,10 @@ import { extractDetailPage, extractModalStructure, extractRelatedNoticeKeys } fr
 const url = "https://www.g2b.go.kr/link/PNPE027_01/single/?bidPbancNo=R26BK1&bidPbancOrd=000";
 const heading = (title: string, tag = "h4") =>
   `<div class="w2group dfbox"><div class="w2group fl"><${tag} class="w2textbox df_tit fl">${title}</${tag}></div></div>`;
+const simpleTable = (columns: string[], rows: (string | null)[][]) => ({
+  headerRows: [columns.map((value, column) => ({ value, column, rowspan: 1, colspan: 1 }))],
+  bodyRows: rows.map((row) => row.map((value, column) => ({ value, column, rowspan: 1, colspan: 1 })))
+});
 
 describe("extractDetailPage", () => {
   it("collects only headed detail content within the rendered notice container", () => {
@@ -30,7 +34,7 @@ describe("extractDetailPage", () => {
         { label: "숨긴 필드", value: "숨긴 값", visible: false }
       ], tables: [], visible: true },
       { title: "새 섹션", fields: [], tables: [
-        { columns: ["구분", "금액"], rows: [["기초금액", "1,000원"]] }
+        simpleTable(["구분", "금액"], [["기초금액", "1,000원"]])
       ], visible: true }
     ]);
   });
@@ -56,7 +60,7 @@ describe("extractDetailPage", () => {
       { label: "숨긴 단일 셀", value: "단일 셀 값", visible: false },
       { label: "숨긴 상위", value: "상위 값", visible: false }
     ]);
-    expect(section?.tables).toEqual([{ columns: ["구분", "금액"], rows: [["기초금액", "1,000원"]] }]);
+    expect(section?.tables).toEqual([simpleTable(["구분", "금액"], [["기초금액", "1,000원"]])]);
   });
   it("keeps heading order and reads each WebSquare field only once", () => {
     const html = `<main>
@@ -73,11 +77,90 @@ describe("extractDetailPage", () => {
     ]);
     expect(result.sections?.[1].fields).toEqual([{ label: "예가방법", value: "복수예가", visible: true }]);
     expect(result.sections?.[2].tables).toEqual([
-      { columns: ["구분", "금액"], rows: [["기초금액", "1,000원"]] }
+      simpleTable(["구분", "금액"], [["기초금액", "1,000원"]])
     ]);
     expect(result).not.toHaveProperty("fields");
     expect(result.sections?.every((section) => !("text" in section))).toBe(true);
     expect(result.sections?.[0].fields).toContainEqual({ label: "공고명", value: "실태조사 용역", visible: true });
+  });
+  it("stores a simple table in the same cell structure as a complex table", () => {
+    const html = `<main>${heading("공고일반")}<table><tr><th>공고명</th><td>용역</td></tr></table>
+      ${heading("진행정보")}<table id="progress_grid"><thead><tr><th>No</th><th>진행명</th></tr></thead>
+      <tbody><tr><td>1</td><td>공고게시</td></tr><tr><td>2</td><td>개찰</td></tr></tbody></table></main>`;
+    expect(extractDetailPage(html, url).sections?.[1].tables).toEqual([
+      simpleTable(["No", "진행명"], [["1", "공고게시"], ["2", "개찰"]])
+    ]);
+  });
+  it("recognizes a one-column HTML table without a grid id", () => {
+    const html = `<main>${heading("공고일반")}<table><tr><th>공고명</th><td>용역</td></tr></table>
+      ${heading("안내 목록")}<table><tr><th>안내</th></tr><tr><td>첫째</td></tr><tr><td>둘째</td></tr></table></main>`;
+    expect(extractDetailPage(html, url).sections?.[1].tables).toEqual([
+      simpleTable(["안내"], [["첫째"], ["둘째"]])
+    ]);
+  });
+  it("preserves multilevel headers and merged data cells in every section", () => {
+    const html = `<main>${heading("공고일반")}<table><tr><th>공고명</th><td>용역</td></tr></table>
+      ${heading("새로운 표 섹션")}<table><thead>
+        <tr><th rowspan="2">No</th><th colspan="2">물품</th><th rowspan="2">금액</th></tr>
+        <tr><th>세부품명</th><th>규격</th></tr></thead><tbody>
+        <tr><td rowspan="2">1</td><td colspan="2">노트북</td><td>100</td></tr>
+        <tr><td>업무용</td><td>13인치</td><td>200</td></tr>
+        <tr><td>2</td><td>모니터</td><td>27인치</td><td>300</td></tr>
+      </tbody></table></main>`;
+    const table = extractDetailPage(html, url).sections?.[1].tables[0];
+    expect(table).not.toHaveProperty("columns");
+    expect(table).not.toHaveProperty("rows");
+    expect(table?.headerRows).toEqual([
+      [{ value: "No", column: 0, rowspan: 2, colspan: 1 }, { value: "물품", column: 1, rowspan: 1, colspan: 2 },
+        { value: "금액", column: 3, rowspan: 2, colspan: 1 }],
+      [{ value: "세부품명", column: 1, rowspan: 1, colspan: 1 }, { value: "규격", column: 2, rowspan: 1, colspan: 1 }]
+    ]);
+    expect(table?.bodyRows).toEqual([
+      [{ value: "1", column: 0, rowspan: 2, colspan: 1 }, { value: "노트북", column: 1, rowspan: 1, colspan: 2 },
+        { value: "100", column: 3, rowspan: 1, colspan: 1 }],
+      [{ value: "업무용", column: 1, rowspan: 1, colspan: 1 }, { value: "13인치", column: 2, rowspan: 1, colspan: 1 },
+        { value: "200", column: 3, rowspan: 1, colspan: 1 }],
+      [{ value: "2", column: 0, rowspan: 1, colspan: 1 }, { value: "모니터", column: 1, rowspan: 1, colspan: 1 },
+        { value: "27인치", column: 2, rowspan: 1, colspan: 1 }, { value: "300", column: 3, rowspan: 1, colspan: 1 }]
+    ]);
+  });
+  it("aligns the two purchase-item rows from R26BK01765444--000 by their merged cells", () => {
+    const html = `<main>${heading("공고일반")}<table><tr><th>공고명</th><td>용역</td></tr></table>
+      ${heading("구매대상물품")}<table id="item_grid"><thead>
+        <tr><th rowspan="2">No</th><th rowspan="2">분류</th><th colspan="3">수요기관</th><th colspan="3">세부품명</th><th>납품일수</th><th>납품장소</th></tr>
+        <tr><th>수량</th><th>단위</th><th>추정단가(원)</th><th>세부품명번호</th><th>물품식별번호</th><th>규격</th><th>납품기한</th><th>인도조건</th></tr>
+      </thead><tbody>
+        <tr><td rowspan="2">1</td><td rowspan="2">1</td><td colspan="3">한국영유아보육·교육진흥원</td><td colspan="3">사무용기기임대서비스</td><td>-</td><td>진흥원이 지정한 장소</td></tr>
+        <tr><td>1</td><td>식</td><td>648,000,000</td><td>7316900201</td><td></td><td>제안요청서에 따름</td><td>2029/10/31</td><td>납품장소도</td></tr>
+        <tr><td rowspan="2"></td><td rowspan="2"></td><td colspan="3"></td><td colspan="3"></td><td></td><td></td></tr>
+        <tr><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+      </tbody></table></main>`;
+    const table = extractDetailPage(html, url).sections?.[1].tables[0];
+    expect(table).not.toHaveProperty("columns");
+    expect(table).not.toHaveProperty("rows");
+    expect(table?.bodyRows).toHaveLength(2);
+    expect(table?.headerRows?.[0][2]).toEqual({ value: "수요기관", column: 2, rowspan: 1, colspan: 3 });
+    expect(table?.bodyRows?.[0][0]).toEqual({ value: "1", column: 0, rowspan: 2, colspan: 1 });
+    expect(table?.bodyRows?.[1][0]).toEqual({ value: "1", column: 2, rowspan: 1, colspan: 1 });
+    expect(table?.bodyRows?.[1][2]).toEqual({ value: "648,000,000", column: 4, rowspan: 1, colspan: 1 });
+    expect(table?.bodyRows?.[1][4]).toEqual({ value: null, column: 6, rowspan: 1, colspan: 1 });
+  });
+
+  it("keeps blank rows inside data and rows covered by a populated rowspan", () => {
+    const html = `<main>${heading("공고일반")}<table><tr><th>공고명</th><td>용역</td></tr></table>
+      ${heading("행 관계")}<table id="row_grid"><thead><tr><th>구분</th><th>값</th></tr></thead><tbody>
+        <tr><td>첫째</td><td>A</td></tr><tr><td></td><td></td></tr><tr><td>둘째</td><td>B</td></tr>
+        <tr><td rowspan="2">셋째</td><td>C</td></tr><tr><td></td></tr>
+        <tr><td></td><td></td></tr><tr><td></td><td></td></tr>
+      </tbody></table></main>`;
+    const rows = extractDetailPage(html, url).sections?.[1].tables[0].bodyRows;
+    expect(rows).toHaveLength(5);
+    expect(rows?.[1]).toEqual([
+      { value: null, column: 0, rowspan: 1, colspan: 1 },
+      { value: null, column: 1, rowspan: 1, colspan: 1 }
+    ]);
+    expect(rows?.[3][0]).toEqual({ value: "셋째", column: 0, rowspan: 2, colspan: 1 });
+    expect(rows?.[4]).toEqual([{ value: null, column: 1, rowspan: 1, colspan: 1 }]);
   });
 
   it("separates named subareas and excludes navigation links", () => {
@@ -133,7 +216,7 @@ describe("extractDetailPage", () => {
     ]);
     expect(result.sections?.[1].fields).toEqual([{ label: "안내값", value: "첫 값", visible: true }]);
     expect(result.sections?.[2].tables).toEqual([
-      { columns: ["구분", "금액"], rows: [["숨긴 값", "5,000원"]] }
+      simpleTable(["구분", "금액"], [["숨긴 값", "5,000원"]])
     ]);
     expect(result.sections?.[3]).toEqual({ title: "빈 구역", fields: [], tables: [], visible: true });
     expect(result.sections?.[4].fields).toEqual([{ label: "안내값", value: "둘째 값", visible: true }]);
@@ -255,8 +338,37 @@ describe("extractModalStructure", () => {
     expect(extractModalStructure(html)).toEqual({
       title: null,
       fields: [],
-      tables: [{ columns: ["순번", "가격"], rows: [["1", "1,000원"], ["2", "2,000원"]] }]
+      tables: [simpleTable(["순번", "가격"], [["1", "1,000원"], ["2", "2,000원"]])]
     });
+  });
+
+  it("omits trailing empty rows from modal WebSquare grids", () => {
+    const html = `<div role="dialog"><table id="price_grd_body_table">
+      <tr><th col_id="seq">순번</th><th col_id="price">가격</th></tr>
+      <tr><td col_id="seq">1</td><td col_id="price">1,000원</td></tr>
+      <tr><td col_id="seq"></td><td col_id="price"></td></tr>
+      <tr><td col_id="seq"></td><td col_id="price"></td></tr>
+    </table></div>`;
+    expect(extractModalStructure(html).tables).toEqual([simpleTable(["순번", "가격"], [["1", "1,000원"]])]);
+  });
+
+  it("retains a modal grid's actual multilevel header and merged body cells", () => {
+    const html = `<div role="dialog"><table id="item_grid"><thead>
+      <tr><th rowspan="2" col_id="seq">No</th><th colspan="2">물품</th></tr>
+      <tr><th col_id="name">품명</th><th col_id="spec">규격</th></tr></thead><tbody>
+      <tr><td rowspan="2" col_id="seq">1</td><td colspan="2" col_id="name">노트북</td></tr>
+      <tr><td col_id="name">업무용</td><td col_id="spec">13인치</td></tr>
+    </tbody></table></div>`;
+    expect(extractModalStructure(html).tables).toEqual([{
+      headerRows: [
+        [{ value: "No", column: 0, rowspan: 2, colspan: 1 }, { value: "물품", column: 1, rowspan: 1, colspan: 2 }],
+        [{ value: "품명", column: 1, rowspan: 1, colspan: 1 }, { value: "규격", column: 2, rowspan: 1, colspan: 1 }]
+      ],
+      bodyRows: [
+        [{ value: "1", column: 0, rowspan: 2, colspan: 1 }, { value: "노트북", column: 1, rowspan: 1, colspan: 2 }],
+        [{ value: "업무용", column: 1, rowspan: 1, colspan: 1 }, { value: "13인치", column: 2, rowspan: 1, colspan: 1 }]
+      ]
+    }]);
   });
 });
 

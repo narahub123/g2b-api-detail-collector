@@ -1,5 +1,60 @@
 import { expect, it } from "vitest";
-import { scrapeDetailPage } from "./detail-page";
+import { chromium } from "playwright-core";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { NoticeComparison } from "../../components/NoticeComparison";
+import { extractDetailPage, scrapeDetailPage, serviceDetailUrl } from "./detail-page";
+
+const tableShape = (element: Element) => {
+  const table = element as HTMLTableElement;
+  const rows = (items: HTMLCollectionOf<HTMLTableRowElement> | undefined) => Array.from(items || []).map((row) =>
+    Array.from(row.cells).map((cell) => ({ value: cell.textContent?.replace(/\s+/g, " ").trim() || "",
+      rowspan: cell.rowSpan, colspan: cell.colSpan })));
+  return { headerRows: rows(table.tHead?.rows), bodyRows: rows(table.tBodies[0]?.rows) };
+};
+
+it.skipIf(!process.env.LIVE_G2B)("aligns the purchase-item grid from the rendered R26BK01765444 notice", async () => {
+  const browser = await chromium.launch({ channel: "chrome", headless: true });
+  try {
+    const page = await browser.newPage();
+    const url = serviceDetailUrl("R26BK01765444", "000");
+    await page.goto(url, { waitUntil: "domcontentloaded" });
+    await page.locator("td[col_id='prchsDtlItemUprc']").filter({ hasText: "648,000,000" }).first().waitFor();
+    const originalShape = await page.locator("table[id$='gridView3_body_table']").evaluate(tableShape);
+    const lastPopulatedRow = originalShape.bodyRows.findLastIndex((row) => row.some((cell) => cell.value));
+    const expectedShape = { ...originalShape, bodyRows: originalShape.bodyRows.slice(0, lastPopulatedRow + 1) };
+    const detail = extractDetailPage(await page.content(), url);
+    const table = detail.sections?.find((section) => section.title === "구매대상물품")?.tables[0];
+    expect(table).not.toHaveProperty("columns");
+    expect(table).not.toHaveProperty("rows");
+    expect(table?.headerRows).toHaveLength(2);
+    expect(table?.bodyRows.length).toBeGreaterThanOrEqual(2);
+    expect(table?.headerRows?.[0][2]).toEqual({ value: "수요기관", column: 2, rowspan: 1, colspan: 3 });
+    expect(table?.headerRows?.[1][2]).toEqual({ value: "추정단가(원)", column: 4, rowspan: 1, colspan: 1 });
+    expect(table?.bodyRows?.[0][0]).toEqual({ value: "1", column: 0, rowspan: 2, colspan: 1 });
+    expect(table?.bodyRows?.[0][2]).toEqual({ value: "한국영유아보육·교육진흥원", column: 2, rowspan: 1, colspan: 3 });
+    expect(table?.bodyRows?.[1][2]).toEqual({ value: "648,000,000", column: 4, rowspan: 1, colspan: 1 });
+
+    const css = await readFile(join(process.cwd(), "src/app/source-comparison.css"), "utf8");
+    await page.setViewportSize({ width: 1800, height: 900 });
+    await page.setContent(`<style>${css}</style>${renderToStaticMarkup(createElement(NoticeComparison, { api: null, detail }))}`);
+    const rendered = page.getByRole("table", { name: "구매대상물품 표 1" });
+    expect(await rendered.evaluate(tableShape)).toEqual(expectedShape);
+    expect(await rendered.locator("thead tr").count()).toBe(2);
+    expect(await rendered.getByRole("columnheader", { name: "수요기관" }).getAttribute("colspan")).toBe("3");
+    expect(await rendered.locator("tbody tr").first().getByRole("cell", { name: "1" }).first().getAttribute("rowspan")).toBe("2");
+    const aligned = await rendered.evaluate((element) => {
+      const header = [...element.querySelectorAll("th")].find((cell) => cell.textContent === "추정단가(원)");
+      const value = [...element.querySelectorAll("td")].find((cell) => cell.textContent === "648,000,000");
+      return header && value ? Math.abs(header.getBoundingClientRect().left - value.getBoundingClientRect().left) : Infinity;
+    });
+    expect(aligned).toBeLessThan(2);
+  } finally {
+    await browser.close();
+  }
+}, 60_000);
 
 it.skipIf(!process.env.LIVE_G2B)("reads a public rendered service notice", async () => {
   const { detail } = await scrapeDetailPage("https://www.g2b.go.kr/link/PNPE027_01/single/?bidPbancNo=R26BK01741650&bidPbancOrd=000");

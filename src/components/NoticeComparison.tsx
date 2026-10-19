@@ -2,6 +2,7 @@ import type { ApiNotice } from "@/lib/g2b/types";
 import type { ScrapedDetail, StructuredField, StructuredTable } from "@/lib/g2b/detail-page";
 import { apiFieldDisplayName } from "@/lib/g2b/api-field-labels";
 import type { IndependentReference } from "@/lib/g2b/notices";
+import { tableForDisplay } from "@/lib/g2b/structured-table";
 
 function safeLink(value: string): string | null {
   try {
@@ -28,14 +29,15 @@ function FieldList({ fields, apiLabels = false }: { fields: StructuredField[]; a
 }
 
 function DataTable({ table, name }: { table: StructuredTable; name: string }) {
-  const rows = table.rows.filter((row) => row.some((value) => Boolean(value?.trim())));
-  if (!rows.length) return <p className="muted comparison-empty">표에 값이 없습니다.</p>;
-  const width = Math.max(table.columns.length, ...rows.map((row) => row.length));
-  const columnIndexes = Array.from({ length: width }, (_, index) => index);
+  const structured = tableForDisplay(table);
+  if (!structured.bodyRows.some((row) => row.some((cell) => Boolean(cell.value?.trim()))))
+    return <p className="muted comparison-empty">표에 값이 없습니다.</p>;
   return <div className="comparison-table-wrap"><table className="comparison-table" aria-label={name}>
-    <thead><tr>{columnIndexes.map((index) => <th key={index} scope="col">{table.columns[index] || `열 ${index + 1}`}</th>)}</tr></thead>
-    <tbody>{rows.map((row, rowIndex) => <tr key={rowIndex}>{columnIndexes.map((columnIndex) =>
-      <td key={columnIndex}>{row[columnIndex] || <span className="muted">값 없음</span>}</td>
+    <thead>{structured.headerRows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) =>
+      <th key={cellIndex} scope={cell.colspan > 1 ? "colgroup" : "col"} rowSpan={cell.rowspan} colSpan={cell.colspan}>{cell.value || ""}</th>
+    )}</tr>)}</thead>
+    <tbody>{structured.bodyRows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) =>
+      <td key={cellIndex} rowSpan={cell.rowspan} colSpan={cell.colspan}>{cell.value ?? ""}</td>
     )}</tr>)}</tbody>
   </table></div>;
 }

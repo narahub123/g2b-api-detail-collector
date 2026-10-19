@@ -40,11 +40,12 @@ describe("saved notices", () => {
       api: { bidNtceNo: "R26BK1", bidNtceOrd: "000", bidNtceNm: "용역", srvceDivNm: "연구" },
       detail: { sourceUrl: "https://www.g2b.go.kr/", sections: [{ title: "입찰자격", fields: [
         { label: "업종제한사항", value: "연구" }
-      ], tables: [] }], text: "전체 본문", attachments: [], links: [] }
+      ], tables: [{ columns: ["구분"], rows: [["이전 형식"]] }] }], text: "전체 본문", attachments: [], links: [] }
     }));
     const record = await getNoticeRecord("R26BK1--000", dir);
     expect(record?.api?.srvceDivNm).toBe("연구");
     expect(record?.detail?.text).toBe("전체 본문");
+    expect(record?.detail?.sections?.[0].tables[0]).toEqual({ columns: ["구분"], rows: [["이전 형식"]] });
     expect(record?.normalized.title.value).toBe("용역");
     expect(await getNoticeRecord("../bad", dir)).toBeNull();
   });

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { structureNoticeDetail } from "./structured-data";
-import type { ModalCapture, ScrapedDetail } from "./detail-page";
+import type { ModalCapture, ScrapedDetail, StructuredTable } from "./detail-page";
+
+const simpleTable = (columnName: string, value: string): StructuredTable => ({
+  headerRows: [[{ value: columnName, column: 0, rowspan: 1, colspan: 1 }]],
+  bodyRows: [[{ value, column: 0, rowspan: 1, colspan: 1 }]]
+});
 
 const capture = (title: string, fields: { label: string; value: string | null }[], sectionHint: string | null = null): ModalCapture => ({
   trigger: { index: 0, tag: "a", label: title, value: title, sectionHint, html: "<a>조회</a>" },
@@ -12,7 +17,7 @@ const detail = (captures: ModalCapture[]): ScrapedDetail => ({
   sections: [
     { title: "공고일반", fields: [{ label: "공고명", value: "용역" }], tables: [] },
     { title: "공지사항", fields: [{ label: "안내", value: "확인" }], tables: [], visible: true },
-    { title: "기초금액공개", fields: [], tables: [{ columns: ["구분"], rows: [["원화"]] }], visible: false }
+    { title: "기초금액공개", fields: [], tables: [simpleTable("구분", "원화")], visible: false }
   ],
   text: "전체 본문", attachments: [], links: [], modalCaptures: captures
 });
@@ -36,7 +41,7 @@ describe("structureNoticeDetail", () => {
     expect(result.detail.sections?.[1]).toEqual({ title: "공지사항", fields: [{ label: "안내", value: "확인" }], tables: [], visible: true,
       details: [{ title: "공지사항 상세", fields: [{ label: "게시물분류", value: "변경/취소 공고 사유" },
         { label: "입찰공고번호", value: "R26BK1" }, { label: "입찰공고차수", value: "000" }], tables: [] }] });
-    expect(result.detail.sections?.[2]).toEqual({ title: "기초금액공개", fields: [], tables: [{ columns: ["구분"], rows: [["원화"]] }], visible: false,
+    expect(result.detail.sections?.[2]).toEqual({ title: "기초금액공개", fields: [], tables: [simpleTable("구분", "원화")], visible: false,
       details: [{ title: "기초가격상세조회", fields: [{ label: "입찰공고번호", value: "R26BK1-000" }], tables: [] }] });
     expect(result.detail).not.toHaveProperty("baseAmountCaptures");
     expect(result.detail).not.toHaveProperty("changeNoticeCaptures");
@@ -97,12 +102,12 @@ describe("structureNoticeDetail", () => {
   it("keeps multiple details and their fields and tables in capture order", () => {
     const first = capture("기초가격상세조회", [{ label: "기초금액", value: "100" }], "기초금액공개");
     const second = capture("기초가격상세조회", [{ label: "기초금액", value: "200" }], "기초금액공개");
-    first.modal.tables = [{ columns: ["차수"], rows: [["1"]] }];
-    second.modal.tables = [{ columns: ["차수"], rows: [["2"]] }];
+    first.modal.tables = [simpleTable("차수", "1")];
+    second.modal.tables = [simpleTable("차수", "2")];
     const result = structureNoticeDetail("R26BK1--000", detail([first, second]));
     expect(result.detail.sections?.[2].details).toEqual([
-      { title: "기초가격상세조회", fields: [{ label: "기초금액", value: "100" }], tables: [{ columns: ["차수"], rows: [["1"]] }] },
-      { title: "기초가격상세조회", fields: [{ label: "기초금액", value: "200" }], tables: [{ columns: ["차수"], rows: [["2"]] }] }
+      { title: "기초가격상세조회", fields: [{ label: "기초금액", value: "100" }], tables: [simpleTable("차수", "1")] },
+      { title: "기초가격상세조회", fields: [{ label: "기초금액", value: "200" }], tables: [simpleTable("차수", "2")] }
     ]);
     expect(result.detail.modalCaptures).toEqual([]);
   });

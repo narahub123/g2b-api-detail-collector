@@ -1,11 +1,14 @@
 import * as cheerio from "cheerio";
 import { chromium } from "playwright-core";
 import { noticeKeyFromParts } from "./identity";
+import { extractDetailTable, extractModalGrid, tableHasValue } from "./structured-table";
+import type { StructuredTable } from "./structured-table";
+
+export type { StructuredTable, StructuredTableCell } from "./structured-table";
 
 export type Attachment = { name: string; url: string | null };
 export type AttachmentMetadata = { orgnlAtchFileNm: string; atchFileSqno: number; scrnIndtYn?: string };
 export type StructuredField = { label: string; value: string | null; visible?: boolean };
-export type StructuredTable = { columns: string[]; rows: (string | null)[][] };
 export type StructuredSection = { title: string; fields: StructuredField[]; tables: StructuredTable[];
   details?: { title: string; fields: StructuredField[]; tables: StructuredTable[] }[]; visible?: boolean };
 export type ModalCapture = {
@@ -107,16 +110,8 @@ export function extractDetailPage(html: string, pageUrl: string, fileMetadata: A
       if (title) { startSection(title, isVisible(node)); return; }
     }
     if (element.is("table")) {
-      const rows = element.find("tr").filter((_, row) => $(row).closest("table")[0] === node).toArray();
-      const first = rows.length ? $(rows[0]).children("th,td") : $([]);
-      const header = first.toArray().map((cell) => clean($(cell).text()));
-      const isGrid = /grd|grid/i.test(element.attr("id") || "") || element.find("[col_id]").length > 0 ||
-        (header.length > 1 && rows.length > 1 && first.filter("th").length === first.length);
-      if (isGrid) {
-        const bodyRows = rows.slice(1).map((row) => $(row).children("td,th").toArray().map((cell) => readCell($(cell))));
-        const nonemptyRows = bodyRows.filter((row) => row.some((value) => value !== null));
-        if (header.length && nonemptyRows.length) target().tables.push({ columns: header, rows: nonemptyRows });
-      }
+      const table = extractDetailTable($, element, readCell);
+      if (table) target().tables.push(table);
     }
     if (element.is("tr") && !element.closest("table[id*='grd'],table[id*='grid']").length &&
         !element.closest("table").find("[col_id]").length) {
@@ -188,7 +183,7 @@ export function extractDetailPage(html: string, pageUrl: string, fileMetadata: A
     fieldCount: sections.reduce((n, item) => n + item.fields.length, 0),
     nonemptyFieldCount: sections.reduce((n, item) => n + item.fields.filter((field) => field.value !== null).length, 0),
     tableCount: sections.reduce((n, item) => n + item.tables.length, 0),
-    tableRowCount: sections.reduce((n, item) => n + item.tables.reduce((count, table) => count + table.rows.length, 0), 0),
+    tableRowCount: sections.reduce((n, item) => n + item.tables.reduce((count, table) => count + table.bodyRows.length, 0), 0),
     attachmentCount: attachments.length,
     linkCount: links.length
   };
@@ -254,21 +249,8 @@ export function extractModalStructure(html: string): { title: string | null; fie
   });
   // WebSquare grids: only actual data cells (col_id), not row-status/checkbox controls.
   root.find("table").each((_, element) => {
-    const table = $(element);
-    const dataRows = table.find("tr").filter((_, tr) => $(tr).children("td[col_id]").length > 0);
-    if (!dataRows.length) return;
-    const firstCells = dataRows.first().children("td[col_id]");
-    const ids = firstCells.toArray().map(cell => $(cell).attr("col_id") || "").filter(Boolean);
-    if (!ids.length) return;
-    const columns = ids.map(id => {
-      const header = table.find("th[col_id]").filter((_, th) => $(th).attr("col_id") === id).first();
-      return clean(header.text()) || id;
-    });
-    const rows = dataRows.toArray().map(tr => ids.map(id => {
-      const cell = $(tr).children("td[col_id]").filter((_, td) => $(td).attr("col_id") === id).first();
-      return cell.length ? readValue(cell) : null;
-    }));
-    if (rows.length) tables.push({ columns, rows });
+    const table = extractModalGrid($, $(element), readValue);
+    if (table) tables.push(table);
   });
   return { title, fields, tables };
 }
@@ -439,7 +421,7 @@ export async function collectModalContents(page: import("playwright-core").Page)
         if (fresh) {
           const structured = extractModalStructure(fresh.html);
           const hasData = structured.fields.some((field) => field.value) ||
-            structured.tables.some((table) => table.rows.some((row) => row.some(Boolean))) ||
+            structured.tables.some(tableHasValue) ||
             fresh.text.replace(fresh.title || "", "").trim().length > 20;
           if (hasData) {
             captures.push({ trigger: { index: candidate.index, tag: candidate.tag, label: candidate.label,
