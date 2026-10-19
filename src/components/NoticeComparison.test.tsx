@@ -21,6 +21,15 @@ const detail: ScrapedDetail = {
 };
 
 describe("NoticeComparison", () => {
+  it("shows resolved independent details and an unresolved reference", () => {
+    render(<NoticeComparison api={null} detail={detail} orderPlans={[{ number: "R26DD1", detail: {
+      schemaVersion: 1, number: "R26DD1", title: "발주계획상세조회", fields: [{ label: "발주계획번호", value: "R26DD1" }],
+      tables: [], text: "발주계획 본문", capturedAt: "2026-10-19T00:00:00Z", sourceNoticeKey: "R26BK1--000"
+    } }]} preSpecifications={[{ number: "R26BD1", detail: null }]} />);
+    expect(screen.getByText("발주계획 · R26DD1")).toBeInTheDocument();
+    expect(screen.getByText("사전규격 · R26BD1")).toBeInTheDocument();
+    expect(screen.getByText("참조한 상세 정보가 없습니다.")).toBeInTheDocument();
+  });
   afterEach(cleanup);
   it("shows every API value alongside detail fields, section tables, and separate clicked details", () => {
     render(<NoticeComparison api={{ bidNtceNo: "R26BK1", cntrctPrd: "" }} detail={detail} />);
@@ -36,7 +45,7 @@ describe("NoticeComparison", () => {
 
     const scraped = within(screen.getByRole("region", { name: "상세 정보 추출" }));
     expect(scraped.getByText("조사 용역")).toBeInTheDocument();
-    expect(scraped.getByText("상세 원문 샘플")).toBeInTheDocument();
+    expect(scraped.queryByRole("heading", { name: "상세 페이지 본문" })).not.toBeInTheDocument();
     expect(scraped.getByRole("table", { name: "가격 표 1" })).toHaveTextContent("3,000원");
     expect(scraped.getByRole("table", { name: "가격 표 1" }).querySelectorAll("tbody tr")).toHaveLength(1);
 

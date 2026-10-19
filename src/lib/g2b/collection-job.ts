@@ -9,6 +9,7 @@ import { readJson, writeJsonAtomic } from "./json-store";
 import { normalizeNotice, type NormalizedNotice } from "./normalize";
 import type { StoredNotice } from "./notices";
 import type { ApiNotice, PostedDateRange } from "./types";
+import { saveIndependentDetails, structureNoticeDetail } from "./structured-data";
 
 export type CollectionJob = {
   id: string;
@@ -93,14 +94,22 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies): 
   };
   const processRecord = async (key: string, api: ApiNotice | null = null): Promise<string[]> => {
     const record = await ensureRecord(key, api);
-    if (record.detail || scraped.has(key)) return [];
+    if (scraped.has(key)) return [];
+    // A selected API notice may replace legacy detail; related discoveries keep their existing detail.
+    if (record.detail && (!api || (record.orderPlanNumbers !== undefined &&
+        record.preSpecificationNumbers !== undefined && !record.detail.text))) return [];
     scraped.add(key);
     job.phase = "detail";
     await saveJob(job, dir);
     const identity = parts(key);
     try {
       const result = await scrape(serviceDetailUrl(identity.number, identity.order));
-      record.detail = result.detail;
+      const structured = structureNoticeDetail(key, result.detail);
+      await saveIndependentDetails(dir, structured);
+      record.detail = structured.detail;
+      record.orderPlanNumbers = structured.orderPlanNumbers;
+      record.preSpecificationNumbers = structured.preSpecificationNumbers;
+      job.errors.push(...structured.warnings);
       record.detailError = null;
       job.detailSucceeded++;
       await saveRecord(key, record);

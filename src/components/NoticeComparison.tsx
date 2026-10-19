@@ -1,6 +1,7 @@
 import type { ApiNotice } from "@/lib/g2b/types";
 import type { ScrapedDetail, StructuredField, StructuredTable } from "@/lib/g2b/detail-page";
 import { apiFieldDisplayName } from "@/lib/g2b/api-field-labels";
+import type { IndependentReference } from "@/lib/g2b/notices";
 
 function safeLink(value: string): string | null {
   try {
@@ -46,10 +47,13 @@ function TableList({ tables, group }: { tables: StructuredTable[]; group: string
   </div>)}</div>;
 }
 
-export function NoticeComparison({ api, detail }: { api: ApiNotice | null; detail: ScrapedDetail | null }) {
+export function NoticeComparison({ api, detail, orderPlans = [], preSpecifications = [] }: { api: ApiNotice | null; detail: ScrapedDetail | null;
+  orderPlans?: IndependentReference[]; preSpecifications?: IndependentReference[] }) {
   const apiFields = Object.entries(api || {}).map(([label, value]) => ({ label, value: displayValue(value) }));
   const detailFields = Object.entries(detail?.fields || {}).map(([label, value]) => ({ label, value }));
-  const captures = detail?.modalCaptures || [];
+  const captures = [...(detail?.modalCaptures || []), ...(detail?.baseAmountCaptures || []), ...(detail?.changeNoticeCaptures || [])];
+  const independent = [...orderPlans.map((item) => ({ ...item, kind: "발주계획" })),
+    ...preSpecifications.map((item) => ({ ...item, kind: "사전규격" }))];
 
   return <>
     <nav className="comparison-jumps" aria-label="비교 항목 바로가기">
@@ -77,9 +81,6 @@ export function NoticeComparison({ api, detail }: { api: ApiNotice | null; detai
             {section.text && <div className="comparison-text-block"><h4>섹션 본문</h4><p>{section.text}</p></div>}
           </details>) : <p className="muted comparison-empty">섹션별 수집 자료가 없습니다.</p>}
         </div>
-        <div className="comparison-group"><h3>상세 페이지 본문</h3>
-          <p className="comparison-body">{detail.text || <span className="muted">수집된 본문이 없습니다.</span>}</p>
-        </div>
         <div className="comparison-group"><h3>첨부파일 · {detail.attachments.length}개</h3>
           {detail.attachments.length ? <ul className="comparison-links">{detail.attachments.map((file, index) => {
             const href = file.url && safeLink(file.url);
@@ -104,6 +105,16 @@ export function NoticeComparison({ api, detail }: { api: ApiNotice | null; detai
           </details>) : <p className="muted comparison-empty">수집된 클릭 상세 정보가 없습니다.</p>}
           {detail.modalDiscovery?.failures.length ? <p className="comparison-failures">수집 실패 {detail.modalDiscovery.failures.length}건: {detail.modalDiscovery.failures.join(" · ")}</p> : null}
         </section>
+        {independent.length > 0 && <section className="comparison-group" aria-label="독립 상세 정보">
+          <h3>참조 상세 정보 · {independent.length}개</h3>
+          {independent.map((item) => <details className="comparison-card" key={`${item.kind}-${item.number}`} open>
+            <summary>{item.kind} · {item.number}</summary>
+            {item.detail ? <><FieldList fields={item.detail.fields} />
+              <TableList tables={item.detail.tables} group={`${item.kind} ${item.number}`} />
+              {item.detail.text && <div className="comparison-text-block"><h4>팝업 본문</h4><p>{item.detail.text}</p></div>}</>
+              : <p className="muted comparison-empty">참조한 상세 정보가 없습니다.</p>}
+          </details>)}
+        </section>}
         <details className="raw-json"><summary>상세 수집 JSON 원문 보기</summary><pre>{JSON.stringify(detail, null, 2)}</pre></details>
       </> : <p className="muted comparison-empty">상세 페이지 수집 자료가 없습니다.</p>}
     </section>

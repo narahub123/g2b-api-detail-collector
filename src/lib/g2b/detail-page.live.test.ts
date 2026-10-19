@@ -16,6 +16,13 @@ it.skipIf(!process.env.LIVE_G2B)("captures a public notice's basic-price dialog"
   expect(capture?.modal.title).toBe("기초가격상세조회");
   expect(capture?.modal.fields).toContainEqual({ label: "입찰공고번호", value: "R26BK01764337-000" });
   expect(detail.modalDiscovery?.failures).toEqual([]);
+  const titles = detail.sections?.map((section) => section.title) || [];
+  expect(titles.indexOf("가격")).toBeLessThan(titles.indexOf("기초금액공개"));
+  expect(titles.indexOf("기초금액공개")).toBeLessThan(titles.indexOf("기관담당자정보"));
+  expect(detail.links.some((link) => link.label === "본문영역 바로가기")).toBe(false);
+  for (const section of detail.sections || []) {
+    expect(new Set(section.fields.map((field) => `${field.label}\u0000${field.value}`)).size).toBe(section.fields.length);
+  }
 }, 120_000);
 
 it.skipIf(!process.env.LIVE_G2B)("captures the notice dialog and related orders of R26BK01766517", async () => {

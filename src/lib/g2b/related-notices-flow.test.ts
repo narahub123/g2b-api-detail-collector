@@ -129,7 +129,8 @@ describe("related notices", () => {
     expect(called).toEqual(["002", "001"]);
     const related = await getNoticeRecord("R26BK1--001", dir);
     expect(related?.api?.bidNtceNm).toBe("이전 API");
-    expect(related?.detail?.text).toBe("001 본문");
+    expect(related?.detail?.fields["공고명"]).toBe("001 차수 공고");
+    expect(related?.detail).not.toHaveProperty("text");
     expect(related?.relatedNoticeKeys).toEqual(["R26BK1--002"]);
   });
 

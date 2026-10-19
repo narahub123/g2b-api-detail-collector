@@ -5,9 +5,13 @@ import { noticeKey, noticeKeyFromParts } from "./identity";
 import { normalizeNotice, type NormalizedNotice } from "./normalize";
 import type { ScrapedDetail } from "./detail-page";
 import type { ApiNotice } from "./types";
+import type { IndependentDetail } from "./structured-data";
 
-export type StoredNotice = { key?: string; api: ApiNotice | null; detail: ScrapedDetail | null; relatedNoticeKeys?: string[]; detailError?: string | null; normalized?: NormalizedNotice };
-export type NoticeRecord = { api: ApiNotice | null; detail: ScrapedDetail | null; relatedNoticeKeys: string[]; detailError: string | null; normalized: NormalizedNotice };
+export type StoredNotice = { key?: string; api: ApiNotice | null; detail: ScrapedDetail | null; relatedNoticeKeys?: string[]; detailError?: string | null; normalized?: NormalizedNotice;
+  orderPlanNumbers?: string[]; preSpecificationNumbers?: string[] };
+export type IndependentReference = { number: string; detail: IndependentDetail | null };
+export type NoticeRecord = { api: ApiNotice | null; detail: ScrapedDetail | null; relatedNoticeKeys: string[]; detailError: string | null; normalized: NormalizedNotice;
+  orderPlans: IndependentReference[]; preSpecifications: IndependentReference[] };
 const defaultDataDir = () => join(process.cwd(), "data");
 
 export async function listNotices(dataDir = defaultDataDir()): Promise<NormalizedNotice[]> {
@@ -36,7 +40,16 @@ export async function getNoticeRecord(key: string, dataDir = defaultDataDir()): 
     if (record.api ? noticeKey(record.api) !== key : noticeKeyFromParts(number, order) !== key) return null;
     const relatedNoticeKeys = [...new Set(record.relatedNoticeKeys || [])]
       .filter((related) => related !== key && /^[A-Za-z0-9_.%~-]+--[A-Za-z0-9_.%~-]+$/.test(related));
+    const resolve = async (folder: string, numbers: string[]): Promise<IndependentReference[]> =>
+      Promise.all([...new Set(numbers)].filter((number) => /^[A-Za-z0-9_-]+$/.test(number)).map(async (number) => {
+        try {
+          const detail = await readJson<IndependentDetail>(join(dataDir, folder, `${number}.json`));
+          return { number, detail: detail.number === number ? detail : null };
+        } catch { return { number, detail: null }; }
+      }));
     return { api: record.api, detail: record.detail, relatedNoticeKeys, detailError: record.detailError || null,
-      normalized: normalizeNotice(record.api, record.detail, { number, order }) };
+      normalized: normalizeNotice(record.api, record.detail, { number, order }),
+      orderPlans: await resolve("order-plans", record.orderPlanNumbers || []),
+      preSpecifications: await resolve("pre-specifications", record.preSpecificationNumbers || []) };
   } catch { return null; }
 }

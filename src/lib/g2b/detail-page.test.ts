@@ -4,6 +4,58 @@ import { extractDetailPage, extractModalStructure, extractRelatedNoticeKeys } fr
 const url = "https://www.g2b.go.kr/link/PNPE027_01/single/?bidPbancNo=R26BK1&bidPbancOrd=000";
 
 describe("extractDetailPage", () => {
+  it("keeps heading order and reads each WebSquare field only once", () => {
+    const html = `<main>
+      <h3>공고일반</h3><table><tr><th>공고명</th><td data-title="공고명"><input value="실태조사 용역"></td></tr></table>
+      <h3>가격</h3><table><tr><th>예가방법</th><td data-title="예가방법"><input value="복수예가"></td></tr></table>
+      <h3>기초금액공개</h3><table id="price_grd"><tr><th>금액</th></tr><tr><td></td></tr></table>
+      <h3>기관담당자정보</h3><table><tr><th>공고담당자</th><td data-title="공고담당자"><input value="홍길동"></td></tr></table>
+      <h3>가격</h3><table><tr><th>추정가격</th><td data-title="추정가격"><input value="1,000원"></td></tr></table>
+    </main>`;
+    const result = extractDetailPage(html, url);
+    expect(result.sections?.map((section) => section.title)).toEqual([
+      "공고일반", "가격", "기초금액공개", "기관담당자정보", "가격"
+    ]);
+    expect(result.sections?.[1].fields).toEqual([{ label: "예가방법", value: "복수예가" }]);
+    expect(result.sections?.[2].tables).toEqual([]);
+    expect(result.fields["공고명"]).toBe("실태조사 용역");
+  });
+
+  it("separates named subareas and excludes navigation links", () => {
+    const html = `<main><h3>공고일반</h3><table><tr><th>공고명</th><td>용역</td></tr></table>
+      <h4>입찰자격</h4><h5>투찰제한 - 일반</h5><table><tr><th>지역제한</th><td>서울</td></tr></table>
+      <h4>입찰진행정보</h4><h5>제안발표순서</h5><p>발표 순서 안내</p>
+      <h5>제안요청정보</h5><p>요청 정보 안내</p><h5>협상에 의한 계약</h5><p>협상 안내</p>
+      <h4>기관담당자정보</h4><h5>수요기관담당자정보 목록</h5>
+      <h4>연관정보</h4><h5>파일첨부</h5>
+      <a href="#main">본문영역 바로가기</a><a href="https://www.g2b.go.kr/help">도움말</a></main>`;
+    const result = extractDetailPage(html, url);
+    expect(result.sections?.map((section) => section.title)).toEqual([
+      "공고일반", "입찰자격", "투찰제한 - 일반", "입찰진행정보", "제안발표순서",
+      "제안요청정보", "협상에 의한 계약", "기관담당자정보", "수요기관담당자정보 목록", "연관정보", "파일첨부"
+    ]);
+    expect(result.sections?.[2].fields).toEqual([{ label: "지역제한", value: "서울" }]);
+    expect(result.links.map((link) => link.label)).toEqual(["도움말"]);
+  });
+  it("recognizes actual WebSquare subheadings and prefers a filled field over an empty duplicate", () => {
+    const html = `<main><h3>공고일반</h3><table>
+      <tr><th>공고명</th><td data-title="공고명">용역</td></tr>
+      <tr><td data-title="공고담당자"></td></tr>
+      <tr><td data-title="공고담당자">홍길동</td></tr></table>
+      <div class="w2textbox df_tit fl">투찰제한-일반</div><p>제한 안내</p>
+      <div class="w2textbox df_tit fl">제안요청정보</div><p>제안 안내</p>
+      <h4>협상에의한 계약</h4><p>협상 안내</p>
+      <div class="w2textbox df_tit fl">수요기관담당자정보 목록</div>
+      <div class="w2textbox df_tit fl">파일첨부</div></main>`;
+    const result = extractDetailPage(html, url);
+    expect(result.sections?.map((section) => section.title)).toEqual([
+      "공고일반", "투찰제한-일반", "제안요청정보", "협상에의한 계약",
+      "수요기관담당자정보 목록", "파일첨부"
+    ]);
+    expect(result.sections?.[0].fields).toEqual([
+      { label: "공고명", value: "용역" }, { label: "공고담당자", value: "홍길동" }
+    ]);
+  });
   it("collects rendered table fields and attachment metadata", () => {
     const html = `<main><h2>입찰공고상세[일반용역]</h2><h3>공고일반</h3>
       <table><tr><th>공고명</th><td><span>실태조사 용역</span></td></tr>

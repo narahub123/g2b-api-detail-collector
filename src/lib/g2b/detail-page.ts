@@ -9,7 +9,7 @@ export type StructuredTable = { columns: string[]; rows: (string | null)[][] };
 export type StructuredSection = { title: string; fields: StructuredField[]; tables: StructuredTable[]; text: string };
 export type ModalCapture = {
   trigger: { index: number; tag: string; label: string; value: string; sectionHint: string | null; html: string; parentModalTitle?: string | null };
-  modal: { text: string; html: string; title: string | null; fields: StructuredField[]; tables: StructuredTable[] };
+  modal: { text: string; html?: string; title: string | null; fields: StructuredField[]; tables: StructuredTable[] };
   settling?: { status: "settled" | "timeout"; elapsedMs: number };
 };
 export type ScrapedDetail = {
@@ -20,6 +20,8 @@ export type ScrapedDetail = {
   sections?: StructuredSection[];
   // Raw, unclassified contents of dialogs opened by read-only controls.
   modalCaptures?: ModalCapture[];
+  baseAmountCaptures?: ModalCapture[];
+  changeNoticeCaptures?: ModalCapture[];
   modalDiscovery?: { candidates: number; attempted: number; captured: number; skipped: number; failures: string[] };
   summary?: { sectionCount: number; fieldCount: number; nonemptyFieldCount: number; tableCount: number; tableRowCount: number; attachmentCount: number; linkCount: number };
   attachments: Attachment[];
@@ -27,7 +29,7 @@ export type ScrapedDetail = {
   provenance?: { sections: string; attachmentsAndLinks: string };
   // Backward-compatible views used by the existing normalizer and UI.
   fields: Record<string, string>;
-  text: string;
+  text?: string;
 };
 
 export function serviceDetailUrl(number: string, order: string): string {
@@ -60,59 +62,72 @@ export function extractDetailPage(html: string, pageUrl: string, fileMetadata: A
   $("script, style, option, [aria-hidden='true'], [style*='display: none']").remove();
   const sections: StructuredSection[] = [];
   const fields: Record<string, string> = {};
-  const sectionByTitle = new Map<string, StructuredSection>();
-  const section = (title: string) => {
-    let result = sectionByTitle.get(title);
-    if (!result) { result = { title, fields: [], tables: [], text: "" }; sectionByTitle.set(title, result); sections.push(result); }
-    return result;
+  const sectionTitles = new Set([...SECTION_TITLES, "투찰제한 - 일반", "투찰제한-일반", "제안발표순서", "제안요청정보",
+    "협상에 의한 계약", "협상에의한 계약", "수요기관담당자정보 목록"]);
+  let active: StructuredSection | null = null;
+  const textParts = new Map<StructuredSection, string[]>();
+  const startSection = (title: string) => {
+    active = { title, fields: [], tables: [], text: "" };
+    sections.push(active);
+    textParts.set(active, []);
+    return active;
   };
-  // Use the nearest preceding named heading in DOM document order.
-  const all = $("body *").toArray();
-  const titleAt = new WeakMap<object, string>();
-  let activeTitle = "공고일반";
-  for (const element of all) {
-    if ($(element).is("h2,h3,h4,h5,legend,.title,.tit")) {
-      const exact = SECTION_TITLES.find((title) => clean($(element).text()) === title);
-      if (exact) activeTitle = exact;
-    }
-    titleAt.set(element, activeTitle);
-  }
-  const target = (element: object) => section(titleAt.get(element) || "공고일반");
-  $("tr").each((_, row) => {
-    const ths = $(row).children("th");
-    if (!ths.length) return;
-    ths.each((_, th) => {
-      const label = clean($(th).text());
-      const td = $(th).nextAll("td").first();
-      if (!label || !td.length) return;
-      const input = td.find("input,textarea,select").first();
-      const value = nonempty(input.length ? String(input.val() ?? td.text()) : td.text());
-      const bucket = target(row);
-      bucket.fields.push({ label, value });
-      if (value !== null && !(label in fields)) fields[label] = value;
-    });
-  });
-  // The G2B UI also uses data-title cells instead of th/td pairs.
-  $("td[data-title]").each((_, cell) => {
-    const label = clean($(cell).attr("data-title") || "");
-    if (!label || label === "") return;
-    const value = nonempty($(cell).text());
-    const bucket = target(cell);
-    if (!bucket.fields.some((item) => item.label === label && item.value === value)) bucket.fields.push({ label, value });
+  const target = () => active || startSection("공고일반");
+  const readCell = (cell: any): string | null => {
+    const input = cell.find("input:not([type='hidden']),textarea,select").first();
+    return nonempty(input.length ? String(input.val() ?? cell.text()) : cell.text());
+  };
+  const appendField = (label: string, value: string | null) => {
+    if (!label) return;
+    const bucket = target();
+    const sameLabel = bucket.fields.filter((field) => field.label === label);
+    if (value !== null) {
+      const empty = sameLabel.find((field) => field.value === null);
+      if (empty) empty.value = value;
+      else if (!sameLabel.some((field) => field.value === value)) bucket.fields.push({ label, value });
+    } else if (!sameLabel.length) bucket.fields.push({ label, value });
     if (value !== null && !(label in fields)) fields[label] = value;
-  });
-  $("table").each((_, table) => {
-    const rows = $(table).find("tr").toArray();
-    if (!rows.length) return;
-    const first = $(rows[0]).children("th,td");
-    const header = first.toArray().map((cell) => clean($(cell).text()));
-    const isGrid = $(table).attr("id")?.includes("grd") || $(table).find("[col_id]").length > 0 ||
-      (header.length > 1 && rows.length > 1 && first.filter("th").length === first.length);
-    if (!isGrid) return;
-    const bodyRows = rows.slice(1).map((row) => $(row).children("td,th").toArray().map((cell) => nonempty($(cell).text())));
-    const columns = header.length ? header : [];
-    if (columns.length && bodyRows.some((row) => row.length)) target(table).tables.push({ columns, rows: bodyRows });
-  });
+  };
+  // Traverse once in document order so fields, grids and repeated headings keep their source position.
+  const walk = (node: any): void => {
+    if (node.type === "text") {
+      if (active && clean(node.data || "")) textParts.get(active)?.push(clean(node.data));
+      return;
+    }
+    if (node.type !== "tag") return;
+    const element = $(node);
+    if (element.is("h2,h3,h4,h5,legend,.title,.tit,.df_tit")) {
+      const title = clean(element.text());
+      if (sectionTitles.has(title)) { startSection(title); return; }
+    }
+    if (element.is("table")) {
+      const rows = element.find("tr").filter((_, row) => $(row).closest("table")[0] === node).toArray();
+      const first = rows.length ? $(rows[0]).children("th,td") : $([]);
+      const header = first.toArray().map((cell) => clean($(cell).text()));
+      const isGrid = /grd|grid/i.test(element.attr("id") || "") || element.find("[col_id]").length > 0 ||
+        (header.length > 1 && rows.length > 1 && first.filter("th").length === first.length);
+      if (isGrid) {
+        const bodyRows = rows.slice(1).map((row) => $(row).children("td,th").toArray().map((cell) => readCell($(cell))));
+        const nonemptyRows = bodyRows.filter((row) => row.some((value) => value !== null));
+        if (header.length && nonemptyRows.length) target().tables.push({ columns: header, rows: nonemptyRows });
+      }
+    }
+    if (element.is("tr") && !element.closest("table[id*='grd'],table[id*='grid']").length &&
+        !element.closest("table").find("[col_id]").length) {
+      const cells = element.children("th,td").toArray();
+      for (const cell of cells) {
+        const td = $(cell);
+        if (td.is("td[data-title]") && !td.is("[col_id]")) appendField(clean(td.attr("data-title") || ""), readCell(td));
+        if (td.is("th")) {
+          const next = td.next();
+          if (next.is("td") && !next.attr("data-title")) appendField(clean(td.text()), readCell(next));
+        }
+      }
+    }
+    for (const child of node.children || []) walk(child);
+  };
+  walk($("body")[0]);
+  for (const bucket of sections) bucket.text = clean((textParts.get(bucket) || []).join(" "));
   const number = url.searchParams.get("bidPbancNo") || "";
   const order = url.searchParams.get("bidPbancOrd") || "";
   const attachments: Attachment[] = [];
@@ -146,23 +161,11 @@ export function extractDetailPage(html: string, pageUrl: string, fileMetadata: A
     try {
       const href = new URL($(anchor).attr("href") || "", pageUrl);
       const label = clean($(anchor).text());
-      if (["http:", "https:"].includes(href.protocol) && label) links.push({ label, url: href.toString() });
+      if (["http:", "https:"].includes(href.protocol) && label &&
+        !($(anchor).attr("href") || "").startsWith("#") && label !== "본문영역 바로가기") links.push({ label, url: href.toString() });
     } catch { /* ignore */ }
   });
   const fullText = clean($("main").text() || $("body").text());
-  // Retain the section text separately; it must not be truncated.
-  const headings = $("h2,h3,h4,h5,legend,.title,.tit").toArray().filter((node) => SECTION_TITLES.includes(clean($(node).text())));
-  for (const heading of headings) {
-    const title = clean($(heading).text());
-    const bucket = section(title);
-    const fragments: string[] = [];
-    let next = $(heading).next();
-    while (next.length && !SECTION_TITLES.includes(clean(next.text()))) {
-      fragments.push(clean(next.text()));
-      next = next.next();
-    }
-    bucket.text = clean(fragments.join(" "));
-  }
   if (!fields["공고명"]) throw new Error("나라장터 상세 데이터를 읽지 못했습니다.");
   const summary = {
     sectionCount: sections.length,
@@ -410,7 +413,7 @@ export async function collectModalContents(page: import("playwright-core").Page)
           if (hasData) {
             captures.push({ trigger: { index: candidate.index, tag: candidate.tag, label: candidate.label,
               value: candidate.value, sectionHint: candidate.sectionHint, html: candidate.html, parentModalTitle },
-              modal: { text: fresh.text, html: fresh.html, ...structured },
+              modal: { text: fresh.text, ...structured },
               settling: { status: settling.status, elapsedMs: settling.elapsedMs } });
             if (fresh.id) await explore(fresh.id, fresh.title, depth + 1);
           }

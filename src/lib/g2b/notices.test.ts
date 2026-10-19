@@ -64,4 +64,21 @@ describe("saved notices", () => {
     }));
     expect(await getNoticeRecord("R26BK1--002", dir)).toBeNull();
   });
+
+  it("resolves independent references and reports a missing referenced file", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "g2b-notices-")); dirs.push(dir);
+    await mkdir(join(dir, "notices"));
+    await mkdir(join(dir, "order-plans"));
+    await writeFile(join(dir, "notices", "R26BK1--000.json"), JSON.stringify({
+      key: "R26BK1--000", api: { bidNtceNo: "R26BK1", bidNtceOrd: "000" }, detail: null,
+      orderPlanNumbers: ["R26DD1"], preSpecificationNumbers: ["R26BD1"]
+    }));
+    await writeFile(join(dir, "order-plans", "R26DD1.json"), JSON.stringify({
+      schemaVersion: 1, number: "R26DD1", title: "발주계획상세조회", fields: [], tables: [], text: "계획",
+      capturedAt: "2026-10-19T00:00:00Z", sourceNoticeKey: "R26BK1--000"
+    }));
+    const record = await getNoticeRecord("R26BK1--000", dir);
+    expect(record?.orderPlans[0].detail?.text).toBe("계획");
+    expect(record?.preSpecifications).toEqual([{ number: "R26BD1", detail: null }]);
+  });
 });
