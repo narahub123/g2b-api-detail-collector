@@ -31,6 +31,43 @@ describe("NoticeComparison", () => {
     expect(screen.getByText("참조한 상세 정보가 없습니다.")).toBeInTheDocument();
   });
   afterEach(cleanup);
+  it("shows every section detail beneath its section fields and tables", () => {
+    const withDetails: ScrapedDetail = { ...detail, sections: [{ ...detail.sections![0], details: [
+      { title: "기초가격상세조회", fields: [{ label: "기초금액", value: "3,100원" }],
+        tables: [{ columns: ["차수", "금액"], rows: [["1", "3,100원"]] }] },
+      { title: "기초가격상세조회", fields: [{ label: "기초금액", value: "3,200원" }], tables: [] }
+    ] }] };
+    render(<NoticeComparison api={null} detail={withDetails} />);
+    const section = within(screen.getByRole("region", { name: "상세 정보 추출" }))
+      .getByText("가격", { selector: "summary" }).closest("details")!;
+    expect(within(section).getByText("조사 용역")).toBeInTheDocument();
+    expect(within(section).getByRole("table", { name: "가격 표 1" })).toHaveTextContent("3,000원");
+    expect(within(section).getAllByRole("heading", { name: "기초가격상세조회" })).toHaveLength(2);
+    expect(within(section).getAllByText("3,100원")).toHaveLength(2);
+    expect(within(section).getByText("3,200원")).toBeInTheDocument();
+    expect(within(section).getByRole("table", { name: "가격 기초가격상세조회 1 표 1" })).toHaveTextContent("3,100원");
+    expect(screen.getByRole("region", { name: "클릭 상세 정보" })).toHaveTextContent("발주계획번호 · 발주계획상세조회");
+  });
+  it("keeps a multiline notice body inside its styled detail block", () => {
+    const withNotice: ScrapedDetail = { ...detail, sections: [{ title: "공지사항", fields: [], tables: [], details: [
+      { title: "공지사항 상세", fields: [{ label: "내용", value: "변경공고가 게시되었습니다.\n\n공고명 변경" }], tables: [] }
+    ] }] };
+    render(<NoticeComparison api={null} detail={withNotice} />);
+    const section = screen.getByText("공지사항", { selector: "summary" }).closest("details")!;
+    const block = within(section).getByRole("heading", { name: "공지사항 상세" }).closest(".comparison-detail-block")!;
+    expect(block).toHaveTextContent("변경공고가 게시되었습니다. 공고명 변경");
+    expect(block.querySelector(".raw-field--multiline dd")?.textContent).toBe("변경공고가 게시되었습니다.\n\n공고명 변경");
+    expect(within(section).queryByText("수집된 필드가 없습니다.")).not.toBeInTheDocument();
+  });
+  it("keeps the section display unchanged when details are empty", () => {
+    const withEmptyDetails: ScrapedDetail = { ...detail, sections: [{ ...detail.sections![0], details: [] }] };
+    render(<NoticeComparison api={null} detail={withEmptyDetails} />);
+    const section = within(screen.getByRole("region", { name: "상세 정보 추출" }))
+      .getByText("가격", { selector: "summary" }).closest("details")!;
+    expect(within(section).getByText("조사 용역")).toBeInTheDocument();
+    expect(within(section).getByRole("table", { name: "가격 표 1" })).toHaveTextContent("3,000원");
+    expect(within(section).queryByRole("heading", { name: "기초가격상세조회" })).not.toBeInTheDocument();
+  });
   it("shows every API value alongside detail fields, section tables, and separate clicked details", () => {
     render(<NoticeComparison api={{ bidNtceNo: "R26BK1", cntrctPrd: "" }} detail={detail} />);
 

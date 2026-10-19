@@ -20,7 +20,7 @@ function FieldList({ fields, apiLabels = false }: { fields: StructuredField[]; a
   return <dl className="raw-fields">{fields.map((field, index) => {
     const value = displayValue(field.value);
     const href = typeof field.value === "string" ? safeLink(field.value) : null;
-    return <div className="raw-field" key={`${field.label}-${index}`}>
+    return <div className={`raw-field${value.includes("\n") ? " raw-field--multiline" : ""}`} key={`${field.label}-${index}`}>
       <dt>{apiLabels ? apiFieldDisplayName(field.label) : field.label}</dt>
       <dd>{value ? href ? <a href={href} target="_blank" rel="noopener noreferrer">{value}</a> : value : <span className="muted">값 없음</span>}</dd>
     </div>;
@@ -75,8 +75,13 @@ export function NoticeComparison({ api, detail, orderPlans = [], preSpecificatio
         <div className="comparison-group"><h3>상세 페이지 섹션 · {detail.sections?.length || 0}개</h3>
           {detail.sections?.length ? detail.sections.map((section, index) => <details className="comparison-card" key={`${section.title}-${index}`} open>
             <summary>{section.title} <span>필드 {section.fields.length} · 표 {section.tables.length}</span></summary>
-            <FieldList fields={section.fields} />
+            {(section.fields.length > 0 || !section.details?.length) && <FieldList fields={section.fields} />}
             <TableList tables={section.tables} group={section.title} />
+            {section.details?.map((item, detailIndex) => <div className="comparison-detail-block" key={detailIndex}>
+              <h4>{item.title}</h4>
+              <FieldList fields={item.fields} />
+              <TableList tables={item.tables} group={`${section.title} ${item.title} ${detailIndex + 1}`} />
+            </div>)}
           </details>) : <p className="muted comparison-empty">섹션별 수집 자료가 없습니다.</p>}
         </div>
         <div className="comparison-group"><h3>첨부파일 · {detail.attachments.length}개</h3>

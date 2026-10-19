@@ -222,6 +222,14 @@ describe("extractDetailPage", () => {
 });
 
 describe("extractModalStructure", () => {
+  it("preserves line breaks represented by br tags in a notice body", () => {
+    const html = `<div role="dialog"><div class="w2window_header_title">공지사항 상세</div>
+      <table><tr><th class="w2tb_th">내용</th><td data-title="내용"><div class="w2textbox">아래와 같은 사유로 변경공고가 게시되었습니다.<br><br>공고명(연도표기) 변경</div></td></tr></table></div>`;
+    expect(extractModalStructure(html).fields).toEqual([
+      { label: "내용", value: "아래와 같은 사유로 변경공고가 게시되었습니다.\n\n공고명(연도표기) 변경" }
+    ]);
+  });
+
   it("reads synchronized WebSquare form values without duplicating paired labels", () => {
     const html = `<div role="dialog"><div class="w2window_header_title">발주계획상세조회</div>
       <table><tr><th class="w2tb_th">발주계획번호</th><td data-title="발주계획번호"><input value="R26DD12345678"></td></tr>

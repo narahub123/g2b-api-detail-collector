@@ -222,7 +222,10 @@ export function extractModalStructure(html: string): { title: string | null; fie
     }).filter((value): value is string => value !== null);
     const plain = cell.clone();
     plain.find("input,textarea,select,button,script,style").remove();
-    return nonempty([...values, clean(plain.text())].filter(Boolean).join(" "));
+    const breakMarker = "\uE000";
+    plain.find("br").replaceWith(breakMarker);
+    const plainText = clean(plain.text()).split(breakMarker).map(clean).join("\n");
+    return [...values, plainText].filter(Boolean).join(" ") || null;
   };
   // A single data-title cell is a single field; never also collect its paired th.
   const fieldIndex = new Map<string, number>();
