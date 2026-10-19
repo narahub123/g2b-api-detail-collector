@@ -32,8 +32,12 @@ const read = (record: Record<string, unknown>, key: string): string | null => {
 
 function pick(api: ApiNotice | null, detail: ScrapedDetail | null, detailKeys: string[], apiKeys: string[]): FieldValue {
   for (const key of detailKeys) {
-    const value = detail?.fields[key]?.trim();
-    if (value) return { value, source: "detail" };
+    for (const section of detail?.sections || []) {
+      for (const field of section.fields) {
+        const value = field.label === key ? field.value?.trim() : null;
+        if (value) return { value, source: "detail" };
+      }
+    }
   }
   for (const key of apiKeys) {
     const value = read(api || {}, key);

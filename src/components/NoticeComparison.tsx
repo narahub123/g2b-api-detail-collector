@@ -50,7 +50,7 @@ function TableList({ tables, group }: { tables: StructuredTable[]; group: string
 export function NoticeComparison({ api, detail, orderPlans = [], preSpecifications = [] }: { api: ApiNotice | null; detail: ScrapedDetail | null;
   orderPlans?: IndependentReference[]; preSpecifications?: IndependentReference[] }) {
   const apiFields = Object.entries(api || {}).map(([label, value]) => ({ label, value: displayValue(value) }));
-  const detailFields = Object.entries(detail?.fields || {}).map(([label, value]) => ({ label, value }));
+  const detailFieldCount = detail?.sections?.reduce((count, section) => count + section.fields.length, 0) || 0;
   const captures = [...(detail?.modalCaptures || []), ...(detail?.baseAmountCaptures || []), ...(detail?.changeNoticeCaptures || [])];
   const independent = [...orderPlans.map((item) => ({ ...item, kind: "발주계획" })),
     ...preSpecifications.map((item) => ({ ...item, kind: "사전규격" }))];
@@ -70,15 +70,13 @@ export function NoticeComparison({ api, detail, orderPlans = [], preSpecificatio
     </section>
 
     <section className="comparison-panel" id="comparison-detail" aria-label="상세 정보 추출">
-      <div className="comparison-panel-header"><h2>상세 정보 추출</h2><span>{detailFields.length}개 필드</span></div>
+      <div className="comparison-panel-header"><h2>상세 정보 추출</h2><span>{detailFieldCount}개 필드</span></div>
       {detail ? <>
-        <div className="comparison-group"><h3>상세 페이지 필드</h3><FieldList fields={detailFields} /></div>
         <div className="comparison-group"><h3>상세 페이지 섹션 · {detail.sections?.length || 0}개</h3>
           {detail.sections?.length ? detail.sections.map((section, index) => <details className="comparison-card" key={`${section.title}-${index}`} open>
             <summary>{section.title} <span>필드 {section.fields.length} · 표 {section.tables.length}</span></summary>
             <FieldList fields={section.fields} />
             <TableList tables={section.tables} group={section.title} />
-            {section.text && <div className="comparison-text-block"><h4>섹션 본문</h4><p>{section.text}</p></div>}
           </details>) : <p className="muted comparison-empty">섹션별 수집 자료가 없습니다.</p>}
         </div>
         <div className="comparison-group"><h3>첨부파일 · {detail.attachments.length}개</h3>

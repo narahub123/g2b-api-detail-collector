@@ -9,6 +9,7 @@ describe("extractDetailPage", () => {
       <h3>공고일반</h3><table><tr><th>공고명</th><td data-title="공고명"><input value="실태조사 용역"></td></tr></table>
       <h3>가격</h3><table><tr><th>예가방법</th><td data-title="예가방법"><input value="복수예가"></td></tr></table>
       <h3>기초금액공개</h3><table id="price_grd"><tr><th>금액</th></tr><tr><td></td></tr></table>
+      <table id="amount_grid"><tr><th>구분</th><th>금액</th></tr><tr><td>기초금액</td><td>1,000원</td></tr></table>
       <h3>기관담당자정보</h3><table><tr><th>공고담당자</th><td data-title="공고담당자"><input value="홍길동"></td></tr></table>
       <h3>가격</h3><table><tr><th>추정가격</th><td data-title="추정가격"><input value="1,000원"></td></tr></table>
     </main>`;
@@ -17,8 +18,12 @@ describe("extractDetailPage", () => {
       "공고일반", "가격", "기초금액공개", "기관담당자정보", "가격"
     ]);
     expect(result.sections?.[1].fields).toEqual([{ label: "예가방법", value: "복수예가" }]);
-    expect(result.sections?.[2].tables).toEqual([]);
-    expect(result.fields["공고명"]).toBe("실태조사 용역");
+    expect(result.sections?.[2].tables).toEqual([
+      { columns: ["구분", "금액"], rows: [["기초금액", "1,000원"]] }
+    ]);
+    expect(result).not.toHaveProperty("fields");
+    expect(result.sections?.every((section) => !("text" in section))).toBe(true);
+    expect(result.sections?.[0].fields).toContainEqual({ label: "공고명", value: "실태조사 용역" });
   });
 
   it("separates named subareas and excludes navigation links", () => {
@@ -62,8 +67,10 @@ describe("extractDetailPage", () => {
       <tr><th>입찰자격</th><td><span>중소기업</span></td></tr></table>
       <h3>파일첨부</h3><table><tr><td col_id="orgnlAtchFileNm">공고문.pdf</td></tr></table></main>`;
     const result = extractDetailPage(html, url);
-    expect(result.fields["공고명"]).toBe("실태조사 용역");
-    expect(result.fields["입찰자격"]).toBe("중소기업");
+    expect(result.sections?.[0].fields).toEqual([
+      { label: "공고명", value: "실태조사 용역" },
+      { label: "입찰자격", value: "중소기업" }
+    ]);
     expect(result.attachments[0]).toMatchObject({ name: "공고문.pdf" });
     expect(result.attachments[0].url).toBeNull();
     expect(result.text).toContain("실태조사 용역");

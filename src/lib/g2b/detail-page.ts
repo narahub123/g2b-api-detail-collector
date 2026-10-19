@@ -6,7 +6,7 @@ export type Attachment = { name: string; url: string | null };
 export type AttachmentMetadata = { orgnlAtchFileNm: string; atchFileSqno: number; scrnIndtYn?: string };
 export type StructuredField = { label: string; value: string | null };
 export type StructuredTable = { columns: string[]; rows: (string | null)[][] };
-export type StructuredSection = { title: string; fields: StructuredField[]; tables: StructuredTable[]; text: string };
+export type StructuredSection = { title: string; fields: StructuredField[]; tables: StructuredTable[] };
 export type ModalCapture = {
   trigger: { index: number; tag: string; label: string; value: string; sectionHint: string | null; html: string; parentModalTitle?: string | null };
   modal: { text: string; html?: string; title: string | null; fields: StructuredField[]; tables: StructuredTable[] };
@@ -27,8 +27,6 @@ export type ScrapedDetail = {
   attachments: Attachment[];
   links: { label: string; url: string }[];
   provenance?: { sections: string; attachmentsAndLinks: string };
-  // Backward-compatible views used by the existing normalizer and UI.
-  fields: Record<string, string>;
   text?: string;
 };
 
@@ -61,15 +59,12 @@ export function extractDetailPage(html: string, pageUrl: string, fileMetadata: A
   const $ = cheerio.load(html);
   $("script, style, option, [aria-hidden='true'], [style*='display: none']").remove();
   const sections: StructuredSection[] = [];
-  const fields: Record<string, string> = {};
   const sectionTitles = new Set([...SECTION_TITLES, "투찰제한 - 일반", "투찰제한-일반", "제안발표순서", "제안요청정보",
     "협상에 의한 계약", "협상에의한 계약", "수요기관담당자정보 목록"]);
   let active: StructuredSection | null = null;
-  const textParts = new Map<StructuredSection, string[]>();
   const startSection = (title: string) => {
-    active = { title, fields: [], tables: [], text: "" };
+    active = { title, fields: [], tables: [] };
     sections.push(active);
-    textParts.set(active, []);
     return active;
   };
   const target = () => active || startSection("공고일반");
@@ -86,14 +81,9 @@ export function extractDetailPage(html: string, pageUrl: string, fileMetadata: A
       if (empty) empty.value = value;
       else if (!sameLabel.some((field) => field.value === value)) bucket.fields.push({ label, value });
     } else if (!sameLabel.length) bucket.fields.push({ label, value });
-    if (value !== null && !(label in fields)) fields[label] = value;
   };
   // Traverse once in document order so fields, grids and repeated headings keep their source position.
   const walk = (node: any): void => {
-    if (node.type === "text") {
-      if (active && clean(node.data || "")) textParts.get(active)?.push(clean(node.data));
-      return;
-    }
     if (node.type !== "tag") return;
     const element = $(node);
     if (element.is("h2,h3,h4,h5,legend,.title,.tit,.df_tit")) {
@@ -127,7 +117,6 @@ export function extractDetailPage(html: string, pageUrl: string, fileMetadata: A
     for (const child of node.children || []) walk(child);
   };
   walk($("body")[0]);
-  for (const bucket of sections) bucket.text = clean((textParts.get(bucket) || []).join(" "));
   const number = url.searchParams.get("bidPbancNo") || "";
   const order = url.searchParams.get("bidPbancOrd") || "";
   const attachments: Attachment[] = [];
@@ -166,7 +155,9 @@ export function extractDetailPage(html: string, pageUrl: string, fileMetadata: A
     } catch { /* ignore */ }
   });
   const fullText = clean($("main").text() || $("body").text());
-  if (!fields["공고명"]) throw new Error("나라장터 상세 데이터를 읽지 못했습니다.");
+  if (!sections.some((section) => section.fields.some((field) => field.label === "공고명" && field.value))) {
+    throw new Error("나라장터 상세 데이터를 읽지 못했습니다.");
+  }
   const summary = {
     sectionCount: sections.length,
     fieldCount: sections.reduce((n, item) => n + item.fields.length, 0),
@@ -180,7 +171,7 @@ export function extractDetailPage(html: string, pageUrl: string, fileMetadata: A
     schemaVersion: "pilot-4", noticeKey: `${number}--${order}`, sourceUrl: pageUrl,
     capturedAt: new Date().toISOString(), sections, summary, attachments, links,
     provenance: { sections: "rendered G2B page", attachmentsAndLinks: "rendered G2B page and attachment metadata response" },
-    fields, text: fullText
+    text: fullText
   };
 }
 

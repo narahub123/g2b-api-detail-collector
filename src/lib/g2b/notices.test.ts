@@ -38,7 +38,9 @@ describe("saved notices", () => {
     await mkdir(join(dir, "notices"));
     await writeFile(join(dir, "notices", "R26BK1--000.json"), JSON.stringify({
       api: { bidNtceNo: "R26BK1", bidNtceOrd: "000", bidNtceNm: "용역", srvceDivNm: "연구" },
-      detail: { sourceUrl: "https://www.g2b.go.kr/", fields: { "업종제한사항": "연구" }, text: "전체 본문", attachments: [], links: [] }
+      detail: { sourceUrl: "https://www.g2b.go.kr/", sections: [{ title: "입찰자격", fields: [
+        { label: "업종제한사항", value: "연구" }
+      ], tables: [] }], text: "전체 본문", attachments: [], links: [] }
     }));
     const record = await getNoticeRecord("R26BK1--000", dir);
     expect(record?.api?.srvceDivNm).toBe("연구");
@@ -52,7 +54,9 @@ describe("saved notices", () => {
     await mkdir(join(dir, "notices"));
     await writeFile(join(dir, "notices", "R26BK1--001.json"), JSON.stringify({
       key: "R26BK1--001", api: null,
-      detail: { sourceUrl: "https://www.g2b.go.kr/", fields: { 공고명: "이전 공고" }, text: "본문", attachments: [], links: [] },
+      detail: { sourceUrl: "https://www.g2b.go.kr/", sections: [{ title: "공고일반", fields: [
+        { label: "공고명", value: "이전 공고" }
+      ], tables: [] }], text: "본문", attachments: [], links: [] },
       relatedNoticeKeys: ["R26BK1--002", "R26BK1--002"]
     }));
     const record = await getNoticeRecord("R26BK1--001", dir);

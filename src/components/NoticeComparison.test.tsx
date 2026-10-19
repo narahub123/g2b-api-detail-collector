@@ -5,10 +5,10 @@ import { NoticeComparison } from "./NoticeComparison";
 import type { ScrapedDetail } from "@/lib/g2b/detail-page";
 
 const detail: ScrapedDetail = {
-  sourceUrl: "https://www.g2b.go.kr/", fields: { 공고명: "조사 용역" }, text: "상세 원문 샘플",
+  sourceUrl: "https://www.g2b.go.kr/", text: "상세 원문 샘플",
   attachments: [], links: [],
-  sections: [{ title: "가격", fields: [{ label: "기초금액", value: "3,000원" }],
-    tables: [{ columns: ["구분", "금액"], rows: [["기초금액", "3,000원"], [null, null]] }], text: "가격 안내" }],
+  sections: [{ title: "가격", fields: [{ label: "공고명", value: "조사 용역" }, { label: "기초금액", value: "3,000원" }],
+    tables: [{ columns: ["구분", "금액"], rows: [["기초금액", "3,000원"], [null, null]] }] }],
   modalCaptures: [
     { trigger: { index: 1, tag: "button", label: "기초금액조회", value: "기초금액조회", sectionHint: "가격", html: "<button>기초금액조회</button>" },
       modal: { title: "기초가격상세조회", text: "기초금액 안내", html: "<div></div>",
@@ -44,6 +44,8 @@ describe("NoticeComparison", () => {
     expect(api.getByText("값 없음")).toBeInTheDocument();
 
     const scraped = within(screen.getByRole("region", { name: "상세 정보 추출" }));
+    expect(scraped.queryByRole("heading", { name: "상세 페이지 필드" })).not.toBeInTheDocument();
+    expect(scraped.queryByRole("heading", { name: "섹션 본문" })).not.toBeInTheDocument();
     expect(scraped.getByText("조사 용역")).toBeInTheDocument();
     expect(scraped.queryByRole("heading", { name: "상세 페이지 본문" })).not.toBeInTheDocument();
     expect(scraped.getByRole("table", { name: "가격 표 1" })).toHaveTextContent("3,000원");
@@ -56,14 +58,14 @@ describe("NoticeComparison", () => {
     expect(clicked.getByRole("table", { name: "발주계획번호 표 1" })).toHaveTextContent("계획서.hwp");
   });
 
-  it("explains absent detail and older captures without hiding the API response", () => {
+  it("explains absent detail and sections without hiding the API response", () => {
     const { rerender } = render(<NoticeComparison api={{ bidNtceNo: "R26BK1" }} detail={null} />);
     expect(screen.getByRole("region", { name: "API 응답 정보" })).toHaveTextContent("R26BK1");
     expect(screen.getByText("상세 페이지 수집 자료가 없습니다.")).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "클릭 상세 정보" })).not.toBeInTheDocument();
 
     rerender(<NoticeComparison api={{ bidNtceNo: "R26BK1" }} detail={{ ...detail, sections: undefined, modalCaptures: undefined }} />);
-    expect(screen.getByRole("region", { name: "상세 정보 추출" })).toHaveTextContent("조사 용역");
+    expect(screen.getByRole("region", { name: "상세 정보 추출" })).toHaveTextContent("섹션별 수집 자료가 없습니다.");
     expect(screen.getByText("수집된 클릭 상세 정보가 없습니다.")).toBeInTheDocument();
   });
 

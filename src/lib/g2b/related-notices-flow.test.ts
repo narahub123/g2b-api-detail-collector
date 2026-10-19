@@ -11,7 +11,8 @@ const dirs: string[] = [];
 afterEach(async () => { delete process.env.G2B_SERVICE_KEY; await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))); });
 const detail = (number: string, order: string): ScrapedDetail => ({
   sourceUrl: `https://www.g2b.go.kr/link/PNPE027_01/single/?bidPbancNo=${number}&bidPbancOrd=${order}`,
-  fields: { 공고명: `${order} 차수 공고` }, text: `${order} 본문`, attachments: [], links: []
+  sections: [{ title: "공고일반", fields: [{ label: "공고명", value: `${order} 차수 공고` }], tables: [] }],
+  text: `${order} 본문`, attachments: [], links: []
 });
 const fetcher = (items: { bidNtceNo: string; bidNtceOrd: string; bidNtceNm: string }[]) =>
   async () => new Response(JSON.stringify({ response: { header: { resultCode: "00" }, body: { totalCount: items.length, items } } }));
@@ -129,7 +130,7 @@ describe("related notices", () => {
     expect(called).toEqual(["002", "001"]);
     const related = await getNoticeRecord("R26BK1--001", dir);
     expect(related?.api?.bidNtceNm).toBe("이전 API");
-    expect(related?.detail?.fields["공고명"]).toBe("001 차수 공고");
+    expect(related?.detail?.sections?.[0].fields).toContainEqual({ label: "공고명", value: "001 차수 공고" });
     expect(related?.detail).not.toHaveProperty("text");
     expect(related?.relatedNoticeKeys).toEqual(["R26BK1--002"]);
   });

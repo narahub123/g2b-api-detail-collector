@@ -9,7 +9,8 @@ const capture = (title: string, fields: { label: string; value: string | null }[
 });
 const detail = (captures: ModalCapture[]): ScrapedDetail => ({
   sourceUrl: "https://www.g2b.go.kr/", capturedAt: "2026-10-19T00:00:00.000Z",
-  fields: { 공고명: "용역" }, text: "전체 본문", attachments: [], links: [], modalCaptures: captures
+  sections: [{ title: "공고일반", fields: [{ label: "공고명", value: "용역" }], tables: [] }],
+  text: "전체 본문", attachments: [], links: [], modalCaptures: captures
 });
 
 describe("structureNoticeDetail", () => {
