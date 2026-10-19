@@ -368,10 +368,22 @@ async function clickCandidates(page: import("playwright-core").Page, dialogId: s
     const inlineAction = [...element.attributes].some((attribute) => /^on/i.test(attribute.name));
     const readOnlyLabel = /조회|상세|정보|안내|보기|열기|공지|계획|금액/.test(`${label} ${value}`);
     const safeAnchor = !anchor || !href || href === "#" || /^javascript:void\((?:null|0)\);?$/i.test(href.trim());
-    const preceding = Array.from(document.querySelectorAll("h2,h3,h4,h5,legend,.title,.tit"))
-      .filter(h => h.compareDocumentPosition(element) & Node.DOCUMENT_POSITION_FOLLOWING);
-    const headings = ["공고일반", "입찰자격", "입찰진행정보", "가격", "기초금액공개", "기관담당자정보", "연관정보", "파일첨부 관련 안내사항", "파일첨부"];
-    const sectionHint = preceding.map(h => (h.textContent || "").trim()).filter(t => headings.includes(t)).pop() || null;
+    const sectionHint = (() => {
+      const detailRoot = element.closest(".pop_contents > .sub_contents");
+      if (!detailRoot) return null;
+      for (let block: Element | null = element; block && block !== detailRoot; block = block.parentElement) {
+        const headingBlock = block.previousElementSibling;
+        if (!headingBlock?.matches(".dfbox")) continue;
+        const heading = headingBlock.querySelector(":scope > .fl > .df_tit");
+        if (!heading) continue;
+        const parent = block.parentElement;
+        if (!block.matches(".tbbox,.gvwbox") &&
+            (!parent || parent.matches(".pop_contents,.sub_contents") ||
+              parent.querySelectorAll(":scope > .dfbox > .fl > .df_tit").length !== 1)) continue;
+        return heading.textContent?.trim() || null;
+      }
+      return null;
+    })();
     const skip = !visible || !value || (owner?.id || null) !== dialogId || element.hasAttribute("disabled") ||
       element.getAttribute("aria-disabled") === "true" || !!element.closest("nav,header,footer,[id*='navigation']") ||
       !!element.closest("td[data-title='관련공고']") || /^(submit|reset|file)$/i.test(type) ||

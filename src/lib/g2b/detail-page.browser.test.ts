@@ -10,6 +10,49 @@ afterAll(async () => {
   await browser?.close();
 });
 
+it("assigns modal triggers to their structural section, or null when none owns them", async () => {
+  const page = await browser.newPage();
+  try {
+    await page.setContent(`<div class="pop_contents"><div class="sub_contents">
+      <div class="w2group"><div class="dfbox"><div class="fl"><h4 class="df_tit">공지사항</h4></div></div>
+        <div><a data-open="notice" href="javascript:void(null)">공지사항 조회</a></div></div>
+      <div class="w2wframe"><div class="pop_contents">
+        <div class="dfbox"><div class="fl"><h4 class="df_tit">가격</h4></div></div>
+        <div class="tbbox"><a data-open="price" href="javascript:void(null)">가격 조회</a></div>
+        <div class="dfbox"><div class="fl"><h4 class="df_tit">기초금액공개</h4></div></div>
+        <div class="gvwbox"><button data-open="amount">기초금액조회</button></div>
+        <div class="w2group"><div class="dfbox"><div class="fl"><h4 class="df_tit">새로운 구역</h4></div></div>
+          <div class="tbbox"><a data-open="new" href="javascript:void(null)">새 구역 상세조회</a></div></div>
+        <div class="dfbox"><div class="fl"><h4 class="df_tit">마지막 구역</h4></div></div>
+        <div class="btnbox_all"><a data-open="toolbar" href="javascript:void(null)">공통 상세조회</a></div>
+      </div></div>
+    </div></div>
+    <div><a data-open="outside" href="javascript:void(null)">외부 상세조회</a></div>
+    <div id="dialog" role="dialog" style="display:none"><h2>상세 정보</h2><button data-close>닫기</button>
+      <table><tr><td data-title="내용">충분한 모달 내용입니다</td></tr></table></div>
+    <script>
+      document.querySelectorAll('[data-open]').forEach(link => link.addEventListener('click', () => {
+        document.querySelector('#dialog').style.display = 'block';
+      }));
+      document.querySelector('[data-close]').addEventListener('click', () => {
+        document.querySelector('#dialog').style.display = 'none';
+      });
+    </script>`);
+    const result = await collectModalContents(page);
+    expect(result.discovery.failures).toEqual([]);
+    expect(result.captures.map((capture) => [capture.trigger.value, capture.trigger.sectionHint])).toEqual([
+      ["공지사항 조회", "공지사항"],
+      ["가격 조회", "가격"],
+      ["기초금액조회", "기초금액공개"],
+      ["새 구역 상세조회", "새로운 구역"],
+      ["공통 상세조회", null],
+      ["외부 상세조회", null],
+    ]);
+  } finally {
+    await page.close();
+  }
+}, 30000);
+
 it("captures a notice and its nested dialog once while avoiding unsafe controls", async () => {
   const page = await browser.newPage();
   try {
