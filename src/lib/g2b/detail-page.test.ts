@@ -6,6 +6,30 @@ const heading = (title: string, tag = "h4") =>
   `<div class="w2group dfbox"><div class="w2group fl"><${tag} class="w2textbox df_tit fl">${title}</${tag}></div></div>`;
 
 describe("extractDetailPage", () => {
+  it("records inline visibility for each field without dropping hidden values", () => {
+    const html = `<main>${heading("공고일반")}
+      <table>
+        <tr><th>공고명</th><td>용역</td></tr>
+        <tr style="display: none"><th>숨긴 행</th><td>행 값</td></tr>
+        <tr><th style="visibility: hidden">숨긴 이름</th><td>이름 값</td></tr>
+        <tr><th>숨긴 값 셀</th><td style="display:none">값 셀 값</td></tr>
+        <tr><td data-title="숨긴 단일 셀" style="visibility:hidden">단일 셀 값</td></tr>
+      </table>
+      <div style="display: none"><table><tr><th>숨긴 상위</th><td>상위 값</td></tr></table></div>
+      <table id="amount_grid"><tr><th>구분</th><th>금액</th></tr><tr><td>기초금액</td><td>1,000원</td></tr></table>
+    </main>`;
+    const section = extractDetailPage(html, url).sections?.[0];
+    expect(section?.visible).toBe(true);
+    expect(section?.fields).toEqual([
+      { label: "공고명", value: "용역", visible: true },
+      { label: "숨긴 행", value: "행 값", visible: false },
+      { label: "숨긴 이름", value: "이름 값", visible: false },
+      { label: "숨긴 값 셀", value: "값 셀 값", visible: false },
+      { label: "숨긴 단일 셀", value: "단일 셀 값", visible: false },
+      { label: "숨긴 상위", value: "상위 값", visible: false }
+    ]);
+    expect(section?.tables).toEqual([{ columns: ["구분", "금액"], rows: [["기초금액", "1,000원"]] }]);
+  });
   it("keeps heading order and reads each WebSquare field only once", () => {
     const html = `<main>
       ${heading("공고일반")}<table><tr><th>공고명</th><td data-title="공고명"><input value="실태조사 용역"></td></tr></table>
@@ -19,13 +43,13 @@ describe("extractDetailPage", () => {
     expect(result.sections?.map((section) => section.title)).toEqual([
       "공고일반", "가격", "기초금액공개", "기관담당자정보", "가격"
     ]);
-    expect(result.sections?.[1].fields).toEqual([{ label: "예가방법", value: "복수예가" }]);
+    expect(result.sections?.[1].fields).toEqual([{ label: "예가방법", value: "복수예가", visible: true }]);
     expect(result.sections?.[2].tables).toEqual([
       { columns: ["구분", "금액"], rows: [["기초금액", "1,000원"]] }
     ]);
     expect(result).not.toHaveProperty("fields");
     expect(result.sections?.every((section) => !("text" in section))).toBe(true);
-    expect(result.sections?.[0].fields).toContainEqual({ label: "공고명", value: "실태조사 용역" });
+    expect(result.sections?.[0].fields).toContainEqual({ label: "공고명", value: "실태조사 용역", visible: true });
   });
 
   it("separates named subareas and excludes navigation links", () => {
@@ -41,13 +65,13 @@ describe("extractDetailPage", () => {
       "공고일반", "입찰자격", "투찰제한 - 일반", "입찰진행정보", "제안발표순서",
       "제안요청정보", "협상에 의한 계약", "기관담당자정보", "수요기관담당자정보 목록", "연관정보", "파일첨부"
     ]);
-    expect(result.sections?.[2].fields).toEqual([{ label: "지역제한", value: "서울" }]);
+    expect(result.sections?.[2].fields).toEqual([{ label: "지역제한", value: "서울", visible: true }]);
     expect(result.links.map((link) => link.label)).toEqual(["도움말"]);
   });
   it("recognizes actual WebSquare subheadings and prefers a filled field over an empty duplicate", () => {
     const html = `<main>${heading("공고일반")}<table>
       <tr><th>공고명</th><td data-title="공고명">용역</td></tr>
-      <tr><td data-title="공고담당자"></td></tr>
+      <tr><td data-title="공고담당자" style="display:none"></td></tr>
       <tr><td data-title="공고담당자">홍길동</td></tr></table>
       ${heading("투찰제한-일반", "div")}<p>제한 안내</p>
       ${heading("제안요청정보", "div")}<p>제안 안내</p>
@@ -60,7 +84,7 @@ describe("extractDetailPage", () => {
       "수요기관담당자정보 목록", "파일첨부"
     ]);
     expect(result.sections?.[0].fields).toEqual([
-      { label: "공고명", value: "용역" }, { label: "공고담당자", value: "홍길동" }
+      { label: "공고명", value: "용역", visible: true }, { label: "공고담당자", value: "홍길동", visible: true }
     ]);
   });
   it("keeps unknown, hidden, empty and repeated structural sections with their own data", () => {
@@ -79,12 +103,12 @@ describe("extractDetailPage", () => {
     expect(result.sections?.map((section) => section.title)).toEqual([
       "공고일반", "새로운 안내", "숨긴 구역", "빈 구역", "새로운 안내"
     ]);
-    expect(result.sections?.[1].fields).toEqual([{ label: "안내값", value: "첫 값" }]);
+    expect(result.sections?.[1].fields).toEqual([{ label: "안내값", value: "첫 값", visible: true }]);
     expect(result.sections?.[2].tables).toEqual([
       { columns: ["구분", "금액"], rows: [["숨긴 값", "5,000원"]] }
     ]);
     expect(result.sections?.[3]).toEqual({ title: "빈 구역", fields: [], tables: [], visible: true });
-    expect(result.sections?.[4].fields).toEqual([{ label: "안내값", value: "둘째 값" }]);
+    expect(result.sections?.[4].fields).toEqual([{ label: "안내값", value: "둘째 값", visible: true }]);
     expect(result.sections?.map((section) => section.visible)).toEqual([true, true, false, true, true]);
   });
   it("checks display and visibility on a section heading and every ancestor", () => {
@@ -121,8 +145,8 @@ describe("extractDetailPage", () => {
       ${heading("파일첨부", "div")}<table><tr><td col_id="orgnlAtchFileNm">공고문.pdf</td></tr></table></main>`;
     const result = extractDetailPage(html, url);
     expect(result.sections?.[0].fields).toEqual([
-      { label: "공고명", value: "실태조사 용역" },
-      { label: "입찰자격", value: "중소기업" }
+      { label: "공고명", value: "실태조사 용역", visible: true },
+      { label: "입찰자격", value: "중소기업", visible: true }
     ]);
     expect(result.attachments[0]).toMatchObject({ name: "공고문.pdf" });
     expect(result.attachments[0].url).toBeNull();
@@ -137,6 +161,7 @@ describe("extractDetailPage", () => {
     const html = `<table><tr><th>공고명</th><td>용역</td></tr></table><table><tr><td col_id="orgnlAtchFileNm">공고문.pdf</td></tr></table>`;
     const result = extractDetailPage(html, url, [{ orgnlAtchFileNm: "공고문.pdf", atchFileSqno: 7 }]);
     expect(result.sections?.[0]).not.toHaveProperty("visible");
+    expect(result.sections?.[0].fields[0]).toEqual({ label: "공고명", value: "용역", visible: true });
     expect(result.attachments[0].url).toContain("fileSeq=7");
   });
 

@@ -4,7 +4,7 @@ import { noticeKeyFromParts } from "./identity";
 
 export type Attachment = { name: string; url: string | null };
 export type AttachmentMetadata = { orgnlAtchFileNm: string; atchFileSqno: number; scrnIndtYn?: string };
-export type StructuredField = { label: string; value: string | null };
+export type StructuredField = { label: string; value: string | null; visible?: boolean };
 export type StructuredTable = { columns: string[]; rows: (string | null)[][] };
 export type StructuredSection = { title: string; fields: StructuredField[]; tables: StructuredTable[]; visible?: boolean };
 export type ModalCapture = {
@@ -84,15 +84,17 @@ export function extractDetailPage(html: string, pageUrl: string, fileMetadata: A
     const input = cell.find("input:not([type='hidden']),textarea,select").first();
     return nonempty(input.length ? String(input.val() ?? cell.text()) : cell.text());
   };
-  const appendField = (label: string, value: string | null) => {
+  const appendField = (label: string, value: string | null, visible: boolean) => {
     if (!label) return;
     const bucket = target();
     const sameLabel = bucket.fields.filter((field) => field.label === label);
     if (value !== null) {
       const empty = sameLabel.find((field) => field.value === null);
-      if (empty) empty.value = value;
-      else if (!sameLabel.some((field) => field.value === value)) bucket.fields.push({ label, value });
-    } else if (!sameLabel.length) bucket.fields.push({ label, value });
+      if (empty) {
+        empty.value = value;
+        empty.visible = visible;
+      } else if (!sameLabel.some((field) => field.value === value)) bucket.fields.push({ label, value, visible });
+    } else if (!sameLabel.length) bucket.fields.push({ label, value, visible });
   };
   // Traverse once in document order so fields, grids and repeated headings keep their source position.
   const walk = (node: any): void => {
@@ -120,10 +122,10 @@ export function extractDetailPage(html: string, pageUrl: string, fileMetadata: A
       const cells = element.children("th,td").toArray();
       for (const cell of cells) {
         const td = $(cell);
-        if (td.is("td[data-title]") && !td.is("[col_id]")) appendField(clean(td.attr("data-title") || ""), readCell(td));
+        if (td.is("td[data-title]") && !td.is("[col_id]")) appendField(clean(td.attr("data-title") || ""), readCell(td), isVisible(cell));
         if (td.is("th")) {
           const next = td.next();
-          if (next.is("td") && !next.attr("data-title")) appendField(clean(td.text()), readCell(next));
+          if (next.is("td") && !next.attr("data-title")) appendField(clean(td.text()), readCell(next), isVisible(cell) && isVisible(next[0]));
         }
       }
     }
