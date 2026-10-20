@@ -1,15 +1,21 @@
 import * as cheerio from "cheerio";
 import { chromium } from "playwright-core";
 import { noticeKeyFromParts } from "./identity";
+import { extractDetailTable, extractModalGrid, isInlineVisible, tableHasValue } from "./structured-table";
+import type { StructuredTable } from "./structured-table";
+import { attachmentDownloadUrl, safeAttachmentLink } from "./attachment-links";
+
+export type { StructuredTable, StructuredTableCell, StructuredTableContent } from "./structured-table";
 
 export type Attachment = { name: string; url: string | null };
 export type AttachmentMetadata = { orgnlAtchFileNm: string; atchFileSqno: number; scrnIndtYn?: string };
-export type StructuredField = { label: string; value: string | null };
-export type StructuredTable = { columns: string[]; rows: (string | null)[][] };
-export type StructuredSection = { title: string; fields: StructuredField[]; tables: StructuredTable[]; text: string };
+export type ClickDownload = { cellId: string; name: string; fileNo: string; seq: number };
+export type StructuredField = { label: string; value: string | null; visible?: boolean };
+export type StructuredSection = { title: string; fields: StructuredField[]; tables: StructuredTable[];
+  details?: { title: string; fields: StructuredField[]; tables: StructuredTable[] }[]; visible?: boolean };
 export type ModalCapture = {
-  trigger: { index: number; tag: string; label: string; value: string; sectionHint: string | null; html: string; parentModalTitle?: string | null };
-  modal: { text: string; html: string; title: string | null; fields: StructuredField[]; tables: StructuredTable[] };
+  trigger: { index: number; tag: string; label: string; value: string; sectionHint?: string | null; html: string; parentModalTitle?: string | null };
+  modal: { text: string; html?: string; title: string | null; fields: StructuredField[]; tables: StructuredTable[] };
   settling?: { status: "settled" | "timeout"; elapsedMs: number };
 };
 export type ScrapedDetail = {
@@ -20,14 +26,14 @@ export type ScrapedDetail = {
   sections?: StructuredSection[];
   // Raw, unclassified contents of dialogs opened by read-only controls.
   modalCaptures?: ModalCapture[];
+  baseAmountCaptures?: ModalCapture[];
+  changeNoticeCaptures?: ModalCapture[];
   modalDiscovery?: { candidates: number; attempted: number; captured: number; skipped: number; failures: string[] };
   summary?: { sectionCount: number; fieldCount: number; nonemptyFieldCount: number; tableCount: number; tableRowCount: number; attachmentCount: number; linkCount: number };
   attachments: Attachment[];
   links: { label: string; url: string }[];
   provenance?: { sections: string; attachmentsAndLinks: string };
-  // Backward-compatible views used by the existing normalizer and UI.
-  fields: Record<string, string>;
-  text: string;
+  text?: string;
 };
 
 export function serviceDetailUrl(number: string, order: string): string {
@@ -43,7 +49,6 @@ function assertG2bUrl(value: string): URL {
 }
 const clean = (value: string) => value.replace(/\s+/g, " ").trim();
 const nonempty = (value: string): string | null => clean(value) || null;
-const SECTION_TITLES = ["공고일반", "입찰자격", "입찰진행정보", "가격", "기초금액공개", "기관담당자정보", "연관정보", "파일첨부 관련 안내사항", "파일첨부"];
 
 export function extractRelatedNoticeKeys(html: string): string[] {
   const $ = cheerio.load(html);
@@ -54,65 +59,73 @@ export function extractRelatedNoticeKeys(html: string): string[] {
   return [...new Set(keys)];
 }
 
-export function extractDetailPage(html: string, pageUrl: string, fileMetadata: AttachmentMetadata[] = []): ScrapedDetail {
+export function extractDetailPage(html: string, pageUrl: string, fileMetadata: AttachmentMetadata[] = [], clickDownloads: ClickDownload[] = []): ScrapedDetail {
   const url = assertG2bUrl(pageUrl);
   const $ = cheerio.load(html);
-  $("script, style, option, [aria-hidden='true'], [style*='display: none']").remove();
+  $("script, style, option").remove();
   const sections: StructuredSection[] = [];
-  const fields: Record<string, string> = {};
-  const sectionByTitle = new Map<string, StructuredSection>();
-  const section = (title: string) => {
-    let result = sectionByTitle.get(title);
-    if (!result) { result = { title, fields: [], tables: [], text: "" }; sectionByTitle.set(title, result); sections.push(result); }
-    return result;
+  let active: StructuredSection | null = null;
+  const startSection = (title: string, visible?: boolean) => {
+    active = { title, fields: [], tables: [] };
+    if (visible !== undefined) active.visible = visible;
+    sections.push(active);
+    return active;
   };
-  // Use the nearest preceding named heading in DOM document order.
-  const all = $("body *").toArray();
-  const titleAt = new WeakMap<object, string>();
-  let activeTitle = "공고일반";
-  for (const element of all) {
-    if ($(element).is("h2,h3,h4,h5,legend,.title,.tit")) {
-      const exact = SECTION_TITLES.find((title) => clean($(element).text()) === title);
-      if (exact) activeTitle = exact;
+  const target = () => active || startSection("미분류");
+  const isVisible = (node: any): boolean => isInlineVisible($, node);
+  const readCell = (cell: any): string | null => {
+    const input = cell.find("input:not([type='hidden']),textarea,select").first();
+    return nonempty(input.length ? String(input.val() ?? cell.text()) : cell.text());
+  };
+  const appendField = (label: string, value: string | null, visible: boolean) => {
+    if (!label) return;
+    const bucket = target();
+    const sameLabel = bucket.fields.filter((field) => field.label === label);
+    if (value !== null) {
+      const empty = sameLabel.find((field) => field.value === null);
+      if (empty) {
+        empty.value = value;
+        empty.visible = visible;
+      } else if (!sameLabel.some((field) => field.value === value)) bucket.fields.push({ label, value, visible });
+    } else if (!sameLabel.length) bucket.fields.push({ label, value, visible });
+  };
+  // Traverse once in document order so fields, grids and repeated headings keep their source position.
+  const walk = (node: any): void => {
+    if (node.type !== "tag") return;
+    const element = $(node);
+    // WebSquare places each section title in a dfbox header, before its field/table containers.
+    if (element.is(".dfbox > .fl > .df_tit")) {
+      const title = clean(element.text());
+      if (title) { startSection(title, isVisible(node)); return; }
     }
-    titleAt.set(element, activeTitle);
+    if (element.is("table")) {
+      const table = extractDetailTable($, element, readCell);
+      if (table) target().tables.push(table);
+    }
+    if (element.is("tr") && !element.closest("table[id*='grd'],table[id*='grid']").length &&
+        !element.closest("table").find("[col_id]").length) {
+      const cells = element.children("th,td").toArray();
+      for (const cell of cells) {
+        const td = $(cell);
+        if (td.is("td[data-title]") && !td.is("[col_id]")) appendField(clean(td.attr("data-title") || ""), readCell(td), isVisible(cell));
+        if (td.is("th")) {
+          const next = td.next();
+          if (next.is("td") && !next.attr("data-title")) appendField(clean(td.text()), readCell(next), isVisible(cell) && isVisible(next[0]));
+        }
+      }
+    }
+    for (const child of node.children || []) walk(child);
+  };
+  // The rendered notice lives in the sub-contents pane; body also contains navigation tables.
+  const detailRoot = $(".pop_contents > .sub_contents").filter((_, node) =>
+    $(node).find(".dfbox > .fl > .df_tit").length > 0).first();
+  if (detailRoot.length) {
+    for (const child of detailRoot.children().toArray()) {
+      if ($(child).find(".dfbox > .fl > .df_tit").length) walk(child);
+    }
+  } else {
+    walk($("body")[0]);
   }
-  const target = (element: object) => section(titleAt.get(element) || "공고일반");
-  $("tr").each((_, row) => {
-    const ths = $(row).children("th");
-    if (!ths.length) return;
-    ths.each((_, th) => {
-      const label = clean($(th).text());
-      const td = $(th).nextAll("td").first();
-      if (!label || !td.length) return;
-      const input = td.find("input,textarea,select").first();
-      const value = nonempty(input.length ? String(input.val() ?? td.text()) : td.text());
-      const bucket = target(row);
-      bucket.fields.push({ label, value });
-      if (value !== null && !(label in fields)) fields[label] = value;
-    });
-  });
-  // The G2B UI also uses data-title cells instead of th/td pairs.
-  $("td[data-title]").each((_, cell) => {
-    const label = clean($(cell).attr("data-title") || "");
-    if (!label || label === "") return;
-    const value = nonempty($(cell).text());
-    const bucket = target(cell);
-    if (!bucket.fields.some((item) => item.label === label && item.value === value)) bucket.fields.push({ label, value });
-    if (value !== null && !(label in fields)) fields[label] = value;
-  });
-  $("table").each((_, table) => {
-    const rows = $(table).find("tr").toArray();
-    if (!rows.length) return;
-    const first = $(rows[0]).children("th,td");
-    const header = first.toArray().map((cell) => clean($(cell).text()));
-    const isGrid = $(table).attr("id")?.includes("grd") || $(table).find("[col_id]").length > 0 ||
-      (header.length > 1 && rows.length > 1 && first.filter("th").length === first.length);
-    if (!isGrid) return;
-    const bodyRows = rows.slice(1).map((row) => $(row).children("td,th").toArray().map((cell) => nonempty($(cell).text())));
-    const columns = header.length ? header : [];
-    if (columns.length && bodyRows.some((row) => row.length)) target(table).tables.push({ columns, rows: bodyRows });
-  });
   const number = url.searchParams.get("bidPbancNo") || "";
   const order = url.searchParams.get("bidPbancOrd") || "";
   const attachments: Attachment[] = [];
@@ -126,50 +139,58 @@ export function extractDetailPage(html: string, pageUrl: string, fileMetadata: A
     download.searchParams.set("fileType", "");
     return download.toString();
   };
-  const seenAttachmentNames = new Set<string>();
+  const clickByCellId = new Map(clickDownloads.map((file) => [file.cellId, file]));
+  const seenAttachments = new Set<string>();
+  const addAttachment = (name: string, downloadUrl: string | null) => {
+    const identity = `${name}\u0000${downloadUrl || ""}`;
+    if (!name || seenAttachments.has(identity)) return;
+    attachments.push({ name, url: downloadUrl });
+    seenAttachments.add(identity);
+  };
   $("td[col_id='orgnlAtchFileNm']").each((_, cell) => {
     const name = clean($(cell).text());
-    if (!name || seenAttachmentNames.has(name)) return;
-    attachments.push({ name, url: attachmentUrl(sequenceByName.get(name)) });
-    seenAttachmentNames.add(name);
+    if (!name) return;
+    const click = clickByCellId.get($(cell).attr("id") || "");
+    const href = $(cell).find("a[href]").first().attr("href");
+    let direct: string | null = null;
+    if (href && !href.startsWith("#")) {
+      try { direct = safeAttachmentLink(new URL(href, pageUrl).toString()); } catch { /* invalid link */ }
+    }
+    const clickUrl = click && click.name === name ? attachmentDownloadUrl(`${number}--${order}`, click.fileNo, click.seq) : null;
+    const metadataUrl = $(cell).find("a").length && !direct ? null : attachmentUrl(sequenceByName.get(name));
+    addAttachment(name, direct || clickUrl || metadataUrl);
   });
   // The grid can still be rendering when its attachment-list response is complete.
   for (const file of fileMetadata) {
     if (file.scrnIndtYn === "N") continue;
     const name = clean(cheerio.load(file.orgnlAtchFileNm).text());
-    if (!name || seenAttachmentNames.has(name)) continue;
-    attachments.push({ name, url: attachmentUrl(file.atchFileSqno) });
-    seenAttachmentNames.add(name);
+    if (!name || attachments.some((item) => item.name === name)) continue;
+    addAttachment(name, attachmentUrl(file.atchFileSqno));
   }
   const links: ScrapedDetail["links"] = [];
-  $("a[href]").each((_, anchor) => {
-    try {
-      const href = new URL($(anchor).attr("href") || "", pageUrl);
-      const label = clean($(anchor).text());
-      if (["http:", "https:"].includes(href.protocol) && label) links.push({ label, url: href.toString() });
-    } catch { /* ignore */ }
+  // Match the section traversal scope: only heading-bearing children of the notice pane.
+  // Do not fall back to the whole body, which would collect global navigation links.
+  if (detailRoot.length) detailRoot.children().each((_, child) => {
+    if (!$(child).find(".dfbox > .fl > .df_tit").length) return;
+    $(child).find("a[href]").each((_, anchor) => {
+      try {
+        const href = new URL($(anchor).attr("href") || "", pageUrl);
+        const label = clean($(anchor).text());
+        if (["http:", "https:"].includes(href.protocol) && label &&
+          !($(anchor).attr("href") || "").startsWith("#") && label !== "본문영역 바로가기") links.push({ label, url: href.toString() });
+      } catch { /* ignore */ }
+    });
   });
   const fullText = clean($("main").text() || $("body").text());
-  // Retain the section text separately; it must not be truncated.
-  const headings = $("h2,h3,h4,h5,legend,.title,.tit").toArray().filter((node) => SECTION_TITLES.includes(clean($(node).text())));
-  for (const heading of headings) {
-    const title = clean($(heading).text());
-    const bucket = section(title);
-    const fragments: string[] = [];
-    let next = $(heading).next();
-    while (next.length && !SECTION_TITLES.includes(clean(next.text()))) {
-      fragments.push(clean(next.text()));
-      next = next.next();
-    }
-    bucket.text = clean(fragments.join(" "));
+  if (!sections.some((section) => section.fields.some((field) => field.label === "공고명" && field.value))) {
+    throw new Error("나라장터 상세 데이터를 읽지 못했습니다.");
   }
-  if (!fields["공고명"]) throw new Error("나라장터 상세 데이터를 읽지 못했습니다.");
   const summary = {
     sectionCount: sections.length,
     fieldCount: sections.reduce((n, item) => n + item.fields.length, 0),
     nonemptyFieldCount: sections.reduce((n, item) => n + item.fields.filter((field) => field.value !== null).length, 0),
     tableCount: sections.reduce((n, item) => n + item.tables.length, 0),
-    tableRowCount: sections.reduce((n, item) => n + item.tables.reduce((count, table) => count + table.rows.length, 0), 0),
+    tableRowCount: sections.reduce((n, item) => n + item.tables.reduce((count, table) => count + table.bodyRows.length, 0), 0),
     attachmentCount: attachments.length,
     linkCount: links.length
   };
@@ -177,7 +198,7 @@ export function extractDetailPage(html: string, pageUrl: string, fileMetadata: A
     schemaVersion: "pilot-4", noticeKey: `${number}--${order}`, sourceUrl: pageUrl,
     capturedAt: new Date().toISOString(), sections, summary, attachments, links,
     provenance: { sections: "rendered G2B page", attachmentsAndLinks: "rendered G2B page and attachment metadata response" },
-    fields, text: fullText
+    text: fullText
   };
 }
 
@@ -203,7 +224,10 @@ export function extractModalStructure(html: string): { title: string | null; fie
     }).filter((value): value is string => value !== null);
     const plain = cell.clone();
     plain.find("input,textarea,select,button,script,style").remove();
-    return nonempty([...values, clean(plain.text())].filter(Boolean).join(" "));
+    const breakMarker = "\uE000";
+    plain.find("br").replaceWith(breakMarker);
+    const plainText = clean(plain.text()).split(breakMarker).map(clean).join("\n");
+    return [...values, plainText].filter(Boolean).join(" ") || null;
   };
   // A single data-title cell is a single field; never also collect its paired th.
   const fieldIndex = new Map<string, number>();
@@ -232,23 +256,45 @@ export function extractModalStructure(html: string): { title: string | null; fie
   });
   // WebSquare grids: only actual data cells (col_id), not row-status/checkbox controls.
   root.find("table").each((_, element) => {
-    const table = $(element);
-    const dataRows = table.find("tr").filter((_, tr) => $(tr).children("td[col_id]").length > 0);
-    if (!dataRows.length) return;
-    const firstCells = dataRows.first().children("td[col_id]");
-    const ids = firstCells.toArray().map(cell => $(cell).attr("col_id") || "").filter(Boolean);
-    if (!ids.length) return;
-    const columns = ids.map(id => {
-      const header = table.find("th[col_id]").filter((_, th) => $(th).attr("col_id") === id).first();
-      return clean(header.text()) || id;
-    });
-    const rows = dataRows.toArray().map(tr => ids.map(id => {
-      const cell = $(tr).children("td[col_id]").filter((_, td) => $(td).attr("col_id") === id).first();
-      return cell.length ? readValue(cell) : null;
-    }));
-    if (rows.length) tables.push({ columns, rows });
+    const table = extractModalGrid($, $(element), readValue);
+    if (table) tables.push(table);
   });
   return { title, fields, tables };
+}
+
+/** Read the file identity behind WebSquare's href-less download cells. */
+export async function collectClickDownloads(page: import("playwright-core").Page): Promise<ClickDownload[]> {
+  return page.locator("td[col_id='orgnlAtchFileNm']").evaluateAll((cells) => {
+    const results: ClickDownload[] = [];
+    for (const cell of cells) {
+      if (!(cell instanceof HTMLElement) || !cell.id) continue;
+      const action = cell.querySelector("a,button");
+      if (!action) continue;
+      const href = action.getAttribute("href");
+      if (href && !href.startsWith("#") && !/^javascript:/i.test(href)) continue;
+      const table = cell.closest("table[id$='_body_table']");
+      const rowMatch = /_cell_(\d+)_\d+$/.exec(cell.id);
+      if (!table || !rowMatch) continue;
+      const gridId = table.id.slice(0, -"_body_table".length);
+      const grid = (window as any).$w?.getComponentById?.(gridId);
+      const rowIndex = Number(rowMatch[1]);
+      if (!grid || rowIndex >= grid.getRowCount?.()) continue;
+      const row = grid.getRowJSON?.(rowIndex) as Record<string, unknown> | undefined;
+      if (!row) continue;
+      for (const key of Object.keys(row)) {
+        const match = /^(.*?)(?:UntyAtchFileNo|untyAtchFileNo)$/.exec(key);
+        if (!match) continue;
+        const fileNo = row[key];
+        const seq = row[`${match[1]}AtchFileSqno`] ?? row[`${match[1]}atchFileSqno`];
+        const number = Number(seq);
+        if (typeof fileNo !== "string" || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(fileNo) ||
+            !Number.isSafeInteger(number) || number <= 0) continue;
+        const name = cell.textContent?.replace(/\s+/g, " ").trim() || "";
+        if (name) results.push({ cellId: cell.id, name, fileNo, seq: number });
+      }
+    }
+    return results;
+  });
 }
 
 // Deliberately collect raw modal contents first; interpretation/structuring is a separate step.
@@ -350,10 +396,22 @@ async function clickCandidates(page: import("playwright-core").Page, dialogId: s
     const inlineAction = [...element.attributes].some((attribute) => /^on/i.test(attribute.name));
     const readOnlyLabel = /조회|상세|정보|안내|보기|열기|공지|계획|금액/.test(`${label} ${value}`);
     const safeAnchor = !anchor || !href || href === "#" || /^javascript:void\((?:null|0)\);?$/i.test(href.trim());
-    const preceding = Array.from(document.querySelectorAll("h2,h3,h4,h5,legend,.title,.tit"))
-      .filter(h => h.compareDocumentPosition(element) & Node.DOCUMENT_POSITION_FOLLOWING);
-    const headings = ["공고일반", "입찰자격", "입찰진행정보", "가격", "기초금액공개", "기관담당자정보", "연관정보", "파일첨부 관련 안내사항", "파일첨부"];
-    const sectionHint = preceding.map(h => (h.textContent || "").trim()).filter(t => headings.includes(t)).pop() || null;
+    const sectionHint = (() => {
+      const detailRoot = element.closest(".pop_contents > .sub_contents");
+      if (!detailRoot) return null;
+      for (let block: Element | null = element; block && block !== detailRoot; block = block.parentElement) {
+        const headingBlock = block.previousElementSibling;
+        if (!headingBlock?.matches(".dfbox")) continue;
+        const heading = headingBlock.querySelector(":scope > .fl > .df_tit");
+        if (!heading) continue;
+        const parent = block.parentElement;
+        if (!block.matches(".tbbox,.gvwbox") &&
+            (!parent || parent.matches(".pop_contents,.sub_contents") ||
+              parent.querySelectorAll(":scope > .dfbox > .fl > .df_tit").length !== 1)) continue;
+        return heading.textContent?.trim() || null;
+      }
+      return null;
+    })();
     const skip = !visible || !value || (owner?.id || null) !== dialogId || element.hasAttribute("disabled") ||
       element.getAttribute("aria-disabled") === "true" || !!element.closest("nav,header,footer,[id*='navigation']") ||
       !!element.closest("td[data-title='관련공고']") || /^(submit|reset|file)$/i.test(type) ||
@@ -405,12 +463,12 @@ export async function collectModalContents(page: import("playwright-core").Page)
         if (fresh) {
           const structured = extractModalStructure(fresh.html);
           const hasData = structured.fields.some((field) => field.value) ||
-            structured.tables.some((table) => table.rows.some((row) => row.some(Boolean))) ||
+            structured.tables.some(tableHasValue) ||
             fresh.text.replace(fresh.title || "", "").trim().length > 20;
           if (hasData) {
             captures.push({ trigger: { index: candidate.index, tag: candidate.tag, label: candidate.label,
               value: candidate.value, sectionHint: candidate.sectionHint, html: candidate.html, parentModalTitle },
-              modal: { text: fresh.text, html: fresh.html, ...structured },
+              modal: { text: fresh.text, ...structured },
               settling: { status: settling.status, elapsedMs: settling.elapsedMs } });
             if (fresh.id) await explore(fresh.id, fresh.title, depth + 1);
           }
@@ -455,13 +513,14 @@ export async function scrapeDetailPage(url: string): Promise<ScrapeResult> {
     await page.locator('table[id$="_grdFile_body_table"]').first().waitFor({ timeout: 20_000 });
     await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => undefined);
     const metadata = (await Promise.all(responses)).flat();
+    const clickDownloads = await collectClickDownloads(page);
     const html = await page.evaluate(() => {
       document.querySelectorAll("input,textarea,select").forEach((element) => {
         if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement) element.setAttribute("value", element.value);
       });
       return document.documentElement.outerHTML;
     });
-    const detail = extractDetailPage(html, url, metadata);
+    const detail = extractDetailPage(html, url, metadata, clickDownloads);
     const relatedNoticeKeys = extractRelatedNoticeKeys(html);
     // Preserve the original extraction independently of modal exploration failures.
     try {

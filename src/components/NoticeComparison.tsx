@@ -1,6 +1,9 @@
 import type { ApiNotice } from "@/lib/g2b/types";
 import type { ScrapedDetail, StructuredField, StructuredTable } from "@/lib/g2b/detail-page";
 import { apiFieldDisplayName } from "@/lib/g2b/api-field-labels";
+import type { IndependentReference } from "@/lib/g2b/notices";
+import { tableForDisplay } from "@/lib/g2b/structured-table";
+import { safeAttachmentLink } from "@/lib/g2b/attachment-links";
 
 function safeLink(value: string): string | null {
   try {
@@ -19,7 +22,7 @@ function FieldList({ fields, apiLabels = false }: { fields: StructuredField[]; a
   return <dl className="raw-fields">{fields.map((field, index) => {
     const value = displayValue(field.value);
     const href = typeof field.value === "string" ? safeLink(field.value) : null;
-    return <div className="raw-field" key={`${field.label}-${index}`}>
+    return <div className={`raw-field${value.includes("\n") ? " raw-field--multiline" : ""}`} key={`${field.label}-${index}`}>
       <dt>{apiLabels ? apiFieldDisplayName(field.label) : field.label}</dt>
       <dd>{value ? href ? <a href={href} target="_blank" rel="noopener noreferrer">{value}</a> : value : <span className="muted">값 없음</span>}</dd>
     </div>;
@@ -27,14 +30,15 @@ function FieldList({ fields, apiLabels = false }: { fields: StructuredField[]; a
 }
 
 function DataTable({ table, name }: { table: StructuredTable; name: string }) {
-  const rows = table.rows.filter((row) => row.some((value) => Boolean(value?.trim())));
-  if (!rows.length) return <p className="muted comparison-empty">표에 값이 없습니다.</p>;
-  const width = Math.max(table.columns.length, ...rows.map((row) => row.length));
-  const columnIndexes = Array.from({ length: width }, (_, index) => index);
+  const structured = tableForDisplay(table);
+  if (!structured.bodyRows.some((row) => row.some((cell) => Boolean(cell.value?.trim()))))
+    return <p className="muted comparison-empty">표에 값이 없습니다.</p>;
   return <div className="comparison-table-wrap"><table className="comparison-table" aria-label={name}>
-    <thead><tr>{columnIndexes.map((index) => <th key={index} scope="col">{table.columns[index] || `열 ${index + 1}`}</th>)}</tr></thead>
-    <tbody>{rows.map((row, rowIndex) => <tr key={rowIndex}>{columnIndexes.map((columnIndex) =>
-      <td key={columnIndex}>{row[columnIndex] || <span className="muted">값 없음</span>}</td>
+    <thead>{structured.headerRows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) =>
+      <th key={cellIndex} scope={cell.colspan > 1 ? "colgroup" : "col"} rowSpan={cell.rowspan} colSpan={cell.colspan}>{cell.value || ""}</th>
+    )}</tr>)}</thead>
+    <tbody>{structured.bodyRows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) =>
+      <td key={cellIndex} rowSpan={cell.rowspan} colSpan={cell.colspan}>{cell.value ?? ""}</td>
     )}</tr>)}</tbody>
   </table></div>;
 }
@@ -46,10 +50,13 @@ function TableList({ tables, group }: { tables: StructuredTable[]; group: string
   </div>)}</div>;
 }
 
-export function NoticeComparison({ api, detail }: { api: ApiNotice | null; detail: ScrapedDetail | null }) {
+export function NoticeComparison({ api, detail, orderPlans = [], preSpecifications = [] }: { api: ApiNotice | null; detail: ScrapedDetail | null;
+  orderPlans?: IndependentReference[]; preSpecifications?: IndependentReference[] }) {
   const apiFields = Object.entries(api || {}).map(([label, value]) => ({ label, value: displayValue(value) }));
-  const detailFields = Object.entries(detail?.fields || {}).map(([label, value]) => ({ label, value }));
-  const captures = detail?.modalCaptures || [];
+  const detailFieldCount = detail?.sections?.reduce((count, section) => count + section.fields.length, 0) || 0;
+  const captures = [...(detail?.modalCaptures || []), ...(detail?.baseAmountCaptures || []), ...(detail?.changeNoticeCaptures || [])];
+  const independent = [...orderPlans.map((item) => ({ ...item, kind: "발주계획" })),
+    ...preSpecifications.map((item) => ({ ...item, kind: "사전규격" }))];
 
   return <>
     <nav className="comparison-jumps" aria-label="비교 항목 바로가기">
@@ -66,23 +73,23 @@ export function NoticeComparison({ api, detail }: { api: ApiNotice | null; detai
     </section>
 
     <section className="comparison-panel" id="comparison-detail" aria-label="상세 정보 추출">
-      <div className="comparison-panel-header"><h2>상세 정보 추출</h2><span>{detailFields.length}개 필드</span></div>
+      <div className="comparison-panel-header"><h2>상세 정보 추출</h2><span>{detailFieldCount}개 필드</span></div>
       {detail ? <>
-        <div className="comparison-group"><h3>상세 페이지 필드</h3><FieldList fields={detailFields} /></div>
         <div className="comparison-group"><h3>상세 페이지 섹션 · {detail.sections?.length || 0}개</h3>
           {detail.sections?.length ? detail.sections.map((section, index) => <details className="comparison-card" key={`${section.title}-${index}`} open>
             <summary>{section.title} <span>필드 {section.fields.length} · 표 {section.tables.length}</span></summary>
-            <FieldList fields={section.fields} />
+            {(section.fields.length > 0 || !section.details?.length) && <FieldList fields={section.fields} />}
             <TableList tables={section.tables} group={section.title} />
-            {section.text && <div className="comparison-text-block"><h4>섹션 본문</h4><p>{section.text}</p></div>}
+            {section.details?.map((item, detailIndex) => <div className="comparison-detail-block" key={detailIndex}>
+              <h4>{item.title}</h4>
+              <FieldList fields={item.fields} />
+              <TableList tables={item.tables} group={`${section.title} ${item.title} ${detailIndex + 1}`} />
+            </div>)}
           </details>) : <p className="muted comparison-empty">섹션별 수집 자료가 없습니다.</p>}
-        </div>
-        <div className="comparison-group"><h3>상세 페이지 본문</h3>
-          <p className="comparison-body">{detail.text || <span className="muted">수집된 본문이 없습니다.</span>}</p>
         </div>
         <div className="comparison-group"><h3>첨부파일 · {detail.attachments.length}개</h3>
           {detail.attachments.length ? <ul className="comparison-links">{detail.attachments.map((file, index) => {
-            const href = file.url && safeLink(file.url);
+            const href = file.url && safeAttachmentLink(file.url);
             return <li key={`${file.name}-${index}`}>{href ? <a href={href} download>{file.name}</a> : file.name}</li>;
           })}</ul> : <p className="muted comparison-empty">수집된 첨부파일이 없습니다.</p>}
         </div>
@@ -104,6 +111,15 @@ export function NoticeComparison({ api, detail }: { api: ApiNotice | null; detai
           </details>) : <p className="muted comparison-empty">수집된 클릭 상세 정보가 없습니다.</p>}
           {detail.modalDiscovery?.failures.length ? <p className="comparison-failures">수집 실패 {detail.modalDiscovery.failures.length}건: {detail.modalDiscovery.failures.join(" · ")}</p> : null}
         </section>
+        {independent.length > 0 && <section className="comparison-group" aria-label="독립 상세 정보">
+          <h3>참조 상세 정보 · {independent.length}개</h3>
+          {independent.map((item) => <details className="comparison-card" key={`${item.kind}-${item.number}`} open>
+            <summary>{item.kind} · {item.number}</summary>
+            {item.detail ? <><FieldList fields={item.detail.fields} />
+              <TableList tables={item.detail.tables} group={`${item.kind} ${item.number}`} /></>
+              : <p className="muted comparison-empty">참조한 상세 정보가 없습니다.</p>}
+          </details>)}
+        </section>}
         <details className="raw-json"><summary>상세 수집 JSON 원문 보기</summary><pre>{JSON.stringify(detail, null, 2)}</pre></details>
       </> : <p className="muted comparison-empty">상세 페이지 수집 자료가 없습니다.</p>}
     </section>

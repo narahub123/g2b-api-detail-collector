@@ -2,6 +2,7 @@ import type { ScrapedDetail } from "./detail-page";
 import { serviceDetailUrl } from "./detail-page";
 import { noticeKeyFromParts } from "./identity";
 import type { ApiNotice } from "./types";
+import { safeAttachmentLink } from "./attachment-links";
 
 export type FieldValue = { value: string | null; source: "api" | "detail" | null };
 export type ValidationIssue = { field: string; message: string };
@@ -32,8 +33,12 @@ const read = (record: Record<string, unknown>, key: string): string | null => {
 
 function pick(api: ApiNotice | null, detail: ScrapedDetail | null, detailKeys: string[], apiKeys: string[]): FieldValue {
   for (const key of detailKeys) {
-    const value = detail?.fields[key]?.trim();
-    if (value) return { value, source: "detail" };
+    for (const section of detail?.sections || []) {
+      for (const field of section.fields) {
+        const value = field.label === key ? field.value?.trim() : null;
+        if (value) return { value, source: "detail" };
+      }
+    }
   }
   for (const key of apiKeys) {
     const value = read(api || {}, key);
@@ -85,14 +90,16 @@ export function normalizeNotice(api: ApiNotice | null, detail: ScrapedDetail | n
   const attachments: NormalizedNotice["attachments"] = [];
   const seen = new Set<string>();
   for (const item of detail?.attachments || []) {
-    const url = item.url && safeG2bUrl(item.url);
-    if (url && !seen.has(item.name)) { attachments.push({ name: item.name, url }); seen.add(item.name); }
+    const url = item.url && safeAttachmentLink(item.url);
+    const identity = `${item.name}\u0000${url}`;
+    if (url && !seen.has(identity)) { attachments.push({ name: item.name, url }); seen.add(identity); }
   }
   for (let i = 1; i <= 10; i++) {
     const name = read(api || {}, `ntceSpecFileNm${i}`);
     const url = read(api || {}, `ntceSpecDocUrl${i}`);
-    const safe = url && safeG2bUrl(url);
-    if (name && safe && !seen.has(name)) { attachments.push({ name, url: safe }); seen.add(name); }
+    const safe = url && safeAttachmentLink(url);
+    const identity = `${name}\u0000${safe}`;
+    if (name && safe && !seen.has(identity)) { attachments.push({ name, url: safe }); seen.add(identity); }
   }
   return {
     key, number, order,

@@ -115,6 +115,11 @@
 .comparison-card[open] summary { border-bottom: 1px solid #dde7e9; }
 .comparison-card .raw-field { padding-left: 15px; padding-right: 15px; }
 .comparison-card .raw-field:last-child { border-bottom: 0; }
+.comparison-detail-block { padding: 15px; border-top: 1px solid #dde7e9; background: #fbfdfd; }
+.comparison-detail-block h4 { margin: 0 0 10px; color: #244750; font-size: 13px; }
+.comparison-detail-block .raw-fields { overflow: hidden; border: 1px solid #dde7e9; border-radius: 8px; background: #fff; }
+.comparison-detail-block .raw-field { grid-template-columns: minmax(100px, 34%) minmax(0, 1fr); padding: 10px 12px; }
+.comparison-detail-block .raw-field--multiline { grid-template-columns: 1fr; gap: 4px; }
 
 .comparison-table-block { padding: 15px; border-top: 1px solid #e7eeef; }
 .comparison-table-block h5 { margin: 0 0 10px; font-size: 12px; color: #49636e; }

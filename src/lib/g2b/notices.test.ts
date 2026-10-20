@@ -38,11 +38,14 @@ describe("saved notices", () => {
     await mkdir(join(dir, "notices"));
     await writeFile(join(dir, "notices", "R26BK1--000.json"), JSON.stringify({
       api: { bidNtceNo: "R26BK1", bidNtceOrd: "000", bidNtceNm: "용역", srvceDivNm: "연구" },
-      detail: { sourceUrl: "https://www.g2b.go.kr/", fields: { "업종제한사항": "연구" }, text: "전체 본문", attachments: [], links: [] }
+      detail: { sourceUrl: "https://www.g2b.go.kr/", sections: [{ title: "입찰자격", fields: [
+        { label: "업종제한사항", value: "연구" }
+      ], tables: [{ columns: ["구분"], rows: [["이전 형식"]] }] }], text: "전체 본문", attachments: [], links: [] }
     }));
     const record = await getNoticeRecord("R26BK1--000", dir);
     expect(record?.api?.srvceDivNm).toBe("연구");
     expect(record?.detail?.text).toBe("전체 본문");
+    expect(record?.detail?.sections?.[0].tables[0]).toEqual({ columns: ["구분"], rows: [["이전 형식"]] });
     expect(record?.normalized.title.value).toBe("용역");
     expect(await getNoticeRecord("../bad", dir)).toBeNull();
   });
@@ -52,7 +55,9 @@ describe("saved notices", () => {
     await mkdir(join(dir, "notices"));
     await writeFile(join(dir, "notices", "R26BK1--001.json"), JSON.stringify({
       key: "R26BK1--001", api: null,
-      detail: { sourceUrl: "https://www.g2b.go.kr/", fields: { 공고명: "이전 공고" }, text: "본문", attachments: [], links: [] },
+      detail: { sourceUrl: "https://www.g2b.go.kr/", sections: [{ title: "공고일반", fields: [
+        { label: "공고명", value: "이전 공고" }
+      ], tables: [] }], text: "본문", attachments: [], links: [] },
       relatedNoticeKeys: ["R26BK1--002", "R26BK1--002"]
     }));
     const record = await getNoticeRecord("R26BK1--001", dir);
@@ -63,5 +68,22 @@ describe("saved notices", () => {
       key: "wrong--key", api: null, detail: null
     }));
     expect(await getNoticeRecord("R26BK1--002", dir)).toBeNull();
+  });
+
+  it("resolves independent references and reports a missing referenced file", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "g2b-notices-")); dirs.push(dir);
+    await mkdir(join(dir, "notices"));
+    await mkdir(join(dir, "order-plans"));
+    await writeFile(join(dir, "notices", "R26BK1--000.json"), JSON.stringify({
+      key: "R26BK1--000", api: { bidNtceNo: "R26BK1", bidNtceOrd: "000" }, detail: null,
+      orderPlanNumbers: ["R26DD1"], preSpecificationNumbers: ["R26BD1"]
+    }));
+    await writeFile(join(dir, "order-plans", "R26DD1.json"), JSON.stringify({
+      schemaVersion: 1, number: "R26DD1", title: "발주계획상세조회", fields: [], tables: [],
+      capturedAt: "2026-10-19T00:00:00Z", sourceNoticeKey: "R26BK1--000"
+    }));
+    const record = await getNoticeRecord("R26BK1--000", dir);
+    expect(record?.orderPlans[0].detail?.number).toBe("R26DD1");
+    expect(record?.preSpecifications).toEqual([{ number: "R26BD1", detail: null }]);
   });
 });

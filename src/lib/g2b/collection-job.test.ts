@@ -19,7 +19,7 @@ describe("collection job", () => {
     } } }));
     const job = await startCollection({ start: "2026-10-01", end: "2026-10-01" }, {
       dataDir, fetcher: fetcher as typeof fetch,
-      scrape: async (url) => { if (url.includes("R26BK2")) throw new Error("페이지 오류"); return { detail: { sourceUrl: url, fields: {}, text: "첫 공고", attachments: [], links: [] }, relatedNoticeKeys: [] }; }
+      scrape: async (url) => { if (url.includes("R26BK2")) throw new Error("페이지 오류"); return { detail: { sourceUrl: url, sections: [], text: "첫 공고", attachments: [], links: [] }, relatedNoticeKeys: [] }; }
     });
     let state = await getCollectionJob(job.id, dataDir);
     for (let i = 0; i < 50 && state?.status === "running"; i++) {
@@ -42,7 +42,7 @@ describe("collection job", () => {
     } } }));
     const job = await startCollection({ start: "2026-10-01", end: "2026-10-01" }, {
       dataDir, fetcher: fetcher as typeof fetch,
-      scrape: async (url) => { await hold; return { detail: { sourceUrl: url, fields: {}, text: "용역", attachments: [], links: [] }, relatedNoticeKeys: [] }; }
+      scrape: async (url) => { await hold; return { detail: { sourceUrl: url, sections: [], text: "용역", attachments: [], links: [] }, relatedNoticeKeys: [] }; }
     });
     vi.resetModules();
     const otherModule = await import("./collection-job");
