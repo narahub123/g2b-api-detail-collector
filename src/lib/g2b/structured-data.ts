@@ -58,8 +58,7 @@ export function structureNoticeDetail(key: string, detail: ScrapedDetail): Struc
   for (const original of [...(detail.modalCaptures || []), ...(detail.baseAmountCaptures || []),
     ...(detail.changeNoticeCaptures || [])]) {
     const sectionHint = original.trigger.sectionHint;
-    const { sectionHint: _sectionHint, ...trigger } = original.trigger;
-    const capture: ModalCapture = { ...original, trigger, modal: { ...original.modal } };
+    const capture: ModalCapture = { ...original, trigger: { ...original.trigger }, modal: { ...original.modal } };
     delete capture.modal.html;
     const title = capture.modal.title;
     const isPlan = title === "발주계획상세조회";

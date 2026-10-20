@@ -120,9 +120,20 @@ describe("structureNoticeDetail", () => {
     const result = structureNoticeDetail("R26BK1--000", source);
     expect(result.detail.sections?.every((section) => section.details?.length === 0)).toBe(true);
     expect(result.detail.modalCaptures).toHaveLength(2);
-    expect(result.detail.modalCaptures?.every((item) => !Object.hasOwn(item.trigger, "sectionHint"))).toBe(true);
+    expect(result.detail.modalCaptures?.map((item) => item.trigger.sectionHint))
+      .toEqual([null, "기초금액공개"]);
     expect(result.detail.modalCaptures?.map((item) => item.modal.fields)).toEqual(source.modalCaptures?.map((item) => item.modal.fields));
     expect(result.warnings).toHaveLength(2);
+  });
+
+  it("preserves the source section for ordinary modal captures", () => {
+    const result = structureNoticeDetail("R26BK1--000", detail([
+      capture("개찰완료", [{ label: "상태", value: "개찰완료" }], "입찰진행현황")
+    ]));
+    expect(result.detail.modalCaptures).toHaveLength(1);
+    expect(result.detail.modalCaptures?.[0].trigger.sectionHint).toBe("입찰진행현황");
+    expect(result.detail.modalCaptures?.[0].modal).not.toHaveProperty("html");
+    expect(result.detail).not.toHaveProperty("text");
   });
 
   it("accepts a shared order plan that lists multiple bid numbers", () => {
