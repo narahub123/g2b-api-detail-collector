@@ -1,5 +1,5 @@
 import type { ApiNotice } from "@/lib/g2b/types";
-import type { ScrapedDetail, StructuredField, StructuredTable } from "@/lib/g2b/detail-page";
+import type { ModalCapture, ScrapedDetail, StructuredField, StructuredTable } from "@/lib/g2b/detail-page";
 import { apiFieldDisplayName } from "@/lib/g2b/api-field-labels";
 import type { IndependentReference } from "@/lib/g2b/notices";
 import { tableForDisplay } from "@/lib/g2b/structured-table";
@@ -50,13 +50,27 @@ function TableList({ tables, group }: { tables: StructuredTable[]; group: string
   </div>)}</div>;
 }
 
-export function NoticeComparison({ api, detail, orderPlans = [], preSpecifications = [] }: { api: ApiNotice | null; detail: ScrapedDetail | null;
-  orderPlans?: IndependentReference[]; preSpecifications?: IndependentReference[] }) {
+/** 저장된 모달이 어떤 클릭으로 열렸는지 비교 화면에 표시합니다. */
+function ClickSources({ triggers }: { triggers: ModalCapture["trigger"][] }) {
+  return triggers.map((trigger, index) => <p className="muted" key={index}>
+    클릭 출처: {trigger.label} · {trigger.value}
+    {trigger.parentModalTitle ? ` (${trigger.parentModalTitle}에서 열림)` : ""}
+  </p>);
+}
+
+/**
+ * API 응답, 섹션 상세, 독립 저장 자료를 공고별로 비교해 보여줍니다.
+ * @param props 읽은 공고 자료와 번호로 연결한 독립 상세 참조
+ * @returns 원문 필드 및 참조 상세를 표시하는 비교 화면
+ */
+export function NoticeComparison({ api, detail, orderPlans = [], preSpecifications = [], otherDetails = [] }: { api: ApiNotice | null; detail: ScrapedDetail | null;
+  orderPlans?: IndependentReference[]; preSpecifications?: IndependentReference[]; otherDetails?: IndependentReference[] }) {
   const apiFields = Object.entries(api || {}).map(([label, value]) => ({ label, value: displayValue(value) }));
   const detailFieldCount = detail?.sections?.reduce((count, section) => count + section.fields.length, 0) || 0;
   const captures = [...(detail?.modalCaptures || []), ...(detail?.baseAmountCaptures || []), ...(detail?.changeNoticeCaptures || [])];
   const independent = [...orderPlans.map((item) => ({ ...item, kind: "발주계획" })),
-    ...preSpecifications.map((item) => ({ ...item, kind: "사전규격" }))];
+    ...preSpecifications.map((item) => ({ ...item, kind: "사전규격" })),
+    ...otherDetails.map((item) => ({ ...item, kind: item.number.slice(3, 5) === "TA" ? "계약" : "입찰공고" }))];
 
   return <>
     <nav className="comparison-jumps" aria-label="비교 항목 바로가기">
@@ -82,6 +96,7 @@ export function NoticeComparison({ api, detail, orderPlans = [], preSpecificatio
             <TableList tables={section.tables} group={section.title} />
             {section.details?.map((item, detailIndex) => <div className="comparison-detail-block" key={detailIndex}>
               <h4>{item.title}</h4>
+              {item.trigger && <ClickSources triggers={[item.trigger]} />}
               <FieldList fields={item.fields} />
               <TableList tables={item.tables} group={`${section.title} ${item.title} ${detailIndex + 1}`} />
             </div>)}
@@ -115,8 +130,11 @@ export function NoticeComparison({ api, detail, orderPlans = [], preSpecificatio
           <h3>참조 상세 정보 · {independent.length}개</h3>
           {independent.map((item) => <details className="comparison-card" key={`${item.kind}-${item.number}`} open>
             <summary>{item.kind} · {item.number}</summary>
+            <ClickSources triggers={item.triggers?.length ? item.triggers : item.detail?.trigger ? [item.detail.trigger] : []} />
+            {item.detail?.sourceNoticeKey && <p className="muted">최초 저장 공고: {item.detail.sourceNoticeKey}</p>}
             {item.detail ? <><FieldList fields={item.detail.fields} />
               <TableList tables={item.detail.tables} group={`${item.kind} ${item.number}`} /></>
+              : item.noticeKey ? <a href={`/bids/${encodeURIComponent(item.noticeKey)}`}>{item.number} 공고 보기</a>
               : <p className="muted comparison-empty">참조한 상세 정보가 없습니다.</p>}
           </details>)}
         </section>}

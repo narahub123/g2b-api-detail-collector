@@ -425,11 +425,26 @@ describe("extractDetailPage", () => {
 });
 
 describe("extractModalStructure", () => {
+  it("records the same inline visibility metadata for modal fields as page fields", () => {
+    const html = `<div role="dialog"><table>
+      <tr><td data-title="표시 필드">표시 값</td></tr>
+      <tr style="display:none"><td data-title="숨긴 행">숨긴 값</td></tr>
+      <tr><td data-title="처음 빈 값" style="visibility:hidden"></td></tr>
+      <tr><td data-title="처음 빈 값">나중 값</td></tr>
+      <tr><th class="w2tb_th">대체 필드</th><td style="display:none">대체 값</td></tr>
+    </table></div>`;
+    expect(extractModalStructure(html).fields).toEqual([
+      { label: "표시 필드", value: "표시 값", visible: true },
+      { label: "숨긴 행", value: "숨긴 값", visible: false },
+      { label: "처음 빈 값", value: "나중 값", visible: true },
+      { label: "대체 필드", value: "대체 값", visible: false }
+    ]);
+  });
   it("preserves line breaks represented by br tags in a notice body", () => {
     const html = `<div role="dialog"><div class="w2window_header_title">공지사항 상세</div>
       <table><tr><th class="w2tb_th">내용</th><td data-title="내용"><div class="w2textbox">아래와 같은 사유로 변경공고가 게시되었습니다.<br><br>공고명(연도표기) 변경</div></td></tr></table></div>`;
     expect(extractModalStructure(html).fields).toEqual([
-      { label: "내용", value: "아래와 같은 사유로 변경공고가 게시되었습니다.\n\n공고명(연도표기) 변경" }
+      { label: "내용", value: "아래와 같은 사유로 변경공고가 게시되었습니다.\n\n공고명(연도표기) 변경", visible: true }
     ]);
   });
 

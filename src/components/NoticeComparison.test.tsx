@@ -26,6 +26,29 @@ const detail: ScrapedDetail = {
 };
 
 describe("NoticeComparison", () => {
+  it("shows generic independent detail and a stored notice link", () => {
+    render(<NoticeComparison api={null} detail={detail} otherDetails={[
+      { number: "R26TA12345678", triggers: [{ index: 0, tag: "a", label: "계약번호", value: "R26TA12345678", html: "<a>조회</a>" }],
+        detail: { schemaVersion: 1, number: "R26TA12345678",
+        title: "계약 상세", fields: [{ label: "계약", value: "완료" }], tables: [],
+        capturedAt: "2026-10-19T00:00:00Z", sourceNoticeKey: "R26BK01774553--000" } },
+      { number: "R26BK12345678-000", detail: null, noticeKey: "R26BK12345678--000" }
+    ]} />);
+    expect(screen.getByText("계약 · R26TA12345678")).toBeInTheDocument();
+    expect(screen.getByText("완료")).toBeInTheDocument();
+    expect(screen.getByText("클릭 출처: 계약번호 · R26TA12345678")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "R26BK12345678-000 공고 보기" }))
+      .toHaveAttribute("href", "/bids/R26BK12345678--000");
+  });
+  it("shows the click source beside a section's modal detail", () => {
+    const withSource: ScrapedDetail = { ...detail, sections: [{ title: "공지사항", fields: [], tables: [], details: [
+      { title: "공지사항 상세", fields: [{ label: "내용", value: "안내" }], tables: [],
+        trigger: { index: 2, tag: "button", label: "보기", value: "보기", sectionHint: "공지사항",
+          parentModalTitle: "상위 팝업", html: "<button>보기</button>" } }
+    ] }] };
+    render(<NoticeComparison api={null} detail={withSource} />);
+    expect(screen.getByText("클릭 출처: 보기 · 보기 (상위 팝업에서 열림)")).toBeInTheDocument();
+  });
   it("links direct and internal attachments but not unrelated paths", () => {
     const internal = "/api/attachments/R26BK1--000?fileNo=de557b90-5d96-430d-9dd4-06b2d7b3627c&seq=1";
     render(<NoticeComparison api={null} detail={{ ...detail, attachments: [

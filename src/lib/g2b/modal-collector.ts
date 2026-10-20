@@ -1,5 +1,5 @@
 import * as cheerio from "cheerio";
-import { extractModalGrid, tableHasValue } from "./structured-table";
+import { extractModalGrid, isInlineVisible, tableHasValue } from "./structured-table";
 import { createModalDeduplication } from "./modal-deduplication";
 import type { StructuredTable } from "./structured-table";
 import type {
@@ -90,13 +90,15 @@ export function extractModalStructure(html: string): {
     const label = clean(cell.attr("data-title") || "");
     if (!label) return;
     const value = readValue(cell);
+    const visible = isInlineVisible($, element);
     // 같은 레이블이 반복되면 먼저 확보한 값을 유지하되, 기존 값이 비어 있을 때만 보완합니다.
     const previous = fieldIndex.get(label);
     if (previous === undefined) {
       fieldIndex.set(label, fields.length);
-      fields.push({ label, value });
+      fields.push({ label, value, visible });
     } else if (fields[previous].value === null && value !== null) {
       fields[previous].value = value;
+      fields[previous].visible = visible;
     }
   });
   // data-title이 없는 실제 인접 th/td 쌍에만 대체 추출 방식을 적용합니다.
@@ -105,7 +107,8 @@ export function extractModalStructure(html: string): {
     const next = th.next();
     if (!next.is("td") || next.attr("data-title")) return;
     const label = clean(th.text());
-    if (label) fields.push({ label, value: readValue(next) });
+    if (label) fields.push({ label, value: readValue(next),
+      visible: isInlineVisible($, element) && isInlineVisible($, next[0]) });
   });
   // WebSquare 그리드에서는 행 상태나 체크박스 컨트롤이 아닌 실제 데이터 셀(col_id)만 추출합니다.
   root.find("table").each((_, element) => {

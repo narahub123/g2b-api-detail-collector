@@ -47,13 +47,16 @@ describe("empty section filtering", () => {
     expect(result.detail.summary?.sectionCount).toBe(3);
   });
 
-  it("keeps a section when its modal capture is unresolved rather than treating it as empty", () => {
+  it("keeps a linked text-only modal's section and metadata without storing text", () => {
     const input = source();
     input.modalCaptures = [noticeCapture([])];
     const result = structureNoticeDetail("R26BK1--000", input);
     expect(result.detail.sections?.map((section) => section.title)).toContain("공지사항");
-    expect(result.detail.modalCaptures).toHaveLength(1);
+    expect(result.detail.sections?.find((section) => section.title === "공지사항")?.details)
+      .toMatchObject([{ title: "공지사항 상세", fields: [], tables: [] }]);
+    expect(result.detail.modalCaptures).toEqual([]);
     expect(result.warnings).toHaveLength(1);
+    expect(JSON.stringify(result.detail)).not.toContain('"text"');
   });
 
   it("retains a section with a nonblank field even when other fields are empty", () => {

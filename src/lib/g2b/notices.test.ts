@@ -8,6 +8,28 @@ const dirs: string[] = [];
 afterEach(async () => { await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))); });
 
 describe("saved notices", () => {
+  it("resolves a generic numbered detail and an already stored notice reference", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "g2b-notices-")); dirs.push(dir);
+    await mkdir(join(dir, "notices"));
+    await mkdir(join(dir, "independent-details"));
+    await writeFile(join(dir, "notices", "R26BK01774553--000.json"), JSON.stringify({
+      key: "R26BK01774553--000", api: null, detail: { sourceUrl: "source", attachments: [], links: [] },
+      otherDetailNumbers: ["R26TA12345678", "R26BK12345678-000"],
+      independentTriggers: [{ number: "R26BK12345678-000",
+        trigger: { index: 1, tag: "a", label: "다른 공고", value: "R26BK12345678-000", html: "<a>조회</a>" } }]
+    }));
+    await writeFile(join(dir, "independent-details", "R26TA12345678.json"), JSON.stringify({
+      schemaVersion: 1, number: "R26TA12345678", title: "계약 상세", fields: [{ label: "계약", value: "완료" }],
+      tables: [], capturedAt: "2026-10-19T00:00:00Z", sourceNoticeKey: "R26BK01774553--000"
+    }));
+    await writeFile(join(dir, "notices", "R26BK12345678--000.json"), JSON.stringify({
+      key: "R26BK12345678--000", api: null, detail: { sourceUrl: "existing", attachments: [], links: [] }
+    }));
+    const record = await getNoticeRecord("R26BK01774553--000", dir);
+    expect(record?.otherDetails[0].detail?.fields[0].value).toBe("완료");
+    expect(record?.otherDetails[1].noticeKey).toBe("R26BK12345678--000");
+    expect(record?.otherDetails[1].triggers?.[0].label).toBe("다른 공고");
+  });
   it("lists separate orders and ignores broken JSON", async () => {
     const dir = await mkdtemp(join(tmpdir(), "g2b-notices-")); dirs.push(dir);
     await mkdir(join(dir, "notices"));

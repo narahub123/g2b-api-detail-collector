@@ -49,6 +49,7 @@ it("assigns modal triggers to their structural section, or null when none owns t
       <table><tr><td data-title="내용">충분한 모달 내용입니다</td></tr></table></div>
     <script>
       document.querySelectorAll('[data-open]').forEach(link => link.addEventListener('click', () => {
+        document.querySelector('#dialog [data-title="내용"]').textContent = link.textContent + ' 상세 내용입니다';
         document.querySelector('#dialog').style.display = 'block';
       }));
       document.querySelector('[data-close]').addEventListener('click', () => {
@@ -109,6 +110,7 @@ it("captures a notice and its nested dialog once while avoiding unsafe controls"
     expect(result.captures[0].modal.fields).toContainEqual({
       label: "내용",
       value: "입찰참가자격 제한사항 재검토",
+      visible: true,
     });
     expect(result.captures[1].trigger.parentModalTitle).toBe("공지사항 상세");
     expect(
@@ -150,6 +152,7 @@ it("waits for asynchronously populated modal fields to settle before capture", a
     expect(result.captures[0].modal.fields).toContainEqual({
       label: "내용",
       value: "최종 응답",
+      visible: true,
     });
     expect(result.captures[0].settling?.status).toBe("settled");
     expect(await page.locator('[role="dialog"]:visible').count()).toBe(0);
@@ -185,6 +188,7 @@ it("does not report a modal-settling timeout as a collection failure", async () 
     expect(result.captures[0].modal.fields).toContainEqual({
       label: "내용",
       value: null,
+      visible: true,
     });
     expect(result.captures[0].settling?.status).toBe("timeout");
     expect(await page.locator('[role="dialog"]:visible').count()).toBe(0);

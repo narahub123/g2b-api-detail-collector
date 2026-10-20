@@ -44,7 +44,7 @@ describe("collection flow", () => {
     expect(saved.detail).not.toHaveProperty("text");
     expect(saved.orderPlanNumbers).toEqual([]);
   });
-  it("writes one latest order plan and references it from both notice orders", async () => {
+  it("keeps the first stored order plan and references it from both notice orders", async () => {
     process.env.G2B_SERVICE_KEY = "test-key";
     const dataDir = await mkdtemp(join(tmpdir(), "g2b-structured-")); dirs.push(dataDir);
     const fetcher = async () => new Response(JSON.stringify({ response: { header: { resultCode: "00" }, body: {
@@ -60,9 +60,9 @@ describe("collection flow", () => {
         return { detail: { sourceUrl: url, capturedAt: newer ? "2026-10-19T02:00:00Z" : "2026-10-19T01:00:00Z",
           sections: [{ title: "공고일반", fields: [{ label: "공고명", value: "용역" }], tables: [] }],
           text: "전체 본문", attachments: [], links: [],
-          modalCaptures: [{ trigger: { index: 0, tag: "a", label: "발주계획번호", value: "R26DD1", sectionHint: null, html: "<a>조회</a>" },
+          modalCaptures: [{ trigger: { index: 0, tag: "a", label: "발주계획번호", value: "R26DD20897516", sectionHint: null, html: "<a>조회</a>" },
             modal: { title: "발주계획상세조회", text: newer ? "최신" : "이전", html: "<div>원본</div>",
-              fields: [{ label: "발주계획번호", value: "R26DD1" }], tables: [] } }] }, relatedNoticeKeys: [] };
+              fields: [{ label: "발주계획번호", value: "R26DD20897516" }], tables: [] } }] }, relatedNoticeKeys: [] };
       }
     });
     let state = await getCollectionJob(job.id, dataDir);
@@ -71,13 +71,16 @@ describe("collection flow", () => {
       state = await getCollectionJob(job.id, dataDir);
     }
     expect(state?.status, state?.errors.join(" | ")).toBe("completed");
-    expect(await readdir(join(dataDir, "order-plans"))).toEqual(["R26DD1.json"]);
-    const plan = JSON.parse(await readFile(join(dataDir, "order-plans", "R26DD1.json"), "utf8"));
+    expect(await readdir(join(dataDir, "order-plans"))).toEqual(["R26DD20897516.json"]);
+    const plan = JSON.parse(await readFile(join(dataDir, "order-plans", "R26DD20897516.json"), "utf8"));
     expect(plan).not.toHaveProperty("text");
-    expect(plan.capturedAt).toBe("2026-10-19T02:00:00Z");
+    expect(plan.capturedAt).toBe("2026-10-19T01:00:00Z");
     for (const order of ["000", "001"]) {
       const notice = JSON.parse(await readFile(join(dataDir, "notices", `R26BK1--${order}.json`), "utf8"));
-      expect(notice.orderPlanNumbers).toEqual(["R26DD1"]);
+      expect(notice.orderPlanNumbers).toEqual(["R26DD20897516"]);
+      expect(notice.independentTriggers).toMatchObject([{
+        number: "R26DD20897516", trigger: { label: "발주계획번호", value: "R26DD20897516" }
+      }]);
       expect(notice.detail.modalCaptures).toEqual([]);
       expect(notice.detail).not.toHaveProperty("text");
     }

@@ -112,6 +112,8 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies): 
       record.detail = structured.detail;
       record.orderPlanNumbers = structured.orderPlanNumbers;
       record.preSpecificationNumbers = structured.preSpecificationNumbers;
+      record.otherDetailNumbers = structured.otherDetailNumbers;
+      record.independentTriggers = structured.independentTriggers;
       job.errors.push(...structured.warnings);
       record.detailError = null;
       job.detailSucceeded++;
@@ -235,6 +237,8 @@ async function runRefresh(job: CollectionJob, deps: CollectionDependencies): Pro
         await saveIndependentDetails(dir, structured);
         const updated: StoredNotice = { ...record, key: result.key, detail: structured.detail,
           orderPlanNumbers: structured.orderPlanNumbers, preSpecificationNumbers: structured.preSpecificationNumbers,
+          otherDetailNumbers: structured.otherDetailNumbers,
+          independentTriggers: structured.independentTriggers,
           detailError: null };
         updated.normalized = normalizeNotice(updated.api, updated.detail, { number, order });
         await writeJsonAtomic(path, updated);

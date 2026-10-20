@@ -14,10 +14,11 @@ export type AttachmentMetadata = { orgnlAtchFileNm: string; atchFileSqno: number
 export type ClickDownload = { cellId: string; name: string; fileNo: string; seq: number };
 export type StructuredField = { label: string; value: string | null; visible?: boolean };
 export type StructuredSection = { title: string; fields: StructuredField[]; tables: StructuredTable[];
-  details?: { title: string; fields: StructuredField[]; tables: StructuredTable[] }[]; visible?: boolean };
+  details?: { title: string; fields: StructuredField[]; tables: StructuredTable[];
+    trigger?: ModalCapture["trigger"] }[]; visible?: boolean };
 export type ModalCapture = {
   trigger: { index: number; tag: string; label: string; value: string; sectionHint?: string | null; html: string; parentModalTitle?: string | null };
-  modal: { text: string; html?: string; title: string | null; fields: StructuredField[]; tables: StructuredTable[] };
+  modal: { text?: string; html?: string; title: string | null; fields: StructuredField[]; tables: StructuredTable[] };
   settling?: { status: "settled" | "timeout"; elapsedMs: number };
 };
 export type ScrapedDetail = {
