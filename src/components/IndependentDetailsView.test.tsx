@@ -4,12 +4,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { IndependentReference } from "@/lib/g2b/notices";
 
 vi.mock("./NoticeUserView", () => ({
-  NoticeUserView: ({ detail }: { detail: { sections?: { title: string; fields: { label: string; value: string | null }[] }[] } }) => (
+  NoticeUserView: ({ detail }: { detail: { sections?: { title: string; fields: { label: string; value: { text: string; visible: boolean }[] }[] }[] } }) => (
     <div data-testid="stored-detail">
       {detail.sections?.map((section) => (
         <div key={section.title}>
           <h3>{section.title}</h3>
-          {section.fields.map((field) => <p key={field.label}>{field.label}: {field.value}</p>)}
+          {section.fields.map((field) => <p key={field.label}>{field.label}: {field.value.map((part) => part.text).join("")}</p>)}
         </div>
       ))}
     </div>
@@ -31,10 +31,10 @@ describe("IndependentDetailsView", () => {
     const references: IndependentReference[] = [{
       number: "R26DD12345678",
       detail: {
-        schemaVersion: 1,
+        schemaVersion: 2,
         number: "R26DD12345678",
         title: "발주계획 상세",
-        fields: [{ label: "사업명", value: "테스트 사업" }],
+        fields: [{ label: "사업명", value: [{ text: "테스트 사업", visible: true }] }],
         tables: [],
         capturedAt: "2026-10-25T00:00:00.000Z",
         sourceNoticeKey: "R26BK01774553--000",

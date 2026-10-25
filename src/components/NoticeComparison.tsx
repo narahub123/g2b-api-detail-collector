@@ -4,6 +4,7 @@ import { apiFieldDisplayName } from "@/lib/g2b/api-field-labels";
 import type { IndependentReference } from "@/lib/g2b/notices";
 import { tableForDisplay } from "@/lib/g2b/structured-table";
 import { safeAttachmentLink } from "@/lib/g2b/attachment-links";
+import { fieldText } from "@/lib/g2b/field-value";
 
 function safeLink(value: string): string | null {
   try {
@@ -21,8 +22,8 @@ function displayValue(value: unknown): string {
 function FieldList({ fields, apiLabels = false, group = "필드" }: { fields: StructuredField[]; apiLabels?: boolean; group?: string }) {
   if (!fields.length) return <p className="muted comparison-empty">수집된 필드가 없습니다.</p>;
   return <dl className="raw-fields">{fields.map((field, index) => {
-    const value = displayValue(field.value);
-    const href = typeof field.value === "string" ? safeLink(field.value) : null;
+    const value = apiLabels ? field.value[0]?.text || "" : fieldText(field.value) || "";
+    const href = safeLink(value);
     return <div className={`raw-field${value.includes("\n") ? " raw-field--multiline" : ""}`} key={`${field.label}-${index}`}>
       <dt>{apiLabels ? apiFieldDisplayName(field.label) : field.label}</dt>
       <dd>{value ? href ? <a href={href} target="_blank" rel="noopener noreferrer">{value}</a> : value
@@ -69,7 +70,8 @@ function ClickSources({ triggers }: { triggers: ModalCapture["trigger"][] }) {
  */
 export function NoticeComparison({ api, detail, orderPlans = [], preSpecifications = [], otherDetails = [] }: { api: ApiNotice | null; detail: ScrapedDetail | null;
   orderPlans?: IndependentReference[]; preSpecifications?: IndependentReference[]; otherDetails?: IndependentReference[] }) {
-  const apiFields = Object.entries(api || {}).map(([label, value]) => ({ label, value: displayValue(value) }));
+  const apiFields = Object.entries(api || {}).map(([label, value]) => ({ label,
+    value: [{ text: displayValue(value), visible: true }] }));
   const detailFieldCount = detail?.sections?.reduce((count, section) => count + section.fields.length, 0) || 0;
   const captures = [...(detail?.modalCaptures || []), ...(detail?.baseAmountCaptures || []), ...(detail?.changeNoticeCaptures || [])];
   const independent = [...orderPlans.map((item) => ({ ...item, kind: "발주계획" })),

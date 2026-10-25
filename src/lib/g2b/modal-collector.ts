@@ -1,7 +1,8 @@
 import * as cheerio from "cheerio";
-import { extractModalGrid, isInlineVisible, tableHasValue } from "./structured-table";
+import { extractDetailTable, extractModalGrid, isInlineVisible, tableHasValue } from "./structured-table";
 import { createModalDeduplication } from "./modal-deduplication";
 import type { StructuredTable } from "./structured-table";
+import { extractFieldValue, fieldText } from "./field-value";
 import type {
   ModalCapture,
   ScrapedDetail,
@@ -39,6 +40,7 @@ export function extractModalStructure(html: string): {
   );
   const fields: StructuredField[] = [];
   const tables: StructuredTable[] = [];
+  const fieldByCell = new Map<any, StructuredField>();
   // HTML 속성뿐 아니라 입력 컨트롤의 현재 값과 일반 텍스트를 함께 읽습니다.
   const readValue = (cell: cheerio.Cheerio<any>): string | null => {
     const controls = cell
@@ -89,17 +91,18 @@ export function extractModalStructure(html: string): {
       return;
     const label = clean(cell.attr("data-title") || "");
     if (!label) return;
-    const value = readValue(cell);
+    const value = extractFieldValue($, cell);
     const visible = isInlineVisible($, element);
     // 같은 레이블이 반복되면 먼저 확보한 값을 유지하되, 기존 값이 비어 있을 때만 보완합니다.
     const previous = fieldIndex.get(label);
     if (previous === undefined) {
       fieldIndex.set(label, fields.length);
       fields.push({ label, value, visible });
-    } else if (fields[previous].value === null && value !== null) {
+    } else if (!fieldText(fields[previous].value) && fieldText(value)) {
       fields[previous].value = value;
       fields[previous].visible = visible;
     }
+    fieldByCell.set(element, fields[fieldIndex.get(label)!]);
   });
   // data-title이 없는 실제 인접 th/td 쌍에만 대체 추출 방식을 적용합니다.
   root.find("th.w2tb_th").each((_, element) => {
@@ -107,13 +110,21 @@ export function extractModalStructure(html: string): {
     const next = th.next();
     if (!next.is("td") || next.attr("data-title")) return;
     const label = clean(th.text());
-    if (label) fields.push({ label, value: readValue(next),
-      visible: isInlineVisible($, element) && isInlineVisible($, next[0]) });
+    if (label) {
+      const field: StructuredField = { label, value: extractFieldValue($, next),
+        visible: isInlineVisible($, element) && isInlineVisible($, next[0]) };
+      fields.push(field);
+      fieldByCell.set(next[0], field);
+    }
   });
   // WebSquare 그리드에서는 행 상태나 체크박스 컨트롤이 아닌 실제 데이터 셀(col_id)만 추출합니다.
   root.find("table").each((_, element) => {
-    const table = extractModalGrid($, $(element), readValue);
-    if (table) tables.push(table);
+    const table = extractModalGrid($, $(element), readValue) || extractDetailTable($, $(element), readValue);
+    if (!table) return;
+    // 필드 안의 그리드는 데이터 행이 없어도 해당 필드의 소유 관계를 유지합니다.
+    const owner = $(element).parents("td").toArray().map((cell) => fieldByCell.get(cell)).find(Boolean);
+    if (owner) (owner.tables ??= []).push(table);
+    else tables.push(table);
   });
   return { title, fields, tables };
 }
@@ -524,7 +535,7 @@ export async function collectModalContents(
           // 필드 값·테이블 값이 하나라도 있거나 제목을 뺀 본문이 20자를 넘으면 저장할 데이터가 있다고 봅니다.
           // 이 기준은 저장 여부 판단용이며 하위 탐색을 막는 조건으로 사용하지 않습니다.
           const hasData =
-            structured.fields.some((field) => field.value) ||
+            structured.fields.some((field) => Boolean(fieldText(field.value))) ||
             structured.tables.some(tableHasValue) ||
             fresh.text.replace(fresh.title || "", "").trim().length > 20;
           // 저장 여부와 무관하게 동일한 모달 내용인지 한 번만 확인합니다.

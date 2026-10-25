@@ -1,9 +1,10 @@
 import type { ModalCapture, ScrapedDetail, StructuredField, StructuredTable } from "./detail-page";
+import { fieldText } from "./field-value";
 import { join } from "node:path";
 import { readJson, writeJsonAtomic } from "./json-store";
 
 export type IndependentDetail = {
-  schemaVersion: 1;
+  schemaVersion: 2;
   number: string;
   title: string | null;
   fields: StructuredField[];
@@ -40,10 +41,10 @@ const isCurrentNotice = (number: string, key: string) => {
 };
 
 // 값이 없는 필드와 표는 내용으로 세지 않되, 연결된 모달의 위치 정보는 보존합니다.
-const hasFieldContent = (fields: StructuredField[]) => fields.some((field) => Boolean(field.value?.trim()) ||
+const hasFieldContent = (fields: StructuredField[]) => fields.some((field) => Boolean(fieldText(field.value)) ||
   hasTableContent(field.tables ?? []));
 const hasTableContent = (tables: StructuredTable[]) => tables.some((table) =>
-  table.bodyRows.some((row) => row.some((cell) => Boolean(cell.value?.trim()))));
+  [...table.headerRows, ...table.bodyRows].some((row) => row.some((cell) => Boolean(cell.value?.trim()))));
 const hasContent = (fields: StructuredField[], tables: StructuredTable[]) =>
   hasFieldContent(fields) || hasTableContent(tables);
 /** 독립 표와 필드에 연결된 표를 각각 한 번씩 집계할 목록으로 만듭니다. */
@@ -84,7 +85,7 @@ export function structureNoticeDetail(key: string, detail: ScrapedDetail): Struc
     if (number) {
       if (isCurrentNotice(number, key)) continue;
       independentTriggers.push({ number, trigger: capture.trigger });
-      const entity: IndependentDetail = { schemaVersion: 1, number, title, fields: capture.modal.fields,
+      const entity: IndependentDetail = { schemaVersion: 2, number, title, fields: capture.modal.fields,
         tables: capture.modal.tables, capturedAt: detail.capturedAt || new Date().toISOString(),
         settling: capture.settling, sourceNoticeKey: key, trigger: capture.trigger };
       const stage = number.slice(3, 5);
@@ -126,7 +127,7 @@ export function structureNoticeDetail(key: string, detail: ScrapedDetail): Struc
       sectionCount: nonemptySections.length,
       fieldCount: nonemptySections.reduce((count, section) => count + section.fields.length, 0),
       nonemptyFieldCount: nonemptySections.reduce((count, section) =>
-        count + section.fields.filter((field) => field.value !== null).length, 0),
+        count + section.fields.filter((field) => fieldText(field.value) !== null).length, 0),
       tableCount: nonemptySections.reduce((count, section) =>
         count + allTables(section.fields, section.tables).length, 0),
       tableRowCount: nonemptySections.reduce((count, section) =>

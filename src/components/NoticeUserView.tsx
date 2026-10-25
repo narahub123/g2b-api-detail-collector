@@ -1,6 +1,7 @@
 import type { ScrapedDetail, StructuredField, StructuredTable } from "@/lib/g2b/detail-page";
 import { safeAttachmentLink } from "@/lib/g2b/attachment-links";
 import { tableForUserDisplay } from "@/lib/g2b/structured-table";
+import { fieldText } from "@/lib/g2b/field-value";
 
 /** 화면 문자열과 수집된 첨부파일명을 같은 기준으로 비교합니다. */
 function fileNameKey(value: string): string {
@@ -30,7 +31,7 @@ function DownloadValue({ value, links }: { value: string; links: Map<string, str
 /** 사용자에게 노출할 수 있는 필드만 반환합니다. */
 function visibleFields(fields: StructuredField[]): StructuredField[] {
   return fields.filter((field) => field.visible !== false &&
-    (Boolean(field.value?.trim()) || field.tables?.some(hasVisibleTableData)));
+    (Boolean(fieldText(field.value, true)) || field.tables?.some(hasVisibleTableData)));
 }
 
 /** 숨겨진 하위 텍스트가 표 셀의 합쳐진 값으로 다시 노출되지 않게 합니다. */
@@ -84,11 +85,13 @@ function UserTable({ table, label, links }: { table: StructuredTable; label: str
 function UserFields({ fields, links }: { fields: StructuredField[]; links: Map<string, string> }) {
   const shown = visibleFields(fields);
   if (!shown.length) return null;
-  return <dl className="user-fields">{shown.map((field, index) => <div className="user-field" key={`${field.label}-${index}`}>
-    <dt>{field.label}</dt><dd>{field.value && <DownloadValue value={field.value} links={links} />}
+  return <dl className="user-fields">{shown.map((field, index) => {
+    const value = fieldText(field.value, true);
+    return <div className="user-field" key={`${field.label}-${index}`}>
+    <dt>{field.label}</dt><dd>{value && <DownloadValue value={value} links={links} />}
       {field.tables?.map((table, tableIndex) => <UserTable table={table}
         label={`${field.label} 표 ${tableIndex + 1}`} links={links} key={tableIndex} />)}</dd>
-  </div>)}</dl>;
+  </div>; })}</dl>;
 }
 
 /** 섹션의 필드·표·연결된 상세를 표시 상태에 맞춰 제공합니다. */

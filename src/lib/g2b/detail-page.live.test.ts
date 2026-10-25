@@ -128,7 +128,7 @@ it.skipIf(!process.env.LIVE_G2B)("captures a public notice's basic-price dialog"
   expect(detail.attachments).toHaveLength(3);
   expect(capture?.modal.title).toBe("기초가격상세조회");
   expect(capture?.modal.fields).toContainEqual(expect.objectContaining({
-    label: "입찰공고번호", value: "R26BK01764337-000"
+    label: "입찰공고번호", value: [{ text: "R26BK01764337-000", visible: true }]
   }));
   expect(detail.modalDiscovery?.failures).toEqual([]);
   const titles = detail.sections?.map((section) => section.title) || [];

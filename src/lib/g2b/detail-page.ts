@@ -5,6 +5,8 @@ import { extractDetailTable, isInlineVisible } from "./structured-table";
 import type { StructuredTable } from "./structured-table";
 import { attachmentDownloadUrl, safeAttachmentLink } from "./attachment-links";
 import { collectModalContents } from "./modal-collector";
+import { extractFieldValue, fieldText } from "./field-value";
+import type { FieldValuePart } from "./field-value";
 export { collectModalContents, extractModalStructure } from "./modal-collector";
 
 export type { StructuredTable, StructuredTableCell, StructuredTableContent } from "./structured-table";
@@ -12,7 +14,7 @@ export type { StructuredTable, StructuredTableCell, StructuredTableContent } fro
 export type Attachment = { name: string; url: string | null };
 export type AttachmentMetadata = { orgnlAtchFileNm: string; atchFileSqno: number; scrnIndtYn?: string };
 export type ClickDownload = { cellId: string; name: string; fileNo: string; seq: number };
-export type StructuredField = { label: string; value: string | null; visible?: boolean; tables?: StructuredTable[] };
+export type StructuredField = { label: string; value: FieldValuePart[]; visible?: boolean; tables?: StructuredTable[] };
 export type StructuredSection = { title: string; fields: StructuredField[]; tables: StructuredTable[];
   details?: { title: string; fields: StructuredField[]; tables: StructuredTable[];
     trigger?: ModalCapture["trigger"] }[]; visible?: boolean };
@@ -22,7 +24,7 @@ export type ModalCapture = {
   settling?: { status: "settled" | "timeout"; elapsedMs: number };
 };
 export type ScrapedDetail = {
-  schemaVersion?: "pilot-4";
+  schemaVersion?: "pilot-5";
   noticeKey?: string;
   sourceUrl: string;
   capturedAt?: string;
@@ -66,7 +68,7 @@ export function extractRelatedNoticeKeys(html: string): string[] {
 export function extractDetailPage(html: string, pageUrl: string, fileMetadata: AttachmentMetadata[] = [], clickDownloads: ClickDownload[] = []): ScrapedDetail {
   const url = assertG2bUrl(pageUrl);
   const $ = cheerio.load(html);
-  $("script, style, option").remove();
+  $("script, style").remove();
   const sections: StructuredSection[] = [];
   let active: StructuredSection | null = null;
   const startSection = (title: string, visible?: boolean) => {
@@ -81,16 +83,9 @@ export function extractDetailPage(html: string, pageUrl: string, fileMetadata: A
     const input = cell.find("input:not([type='hidden']),textarea,select").first();
     return nonempty(input.length ? String(input.val() ?? cell.text()) : cell.text());
   };
-  /** 안쪽 표의 문자가 필드 값으로 중복 저장되지 않게 바깥 값만 읽습니다. */
-  const readFieldCell = (cell: any): string | null => {
-    if (!cell.find("table").length) return readCell(cell);
-    const outer = cell.clone();
-    outer.find("table").remove();
-    return readCell(outer);
-  };
   const fieldByCell = new Map<any, StructuredField>();
   /** 표가 있는 반복 필드는 소유 관계를 유지하도록 별도 항목으로 둡니다. */
-  const appendField = (label: string, value: string | null, visible: boolean, ownsTable = false): StructuredField | null => {
+  const appendField = (label: string, value: FieldValuePart[], visible: boolean, ownsTable = false): StructuredField | null => {
     if (!label) return null;
     const bucket = target();
     const sameLabel = bucket.fields.filter((field) => field.label === label && field.tables === undefined);
@@ -99,14 +94,15 @@ export function extractDetailPage(html: string, pageUrl: string, fileMetadata: A
       bucket.fields.push(field);
       return field;
     }
-    if (value !== null) {
-      const empty = sameLabel.find((field) => field.value === null);
+    const text = fieldText(value);
+    if (text !== null) {
+      const empty = sameLabel.find((field) => fieldText(field.value) === null);
       if (empty) {
         empty.value = value;
         empty.visible = visible;
         return empty;
       }
-      const existing = sameLabel.find((field) => field.value === value);
+      const existing = sameLabel.find((field) => fieldText(field.value) === text);
       if (existing) return existing;
       const field = { label, value, visible };
       bucket.fields.push(field);
@@ -144,13 +140,13 @@ export function extractDetailPage(html: string, pageUrl: string, fileMetadata: A
       for (const cell of cells) {
         const td = $(cell);
         if (td.is("td[data-title]") && !td.is("[col_id]")) {
-          const field = appendField(clean(td.attr("data-title") || ""), readFieldCell(td), isVisible(cell), td.find("table").length > 0);
+          const field = appendField(clean(td.attr("data-title") || ""), extractFieldValue($, td), isVisible(cell), td.find("table").length > 0);
           if (field) fieldByCell.set(cell, field);
         }
         if (td.is("th")) {
           const next = td.next();
           if (next.is("td") && !next.attr("data-title")) {
-            const field = appendField(clean(td.text()), readFieldCell(next), isVisible(cell) && isVisible(next[0]), next.find("table").length > 0);
+            const field = appendField(clean(td.text()), extractFieldValue($, next), isVisible(cell) && isVisible(next[0]), next.find("table").length > 0);
             if (field) fieldByCell.set(next[0], field);
           }
         }
@@ -224,13 +220,13 @@ export function extractDetailPage(html: string, pageUrl: string, fileMetadata: A
     });
   });
   const fullText = clean($("main").text() || $("body").text());
-  if (!sections.some((section) => section.fields.some((field) => field.label === "공고명" && field.value))) {
+  if (!sections.some((section) => section.fields.some((field) => field.label === "공고명" && fieldText(field.value)))) {
     throw new Error("나라장터 상세 데이터를 읽지 못했습니다.");
   }
   const summary = {
     sectionCount: sections.length,
     fieldCount: sections.reduce((n, item) => n + item.fields.length, 0),
-    nonemptyFieldCount: sections.reduce((n, item) => n + item.fields.filter((field) => field.value !== null).length, 0),
+    nonemptyFieldCount: sections.reduce((n, item) => n + item.fields.filter((field) => fieldText(field.value) !== null).length, 0),
     tableCount: sections.reduce((n, item) => n + item.tables.length +
       item.fields.reduce((count, field) => count + (field.tables?.length ?? 0), 0), 0),
     tableRowCount: sections.reduce((n, item) => n + [...item.tables, ...item.fields.flatMap((field) => field.tables ?? [])]
@@ -239,7 +235,7 @@ export function extractDetailPage(html: string, pageUrl: string, fileMetadata: A
     linkCount: links.length
   };
   return {
-    schemaVersion: "pilot-4", noticeKey: `${number}--${order}`, sourceUrl: pageUrl,
+    schemaVersion: "pilot-5", noticeKey: `${number}--${order}`, sourceUrl: pageUrl,
     capturedAt: new Date().toISOString(), sections, summary, attachments, links,
     provenance: { sections: "rendered G2B page", attachmentsAndLinks: "rendered G2B page and attachment metadata response" },
     text: fullText

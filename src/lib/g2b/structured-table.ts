@@ -202,7 +202,10 @@ export function extractDetailTable($: cheerio.CheerioAPI, table: cheerio.Cheerio
   const retainedColumns = columns?.filter((_, index) => !excluded.has(index));
   const projectedBody = withoutTrailingEmptyRows(withoutColumns(applyColumnVisibility(alignedBody, columns), excluded),
     (index) => $(bodyNodes[index]).hasClass("w2grid_hidedRow"));
-  return projectedBody.length ? { headerRows: withoutColumns(applyColumnVisibility(headerRows, columns), excluded),
+  const projectedHeader = withoutColumns(applyColumnVisibility(headerRows, columns), excluded);
+  const hasHeader = projectedHeader.some((row) => row.some((cell) => Boolean(cell.value?.trim())));
+  const explicitGrid = /grd|grid/i.test(table.attr("id") || "") || hasColId || hasThead;
+  return projectedBody.length || (explicitGrid && hasHeader) ? { headerRows: projectedHeader,
     bodyRows: projectedBody,
     ...(retainedColumns ? { columnVisibility: retainedColumns } : {}),
     visible: isInlineVisible($, table[0]),

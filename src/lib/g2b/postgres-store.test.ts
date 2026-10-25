@@ -64,7 +64,7 @@ describe("noticeSummary", () => {
   it("rolls back a failed detail and reference update", async () => {
     const statements = fakePool("INSERT INTO public.notice_independent_refs");
     const key = "R26BK1--000";
-    const detail = { schemaVersion: 1 as const, number: "R26DD1", title: "계획", fields: [], tables: [],
+    const detail = { schemaVersion: 2 as const, number: "R26DD1", title: "계획", fields: [], tables: [],
       capturedAt: "2026-10-25T00:00:00Z", sourceNoticeKey: key };
     await expect(saveStoredNotice(key, { api: { bidNtceNo: "R26BK1", bidNtceOrd: "000" }, detail: null }, {
       detail: { sourceUrl: "https://www.g2b.go.kr/", attachments: [], links: [] },

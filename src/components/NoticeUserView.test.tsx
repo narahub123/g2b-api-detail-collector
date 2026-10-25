@@ -5,12 +5,12 @@ import { NoticeUserView } from "./NoticeUserView";
 import type { ScrapedDetail } from "@/lib/g2b/detail-page";
 
 const detail: ScrapedDetail = {
-  schemaVersion: "pilot-4", noticeKey: "R26BK1--000", sourceUrl: "https://www.g2b.go.kr/",
+  schemaVersion: "pilot-5", noticeKey: "R26BK1--000", sourceUrl: "https://www.g2b.go.kr/",
   capturedAt: "2026-10-25T00:00:00.000Z", attachments: [], links: [],
   sections: [
     { title: "공고일반", visible: true, fields: [
-      { label: "공고명", value: "조사 용역", visible: true },
-      { label: "내부 값", value: "비공개", visible: false }
+      { label: "공고명", value: [{ text: "조사 용역", visible: true }], visible: true },
+      { label: "내부 값", value: [{ text: "비공개", visible: false }], visible: false }
     ], tables: [{ visible: true, headerRowVisibility: [true, true], bodyRowVisibility: [true, false],
       headerRows: [
         [{ value: "구분", column: 0, rowspan: 2, colspan: 1, visible: true },
@@ -23,12 +23,24 @@ const detail: ScrapedDetail = {
             contents: [{ value: "숨긴 내용", visible: false }, { value: "공개 금액", visible: true }] }],
         [{ value: "숨긴 행", column: 0, rowspan: 1, colspan: 1, visible: false }]
       ] }], details: [] },
-    { title: "숨긴 섹션", visible: false, fields: [{ label: "값", value: "숨김", visible: false }], tables: [] }
+    { title: "숨긴 섹션", visible: false, fields: [{ label: "값", value: [{ text: "숨김", visible: false }], visible: false }], tables: [] }
   ]
 };
 
 describe("NoticeUserView", () => {
   afterEach(cleanup);
+
+  it("shows only visible pieces of a field and omits its hidden empty table", () => {
+    const source: ScrapedDetail = { ...detail, sections: [{ title: "투찰제한-일반", visible: true, tables: [],
+      fields: [{ label: "업종제한사항", visible: true,
+        value: [{ text: "표시 안내", visible: true }, { text: " 숨긴 안내", visible: false }],
+        tables: [{ visible: false, headerRows: [[{ value: "그룹업종", column: 0, rowspan: 1,
+          colspan: 1, visible: false }]], bodyRows: [] }] }] }] };
+    render(<NoticeUserView detail={source} />);
+    expect(screen.getByText("표시 안내")).toBeInTheDocument();
+    expect(screen.queryByText("숨긴 안내")).not.toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+  });
 
   it("shows a table-only field under its label while respecting hidden tables and zero-width columns", () => {
     const nested = { columnVisibility: [true, false, true],
@@ -37,8 +49,8 @@ describe("NoticeUserView", () => {
       bodyRows: [[{ value: "건설업", column: 0, rowspan: 1, colspan: 2, visible: true },
         { value: "내부코드", column: 2, rowspan: 1, colspan: 1, visible: false }]] };
     const source: ScrapedDetail = { ...detail, sections: [{ title: "투찰제한-일반", visible: true, tables: [],
-      fields: [{ label: "업종제한사항", value: null, visible: true, tables: [nested] },
-        { label: "숨긴 표", value: null, tables: [{ ...nested, visible: false }] }] }] };
+      fields: [{ label: "업종제한사항", value: [], visible: true, tables: [nested] },
+        { label: "숨긴 표", value: [], tables: [{ ...nested, visible: false }] }] }] };
     render(<NoticeUserView detail={source} />);
     const field = screen.getByText("업종제한사항").closest(".user-field")!;
     const table = within(field as HTMLElement).getByRole("table");
@@ -87,7 +99,7 @@ describe("NoticeUserView", () => {
         { name: "제안요청서.hwp", url: "https://www.g2b.go.kr/downloadFile.do?fileSeq=2" }
       ],
       sections: [{ ...detail.sections![0], fields: [
-        ...detail.sections![0].fields, { label: "제안요청서", value: "제안요청서.hwp", visible: true }
+        ...detail.sections![0].fields, { label: "제안요청서", value: [{ text: "제안요청서.hwp", visible: true }], visible: true }
       ], tables: [{ ...detail.sections![0].tables[0], bodyRows: [
         ...detail.sections![0].tables[0].bodyRows.slice(0, 1),
         [{ value: "공고문.pdf", column: 0, rowspan: 1, colspan: 1, visible: true }]
@@ -104,7 +116,7 @@ describe("NoticeUserView", () => {
     const withUnsafeFile: ScrapedDetail = { ...detail,
       attachments: [{ name: "공고문.pdf", url: "https://example.com/file.pdf" }],
       sections: [{ ...detail.sections![0], fields: [
-        ...detail.sections![0].fields, { label: "첨부", value: "공고문.pdf", visible: true }
+        ...detail.sections![0].fields, { label: "첨부", value: [{ text: "공고문.pdf", visible: true }], visible: true }
       ] }]
     };
     render(<NoticeUserView detail={withUnsafeFile} />);

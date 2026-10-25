@@ -8,15 +8,25 @@ describe("normalizeNotice", () => {
     bidClseDt: "2026-10-12 10:00:00", presmptPrce: "12,000,000"
   };
 
+  it("uses only visible field pieces for user-facing normalized values", () => {
+    const notice = normalizeNotice(api, { sourceUrl: "https://www.g2b.go.kr/", attachments: [], links: [],
+      sections: [{ title: "공고일반", tables: [], fields: [
+        { label: "공고명", value: [{ text: "숨긴 제목", visible: false }, { text: "표시 제목", visible: true }] },
+        { label: "공고기관", visible: false, value: [{ text: "숨긴 기관", visible: true }] }
+      ] }] });
+    expect(notice.title).toEqual({ value: "표시 제목", source: "detail" });
+    expect(notice.agency).toEqual({ value: "발주기관", source: "api" });
+  });
+
   it("uses the first nonempty occurrence of a label in section order", () => {
     const detail = { sourceUrl: "https://www.g2b.go.kr/", attachments: [], links: [], sections: [
       { title: "공고일반", fields: [
-        { label: "공고명", value: null }, { label: "공고기관", value: "첫 기관" },
-        { label: "지역제한", value: "서울" }
+        { label: "공고명", value: [] }, { label: "공고기관", value: [{ text: "첫 기관", visible: true }] },
+        { label: "지역제한", value: [{ text: "서울", visible: true }] }
       ], tables: [] },
       { title: "입찰자격", fields: [
-        { label: "공고명", value: "첫 유효 공고명" }, { label: "공고기관", value: "둘째 기관" },
-        { label: "지역제한", value: "부산" }
+        { label: "공고명", value: [{ text: "첫 유효 공고명", visible: true }] }, { label: "공고기관", value: [{ text: "둘째 기관", visible: true }] },
+        { label: "지역제한", value: [{ text: "부산", visible: true }] }
       ], tables: [] }
     ] };
     const notice = normalizeNotice(api, detail);
@@ -29,8 +39,8 @@ describe("normalizeNotice", () => {
     const notice = normalizeNotice(api, {
       sourceUrl: "https://www.g2b.go.kr/link/PNPE027_01/single/?bidPbancNo=R26BK1&bidPbancOrd=000",
       sections: [{ title: "공고일반", fields: [
-        { label: "공고명", value: "조사 용역 변경" }, { label: "입찰자격", value: "중소기업" },
-        { label: "지역제한", value: "서울특별시" }
+        { label: "공고명", value: [{ text: "조사 용역 변경", visible: true }] }, { label: "입찰자격", value: [{ text: "중소기업", visible: true }] },
+        { label: "지역제한", value: [{ text: "서울특별시", visible: true }] }
       ], tables: [] }],
       text: "조사 업무", attachments: [], links: []
     });
@@ -75,7 +85,7 @@ describe("normalizeNotice", () => {
   it("reads actual industry qualification and rejects invalid dates", () => {
     const notice = normalizeNotice({ ...api, bidNtceDt: "2026-99-99 nonsense", bidClseDt: "invalid" }, {
       sourceUrl: "https://www.g2b.go.kr/", sections: [{ title: "입찰자격", fields: [
-        { label: "업종제한사항", value: "학술.연구용역(1169)" }
+        { label: "업종제한사항", value: [{ text: "학술.연구용역(1169)", visible: true }] }
       ], tables: [] }],
       text: "", attachments: [], links: []
     });
@@ -89,7 +99,7 @@ describe("normalizeNotice", () => {
     const notice = normalizeNotice(null, {
       sourceUrl: "https://www.g2b.go.kr/link/PNPE027_01/single/?bidPbancNo=R26BK01766517&bidPbancOrd=001",
       sections: [{ title: "공고일반", fields: [
-        { label: "공고명", value: "이전 차수 공고" }, { label: "공고기관", value: "고흥군" }
+        { label: "공고명", value: [{ text: "이전 차수 공고", visible: true }] }, { label: "공고기관", value: [{ text: "고흥군", visible: true }] }
       ], tables: [] }], text: "공고 본문", attachments: [], links: []
     }, { number: "R26BK01766517", order: "001" });
     expect(notice.key).toBe("R26BK01766517--001");

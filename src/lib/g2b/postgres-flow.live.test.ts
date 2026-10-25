@@ -73,10 +73,10 @@ it.skipIf(!process.env.LIVE_DB_TEST || !process.env.DATABASE_URL)(
         body: { totalCount: 1, items: [{ bidNtceNo: "R26BK1", bidNtceOrd: "000", bidNtceNm: "연구 용역",
           bidNtceDt: "202610250930", presmptPrce: "1,200" }] } } }));
       const scrape = async (url: string) => ({ detail: {
-        sourceUrl: url, sections: [{ title: "공고일반", fields: [{ label: "공고명", value: "연구 용역" }], tables: [] }],
+        sourceUrl: url, sections: [{ title: "공고일반", fields: [{ label: "공고명", value: [{ text: "연구 용역", visible: true }] }], tables: [] }],
         attachments: [], links: [], modalCaptures: url.includes("R26BK1") ? [{
           trigger: { index: 0, tag: "a", label: "발주계획", value: "R26DD12345678", html: "<a>계획</a>" },
-          modal: { title: "계획", fields: [{ label: "내용", value: "예산" }], tables: [] }
+          modal: { title: "계획", fields: [{ label: "내용", value: [{ text: "예산", visible: true }] }], tables: [] }
         }] : [] }, relatedNoticeKeys: url.includes("R26BK1") ? ["R26BK2--000"] : [] });
       const job = await startCollection({ start: "2026-10-25", end: "2026-10-25" },
         { storage: "postgres", dataDir: dir, fetcher: fetcher as typeof fetch, scrape });
@@ -93,10 +93,10 @@ it.skipIf(!process.env.LIVE_DB_TEST || !process.env.DATABASE_URL)(
       expect(summary.rows[0].amount).toBe("1200");
       const refresh = await startRefresh(["R26BK1--000"], { storage: "postgres", dataDir: dir,
         scrape: async (url) => ({ detail: { sourceUrl: url,
-          sections: [{ title: "공고일반", fields: [{ label: "공고명", value: "갱신된 용역" }], tables: [] }],
+          sections: [{ title: "공고일반", fields: [{ label: "공고명", value: [{ text: "갱신된 용역", visible: true }] }], tables: [] }],
           attachments: [], links: [], modalCaptures: [{
             trigger: { index: 0, tag: "a", label: "발주계획", value: "R26DD12345678", html: "<a>계획</a>" },
-            modal: { title: "계획", fields: [{ label: "내용", value: "변경된 예산" }], tables: [] }
+            modal: { title: "계획", fields: [{ label: "내용", value: [{ text: "변경된 예산", visible: true }] }], tables: [] }
           }] }, relatedNoticeKeys: [] }) });
       const refreshed = await finished(refresh.id, dir);
       expect(refreshed?.results, JSON.stringify(refreshed?.errors)).toEqual([{ key: "R26BK1--000", status: "succeeded" }]);
