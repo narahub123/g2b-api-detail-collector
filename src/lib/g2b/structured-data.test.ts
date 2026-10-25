@@ -29,6 +29,18 @@ const dirs: string[] = [];
 afterEach(async () => { await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))); });
 
 describe("structureNoticeDetail", () => {
+  it("retains a section with a table-only field and counts its table exactly once", () => {
+    const grid = simpleTable("업종", "건설업");
+    const source: ScrapedDetail = { sourceUrl: "https://www.g2b.go.kr/", attachments: [], links: [],
+      sections: [{ title: "투찰제한-일반", fields: [{ label: "업종제한사항", value: null, tables: [grid] }], tables: [] }],
+      summary: { sectionCount: 1, fieldCount: 1, nonemptyFieldCount: 0, tableCount: 0,
+        tableRowCount: 0, attachmentCount: 0, linkCount: 0 } };
+    const result = structureNoticeDetail("R26BK01774553--000", source);
+    expect(result.detail.sections?.map((section) => section.title)).toEqual(["투찰제한-일반"]);
+    expect(result.detail.summary).toMatchObject({ fieldCount: 1, nonemptyFieldCount: 0,
+      tableCount: 1, tableRowCount: 1 });
+  });
+
   it("writes a new generic detail but reuses an already stored notice number", async () => {
     const dir = await mkdtemp(join(tmpdir(), "g2b-independent-")); dirs.push(dir);
     await mkdir(join(dir, "notices"));

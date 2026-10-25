@@ -27,6 +27,8 @@ describe("extractDetailPage", () => {
         bodyRows: [[expect.objectContaining({ value: "건설업" })]] }] });
     expect(sections[1].tables).toEqual([]);
     expect(sections[2].tables).toHaveLength(1);
+    expect(extractDetailPage(html, url).summary).toMatchObject({ fieldCount: 9,
+      nonemptyFieldCount: 8, tableCount: 2, tableRowCount: 2 });
   });
 
   it("keeps nested grids with their own repeated field and excludes grid controls from field text", () => {

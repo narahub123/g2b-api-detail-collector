@@ -40,11 +40,15 @@ const isCurrentNotice = (number: string, key: string) => {
 };
 
 // 값이 없는 필드와 표는 내용으로 세지 않되, 연결된 모달의 위치 정보는 보존합니다.
-const hasFieldContent = (fields: StructuredField[]) => fields.some((field) => Boolean(field.value?.trim()));
+const hasFieldContent = (fields: StructuredField[]) => fields.some((field) => Boolean(field.value?.trim()) ||
+  hasTableContent(field.tables ?? []));
 const hasTableContent = (tables: StructuredTable[]) => tables.some((table) =>
   table.bodyRows.some((row) => row.some((cell) => Boolean(cell.value?.trim()))));
 const hasContent = (fields: StructuredField[], tables: StructuredTable[]) =>
   hasFieldContent(fields) || hasTableContent(tables);
+/** 독립 표와 필드에 연결된 표를 각각 한 번씩 집계할 목록으로 만듭니다. */
+const allTables = (fields: StructuredField[], tables: StructuredTable[]): StructuredTable[] =>
+  [...tables, ...fields.flatMap((field) => field.tables ?? [])];
 
 /**
  * 클릭 출처의 번호와 최상위 섹션을 기준으로 수집된 모달의 저장 위치를 결정합니다.
@@ -123,9 +127,10 @@ export function structureNoticeDetail(key: string, detail: ScrapedDetail): Struc
       fieldCount: nonemptySections.reduce((count, section) => count + section.fields.length, 0),
       nonemptyFieldCount: nonemptySections.reduce((count, section) =>
         count + section.fields.filter((field) => field.value !== null).length, 0),
-      tableCount: nonemptySections.reduce((count, section) => count + section.tables.length, 0),
+      tableCount: nonemptySections.reduce((count, section) =>
+        count + allTables(section.fields, section.tables).length, 0),
       tableRowCount: nonemptySections.reduce((count, section) =>
-        count + section.tables.reduce((rows, table) => rows + table.bodyRows.length, 0), 0)
+        count + allTables(section.fields, section.tables).reduce((rows, table) => rows + table.bodyRows.length, 0), 0)
     };
   }
   delete structured.baseAmountCaptures;

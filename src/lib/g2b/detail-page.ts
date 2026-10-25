@@ -231,8 +231,10 @@ export function extractDetailPage(html: string, pageUrl: string, fileMetadata: A
     sectionCount: sections.length,
     fieldCount: sections.reduce((n, item) => n + item.fields.length, 0),
     nonemptyFieldCount: sections.reduce((n, item) => n + item.fields.filter((field) => field.value !== null).length, 0),
-    tableCount: sections.reduce((n, item) => n + item.tables.length, 0),
-    tableRowCount: sections.reduce((n, item) => n + item.tables.reduce((count, table) => count + table.bodyRows.length, 0), 0),
+    tableCount: sections.reduce((n, item) => n + item.tables.length +
+      item.fields.reduce((count, field) => count + (field.tables?.length ?? 0), 0), 0),
+    tableRowCount: sections.reduce((n, item) => n + [...item.tables, ...item.fields.flatMap((field) => field.tables ?? [])]
+      .reduce((count, table) => count + table.bodyRows.length, 0), 0),
     attachmentCount: attachments.length,
     linkCount: links.length
   };
