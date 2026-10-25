@@ -10,6 +10,32 @@ const simpleTable = (columns: string[], rows: (string | null)[][]) => ({
 });
 
 describe("extractDetailPage", () => {
+  it("records zero-width colgroup columns in the attachment grid", () => {
+    const html = `<main>${heading("공고일반")}<table><tr><th>공고명</th><td>용역</td></tr></table>
+      ${heading("파일첨부")}<table id="grdFile_body_table"><colgroup>
+        <col style="width: 120px"><col style="width:0px;white-space:nowrap"><col style="width: 80px">
+      </colgroup><thead><tr><th colspan="2">파일명</th><th>파일크기</th></tr></thead><tbody>
+        <tr><td colspan="2">공고문.pdf</td><td style="display:none"></td><td>123 KB</td></tr>
+      </tbody></table></main>`;
+    const table = extractDetailPage(html, url).sections?.[1].tables[0];
+    expect(table?.columnVisibility).toEqual([true, false, true]);
+    expect(table?.bodyRows[0].map((cell) => [cell.value, cell.column, cell.visible]))
+      .toEqual([["공고문.pdf", 0, true], ["123 KB", 2, true]]);
+  });
+
+  it("marks colgroup zero-width cells hidden without display:none", () => {
+    const html = `<main>${heading("공고일반")}<table><tr><th>공고명</th><td>용역</td></tr></table>
+      ${heading("파일첨부")}<table id="grdFile_body_table"><colgroup>
+        <col style="width:0px"><col style="width:120px"><col style="width: 0px"><col style="width:80px">
+      </colgroup><thead><tr><th>상태</th><th>파일명</th><th>내부</th><th>파일크기</th></tr></thead><tbody>
+        <tr><td>대기</td><td>공고문.pdf</td><td>내부코드</td><td>123 KB</td></tr>
+      </tbody></table></main>`;
+    const table = extractDetailPage(html, url).sections?.[1].tables[0];
+    expect(table?.columnVisibility).toEqual([false, true, false, true]);
+    expect(table?.headerRows[0].map((cell) => cell.visible)).toEqual([false, true, false, true]);
+    expect(table?.bodyRows[0].map((cell) => cell.visible)).toEqual([false, true, false, true]);
+  });
+
   it("preserves table, row, cell and mixed content visibility in a form table", () => {
     const html = `<main>${heading("공고일반")}<table><tr><th>공고명</th><td>용역</td></tr></table>
       ${heading("제안발표순서")}<table><tbody>

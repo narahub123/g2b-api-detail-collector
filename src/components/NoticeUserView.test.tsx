@@ -93,4 +93,36 @@ describe("NoticeUserView", () => {
     expect(screen.getByText("공고문.pdf")).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "공고문.pdf" })).not.toBeInTheDocument();
   });
+
+  it("aligns attachment values after removing an extra hidden cell and zero-width columns", () => {
+    const attachmentTable = { columnVisibility: [true, false, true],
+      headerRows: [[
+        { value: "파일명", column: 0, rowspan: 1, colspan: 2, visible: true },
+        { value: "파일크기", column: 2, rowspan: 1, colspan: 1, visible: true }
+      ]], bodyRows: [[
+        { value: "공고문.pdf", column: 0, rowspan: 1, colspan: 2, visible: true },
+        { value: null, column: 2, rowspan: 1, colspan: 1, visible: false },
+        { value: "123 KB", column: 3, rowspan: 1, colspan: 1, visible: true }
+      ]] };
+    render(<NoticeUserView detail={{ ...detail, sections: [{ ...detail.sections![0], tables: [attachmentTable] }] }} />);
+    const table = screen.getByRole("table");
+    expect(within(table).getAllByRole("columnheader").map((cell) => cell.textContent)).toEqual(["파일명", "파일크기"]);
+    expect(within(table).getAllByRole("cell").map((cell) => cell.textContent)).toEqual(["공고문.pdf", "123 KB"]);
+    expect(within(table).getByRole("columnheader", { name: "파일명" })).toHaveAttribute("colspan", "1");
+  });
+
+  it("aligns already stored attachment tables that lack colgroup metadata", () => {
+    const attachmentTable = { headerRows: [[
+      { value: "파일명", column: 0, rowspan: 1, colspan: 2, visible: true },
+      { value: "파일크기", column: 2, rowspan: 1, colspan: 1, visible: true }
+    ]], bodyRows: [[
+      { value: "공고문.pdf", column: 0, rowspan: 1, colspan: 2, visible: true },
+      { value: null, column: 2, rowspan: 1, colspan: 1, visible: false },
+      { value: "123 KB", column: 3, rowspan: 1, colspan: 1, visible: true }
+    ]] };
+    render(<NoticeUserView detail={{ ...detail, sections: [{ ...detail.sections![0], tables: [attachmentTable] }] }} />);
+    const table = screen.getByRole("table");
+    expect(within(table).getAllByRole("cell").map((cell) => cell.textContent)).toEqual(["공고문.pdf", "123 KB"]);
+    expect(within(table).getByRole("columnheader", { name: "파일크기" })).toHaveAttribute("colspan", "1");
+  });
 });

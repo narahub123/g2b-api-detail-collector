@@ -4,7 +4,7 @@ export type StructuredTableContent = { value: string; visible: boolean };
 export type StructuredTableCell = { value: string | null; column: number; rowspan: number; colspan: number;
   visible?: boolean; contents?: StructuredTableContent[] };
 export type StructuredTable = { headerRows: StructuredTableCell[][]; bodyRows: StructuredTableCell[][];
-  visible?: boolean; headerRowVisibility?: boolean[]; bodyRowVisibility?: boolean[] };
+  visible?: boolean; headerRowVisibility?: boolean[]; bodyRowVisibility?: boolean[]; columnVisibility?: boolean[] };
 export type LegacyStructuredTable = { columns: string[]; rows: (string | null)[][] };
 
 const clean = (value: string) => value.replace(/\s+/g, " ").trim();
@@ -23,6 +23,53 @@ export function isInlineVisible($: cheerio.CheerioAPI, node: any): boolean {
     }
   }
   return true;
+}
+
+/** colgroup의 0px 열을 찾아 표의 실제 표시 열 정보를 반환합니다. */
+function columnVisibility($: cheerio.CheerioAPI, table: cheerio.Cheerio<any>): boolean[] | undefined {
+  const columns: boolean[] = [];
+  /** 자식 col에 선언한 너비가 있으면 colgroup보다 우선합니다. */
+  const widthFrom = (element: any): string | undefined => /(?:^|;)\s*width\s*:\s*([^;]+)/i.exec($(element).attr("style") || "")?.[1]
+    ?.replace(/\s*!important\s*$/i, "").trim().toLowerCase() || $(element).attr("width")?.trim().toLowerCase();
+  table.children("colgroup").each((_, group) => {
+    const children = $(group).children("col").toArray();
+    const nodes = children.length ? children : [group];
+    for (const node of nodes) {
+      const width = widthFrom(node) || widthFrom(group);
+      const parsedSpan = Number($(node).attr("span") || 1);
+      const span = Number.isSafeInteger(parsedSpan) && parsedSpan > 0 ? parsedSpan : 1;
+      for (let index = 0; index < span; index++) columns.push(!/^0(?:\.0+)?(?:px)?$/.test(width || ""));
+    }
+  });
+  return columns.length ? columns : undefined;
+}
+
+/** 숨겨진 빈 보조 셀이 헤더보다 본문을 한 열 늘리면 그 셀을 제외하고 열 위치를 맞춥니다. */
+function alignOverflowCells(rows: StructuredTableCell[][], width: number): StructuredTableCell[][] {
+  if (!width) return rows;
+  return rows.map((row) => {
+    let overflow = Math.max(0, ...row.map((cell) => cell.column + cell.colspan)) - width;
+    if (overflow <= 0) return row;
+    let shift = 0;
+    return row.flatMap((cell) => {
+      if (overflow >= cell.colspan && cell.visible === false && !cell.value?.trim()) {
+        overflow -= cell.colspan;
+        shift += cell.colspan;
+        return [];
+      }
+      return [{ ...cell, column: cell.column - shift }];
+    });
+  });
+}
+
+/** 셀이 걸친 모든 열의 너비가 0px이면 셀 내용도 숨김 상태로 기록합니다. */
+function applyColumnVisibility(rows: StructuredTableCell[][], visibility: boolean[] | undefined): StructuredTableCell[][] {
+  if (!visibility) return rows;
+  return rows.map((row) => row.map((cell) => {
+    const shown = visibility.slice(cell.column, cell.column + cell.colspan).some(Boolean);
+    return shown ? cell : { ...cell, visible: false,
+      contents: cell.contents?.map((item) => ({ ...item, visible: false })) };
+  }));
 }
 
 function cellContents($: cheerio.CheerioAPI, cell: any): StructuredTableContent[] {
@@ -108,10 +155,16 @@ export function extractDetailTable($: cheerio.CheerioAPI, table: cheerio.Cheerio
   }
   const headerNodes = rows.slice(0, headerLength);
   const bodyNodes = rows.slice(headerLength);
+  const columns = columnVisibility($, table);
   const headerRows = positionedRows($, headerNodes, (cell) => nonempty(cell.text()));
+  const headerWidth = Math.max(0, ...headerRows.flat().map((cell) => cell.column + cell.colspan));
   const bodyRows = withoutTrailingEmptyRows(positionedRows($, bodyNodes, readCell),
     (index) => $(bodyNodes[index]).hasClass("w2grid_hidedRow"));
-  return bodyRows.length ? { headerRows, bodyRows, visible: isInlineVisible($, table[0]),
+  // WebSquare의 숨겨진 빈 보조 셀이 colgroup 수보다 셀 한 칸을 더 만드는 경우를 정렬합니다.
+  const alignedBody = alignOverflowCells(bodyRows, columns?.length || headerWidth);
+  return alignedBody.length ? { headerRows: applyColumnVisibility(headerRows, columns),
+    bodyRows: applyColumnVisibility(alignedBody, columns), ...(columns ? { columnVisibility: columns } : {}),
+    visible: isInlineVisible($, table[0]),
     headerRowVisibility: headerNodes.map((row) => isInlineVisible($, row)),
     bodyRowVisibility: bodyNodes.slice(0, bodyRows.length).map((row) => isInlineVisible($, row)) } : null;
 }
@@ -165,4 +218,19 @@ export function tableForDisplay(table: StructuredTable | LegacyStructuredTable):
       value: row[column] ?? null, column, rowspan: 1, colspan: 1
     })))
   };
+}
+
+/** 사용자 화면에서 숨겨진 보조 셀과 0px 열을 제외해 헤더·본문 위치를 맞춥니다. */
+export function tableForUserDisplay(table: StructuredTable | LegacyStructuredTable): StructuredTable {
+  const structured = tableForDisplay(table);
+  const visibility = structured.columnVisibility;
+  const headerWidth = Math.max(0, ...structured.headerRows.flat().map((cell) => cell.column + cell.colspan));
+  const bodyRows = alignOverflowCells(structured.bodyRows, visibility?.length || headerWidth);
+  if (!visibility) return { ...structured, bodyRows };
+  const before = (column: number) => visibility.slice(0, column).filter(Boolean).length;
+  const project = (rows: StructuredTableCell[][]) => rows.map((row) => row.flatMap((cell) => {
+    const colspan = visibility.slice(cell.column, cell.column + cell.colspan).filter(Boolean).length;
+    return colspan ? [{ ...cell, column: before(cell.column), colspan }] : [];
+  }));
+  return { ...structured, headerRows: project(structured.headerRows), bodyRows: project(bodyRows) };
 }

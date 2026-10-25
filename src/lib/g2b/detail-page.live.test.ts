@@ -8,6 +8,20 @@ import { NoticeComparison } from "../../components/NoticeComparison";
 import { extractDetailPage, scrapeDetailPage, serviceDetailUrl } from "./detail-page";
 import { handleAttachmentRequest, openG2bDownload } from "./attachment-download";
 import { attachmentDownloadUrl } from "./attachment-links";
+import { tableForUserDisplay } from "./structured-table";
+
+it.skipIf(!process.env.LIVE_G2B)("aligns the live attachment grid using colgroup widths", async () => {
+  const { detail } = await scrapeDetailPage(serviceDetailUrl("R26BK01765444", "000"));
+  const table = detail.sections?.find((section) => section.title === "파일첨부")?.tables[0];
+  expect(table?.columnVisibility).toContain(false);
+  const shown = tableForUserDisplay(table!);
+  const header = shown.headerRows[0].map((cell) => cell.value);
+  const body = shown.bodyRows[0].map((cell) => cell.value);
+  expect(header).toContain("파일명");
+  expect(body.some((value) => value?.includes("입찰공고서"))).toBe(true);
+  expect(shown.bodyRows[0].reduce((width, cell) => width + cell.colspan, 0))
+    .toBe(shown.headerRows[0].reduce((width, cell) => width + cell.colspan, 0));
+}, 120_000);
 
 it.skipIf(!process.env.LIVE_G2B)("resolves the R26BK01765444 proposal document and downloads it through the app", async () => {
   const key = "R26BK01765444--000";

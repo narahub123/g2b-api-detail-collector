@@ -1,6 +1,6 @@
 import type { ScrapedDetail, StructuredField, StructuredTable } from "@/lib/g2b/detail-page";
 import { safeAttachmentLink } from "@/lib/g2b/attachment-links";
-import { tableForDisplay } from "@/lib/g2b/structured-table";
+import { tableForUserDisplay } from "@/lib/g2b/structured-table";
 
 /** 화면 문자열과 수집된 첨부파일명을 같은 기준으로 비교합니다. */
 function fileNameKey(value: string): string {
@@ -51,7 +51,7 @@ function visibleRowSpan(visibility: boolean[] | undefined, start: number, span: 
 /** 사용자에게 실제로 표시할 값이 있는 표인지 확인합니다. */
 function hasVisibleTableData(table: StructuredTable): boolean {
   if (table.visible === false) return false;
-  const structured = tableForDisplay(table);
+  const structured = tableForUserDisplay(table);
   return structured.bodyRows.some((cells, index) => structured.bodyRowVisibility?.[index] !== false &&
     cells.some((cell) => Boolean(visibleCellValue(cell).trim())));
 }
@@ -59,7 +59,7 @@ function hasVisibleTableData(table: StructuredTable): boolean {
 /** 저장된 표의 행·열 병합 구조를 사용자 화면에 표시합니다. */
 function UserTable({ table, label, links }: { table: StructuredTable; label: string; links: Map<string, string> }) {
   if (!hasVisibleTableData(table)) return null;
-  const structured = tableForDisplay(table);
+  const structured = tableForUserDisplay(table);
   const bodyRows = structured.bodyRows.map((cells, index) => ({ cells, index }))
     .filter(({ index }) => structured.bodyRowVisibility?.[index] !== false);
   const headerRows = structured.headerRows.map((cells, index) => ({ cells, index }))
