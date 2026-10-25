@@ -10,6 +10,33 @@ const simpleTable = (columns: string[], rows: (string | null)[][]) => ({
 });
 
 describe("extractDetailPage", () => {
+  it("omits a grid row-selection checkbox column from collected table data", () => {
+    const html = `<main>${heading("공고일반")}<table><tr><th>공고명</th><td>용역</td></tr></table>
+      ${heading("파일첨부")}<table id="grdFile_body_table"><colgroup>
+        <col style="width:40px"><col style="width:180px"><col style="width:80px">
+      </colgroup><thead><tr><th col_id="CHK">전체선택<input type="checkbox"></th>
+        <th col_id="fileName">파일명</th><th col_id="fileSize">파일크기</th></tr></thead><tbody>
+        <tr><td col_id="CHK"><input type="checkbox" value="on">선택</td>
+          <td col_id="orgnlAtchFileNm">공고문.pdf</td><td col_id="fileSz">123 KB</td></tr>
+      </tbody></table></main>`;
+    const table = extractDetailPage(html, url).sections?.[1].tables[0];
+    expect(table?.headerRows[0].map((cell) => cell.value)).toEqual(["파일명", "파일크기"]);
+    expect(table?.bodyRows[0].map((cell) => cell.value)).toEqual(["공고문.pdf", "123 KB"]);
+    expect(table?.columnVisibility).toEqual([true, true]);
+  });
+
+  it("stores field-style table values only as fields while keeping a separate grid", () => {
+    const html = `<main>${heading("공고일반")}<table><tr>
+      <th>공고명</th><td data-title="공고명">용역</td></tr></table>
+      ${heading("내역")}<table id="price_grid"><thead><tr><th>항목</th><th>금액</th></tr></thead>
+      <tbody><tr><td>예산</td><td>1,000원</td></tr></tbody></table></main>`;
+    const sections = extractDetailPage(html, url).sections;
+    expect(sections?.[0].fields).toEqual([{ label: "공고명", value: "용역", visible: true }]);
+    expect(sections?.[0].tables).toEqual([]);
+    expect(sections?.[1].fields).toEqual([]);
+    expect(sections?.[1].tables).toHaveLength(1);
+  });
+
   it("records zero-width colgroup columns in the attachment grid", () => {
     const html = `<main>${heading("공고일반")}<table><tr><th>공고명</th><td>용역</td></tr></table>
       ${heading("파일첨부")}<table id="grdFile_body_table"><colgroup>
@@ -36,7 +63,7 @@ describe("extractDetailPage", () => {
     expect(table?.bodyRows[0].map((cell) => cell.visible)).toEqual([false, true, false, true]);
   });
 
-  it("preserves table, row, cell and mixed content visibility in a form table", () => {
+  it("keeps hidden values in fields without also storing their form table", () => {
     const html = `<main>${heading("공고일반")}<table><tr><th>공고명</th><td>용역</td></tr></table>
       ${heading("제안발표순서")}<table><tbody>
         <tr><th>발표순서 확인</th><td data-title="발표순서 확인"><ul>
@@ -46,21 +73,8 @@ describe("extractDetailPage", () => {
       </tbody></table></main>`;
     const section = extractDetailPage(html, url).sections?.[1];
     expect(section?.fields.find((field) => field.label === "발표순서 확인")?.value).toBe("숨긴 안내표시 안내");
-    expect(section?.tables).toHaveLength(1);
-    expect(section?.tables[0]).toMatchObject({
-      visible: true,
-      bodyRowVisibility: [true, false],
-      bodyRows: [
-        [
-          { value: "발표순서 확인", visible: true },
-          { value: "숨긴 안내표시 안내", visible: true, contents: [
-            { value: "숨긴 안내", visible: false }, { value: "표시 안내", visible: true }
-          ] }
-        ],
-        [{ value: "유의사항", visible: false }, { value: "숨긴 행의 값", visible: false,
-          contents: [{ value: "숨긴 행의 값", visible: false }] }]
-      ]
-    });
+    expect(section?.fields.find((field) => field.label === "유의사항")?.visible).toBe(false);
+    expect(section?.tables).toEqual([]);
   });
 
   it("propagates hidden table and cell ancestors without changing merged positions", () => {
@@ -150,9 +164,8 @@ describe("extractDetailPage", () => {
       { label: "숨긴 단일 셀", value: "단일 셀 값", visible: false },
       { label: "숨긴 상위", value: "상위 값", visible: false }
     ]);
-    expect(section?.tables).toHaveLength(2);
-    expect(section?.tables[0].bodyRowVisibility).toEqual([true, false, true, true, true]);
-    expect(section?.tables[1]).toMatchObject(simpleTable(["구분", "금액"], [["기초금액", "1,000원"]]));
+    expect(section?.tables).toHaveLength(1);
+    expect(section?.tables[0]).toMatchObject(simpleTable(["구분", "금액"], [["기초금액", "1,000원"]]));
   });
   it("keeps heading order and reads each WebSquare field only once", () => {
     const html = `<main>
@@ -451,6 +464,16 @@ describe("extractDetailPage", () => {
 });
 
 describe("extractModalStructure", () => {
+  it("omits row-selection checkbox cells from a modal grid", () => {
+    const html = `<div role="dialog"><table id="plan_grid"><thead><tr>
+      <th col_id="CHK">전체선택</th><th col_id="name">계획명</th></tr></thead><tbody><tr>
+      <td col_id="CHK"><input type="checkbox" value="on"></td><td col_id="name">구매계획</td>
+    </tr></tbody></table></div>`;
+    const table = extractModalStructure(html).tables[0];
+    expect(table.headerRows[0].map((cell) => cell.value)).toEqual(["계획명"]);
+    expect(table.bodyRows[0].map((cell) => cell.value)).toEqual(["구매계획"]);
+  });
+
   it("records the same inline visibility metadata for modal fields as page fields", () => {
     const html = `<div role="dialog"><table>
       <tr><td data-title="표시 필드">표시 값</td></tr>

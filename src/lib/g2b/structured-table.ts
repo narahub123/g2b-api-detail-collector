@@ -72,6 +72,35 @@ function applyColumnVisibility(rows: StructuredTableCell[][], visibility: boolea
   }));
 }
 
+/** 행 선택 컨트롤인 셀의 원래 열 위치를 찾습니다. */
+function selectionColumns($: cheerio.CheerioAPI, sourceRows: any[], rows: StructuredTableCell[][]): Set<number> {
+  const excluded = new Set<number>();
+  sourceRows.slice(0, rows.length).forEach((row, rowIndex) => {
+    $(row).children("th,td").toArray().forEach((node, cellIndex) => {
+      const cell = $(node);
+      const id = cell.attr("col_id") || "";
+      const hasCheckbox = cell.find("input[type='checkbox'],[role='checkbox']").length > 0;
+      if (!/^(?:chk|checkbox|row.?select|select)$/i.test(id) &&
+          !(hasCheckbox && /선택/.test(clean(cell.text())))) return;
+      const placed = rows[rowIndex]?.[cellIndex];
+      if (placed) for (let column = placed.column; column < placed.column + placed.colspan; column++) excluded.add(column);
+    });
+  });
+  return excluded;
+}
+
+/** 행 선택 열을 헤더·본문·colgroup에서 함께 제거해 열 위치를 유지합니다. */
+function withoutColumns(rows: StructuredTableCell[][], excluded: Set<number>): StructuredTableCell[][] {
+  if (!excluded.size) return rows;
+  return rows.map((row) => row.flatMap((cell) => {
+    const kept = Array.from({ length: cell.colspan }, (_, offset) => cell.column + offset)
+      .filter((column) => !excluded.has(column));
+    if (!kept.length) return [];
+    const before = [...excluded].filter((column) => column < cell.column).length;
+    return [{ ...cell, column: cell.column - before, colspan: kept.length }];
+  }));
+}
+
 function cellContents($: cheerio.CheerioAPI, cell: any): StructuredTableContent[] {
   const contents: StructuredTableContent[] = [];
   const append = (value: string | null, node: any) => {
@@ -139,6 +168,10 @@ export function extractDetailTable($: cheerio.CheerioAPI, table: cheerio.Cheerio
   const first = $(rows[0]).children("th,td");
   const hasColId = rows.some((row) => $(row).children("th[col_id],td[col_id]").length > 0);
   const hasThead = rows.some((row) => $(row).closest("thead")[0]?.parent === table[0]);
+  // data-title로 이미 필드가 되는 서식 표는 동일 값을 표로 다시 저장하지 않습니다.
+  const isFieldTable = !/grd|grid/i.test(table.attr("id") || "") && !hasColId && !hasThead &&
+    rows.some((row) => $(row).children("td[data-title]:not([col_id])").length > 0);
+  if (isFieldTable) return null;
   const isGrid = /grd|grid/i.test(table.attr("id") || "") || hasColId || hasThead ||
     table.find("td[data-title]").length > 0 ||
     (rows.length > 1 && first.length > 0 && first.filter("th").length === first.length);
@@ -158,15 +191,22 @@ export function extractDetailTable($: cheerio.CheerioAPI, table: cheerio.Cheerio
   const columns = columnVisibility($, table);
   const headerRows = positionedRows($, headerNodes, (cell) => nonempty(cell.text()));
   const headerWidth = Math.max(0, ...headerRows.flat().map((cell) => cell.column + cell.colspan));
-  const bodyRows = withoutTrailingEmptyRows(positionedRows($, bodyNodes, readCell),
+  const rawBodyRows = positionedRows($, bodyNodes, readCell);
+  const excluded = selectionColumns($, headerNodes, headerRows);
+  for (const column of selectionColumns($, bodyNodes, rawBodyRows)) excluded.add(column);
+  const bodyRows = withoutTrailingEmptyRows(rawBodyRows,
     (index) => $(bodyNodes[index]).hasClass("w2grid_hidedRow"));
   // WebSquare의 숨겨진 빈 보조 셀이 colgroup 수보다 셀 한 칸을 더 만드는 경우를 정렬합니다.
   const alignedBody = alignOverflowCells(bodyRows, columns?.length || headerWidth);
-  return alignedBody.length ? { headerRows: applyColumnVisibility(headerRows, columns),
-    bodyRows: applyColumnVisibility(alignedBody, columns), ...(columns ? { columnVisibility: columns } : {}),
+  const retainedColumns = columns?.filter((_, index) => !excluded.has(index));
+  const projectedBody = withoutTrailingEmptyRows(withoutColumns(applyColumnVisibility(alignedBody, columns), excluded),
+    (index) => $(bodyNodes[index]).hasClass("w2grid_hidedRow"));
+  return projectedBody.length ? { headerRows: withoutColumns(applyColumnVisibility(headerRows, columns), excluded),
+    bodyRows: projectedBody,
+    ...(retainedColumns ? { columnVisibility: retainedColumns } : {}),
     visible: isInlineVisible($, table[0]),
     headerRowVisibility: headerNodes.map((row) => isInlineVisible($, row)),
-    bodyRowVisibility: bodyNodes.slice(0, bodyRows.length).map((row) => isInlineVisible($, row)) } : null;
+    bodyRowVisibility: bodyNodes.slice(0, projectedBody.length).map((row) => isInlineVisible($, row)) } : null;
 }
 
 /** Modal WebSquare grids identify columns by col_id, which need not match their HTML row positions. */
@@ -194,7 +234,9 @@ export function extractModalGrid($: cheerio.CheerioAPI, table: cheerio.Cheerio<a
   }));
   const retainedBodyRows = withoutTrailingEmptyRows(bodyRows,
     (index) => $(dataRows[index]).hasClass("w2grid_hidedRow"));
-  return { headerRows, bodyRows: retainedBodyRows, visible: isInlineVisible($, table[0]),
+  const excluded = new Set(ids.flatMap((id, index) => /^(?:chk|checkbox|row.?select|select)$/i.test(id) ? [index] : []));
+  return { headerRows: withoutColumns(headerRows, excluded),
+    bodyRows: withoutColumns(retainedBodyRows, excluded), visible: isInlineVisible($, table[0]),
     headerRowVisibility: headerNodes.length ? headerNodes.map((row) => isInlineVisible($, row)) : [isInlineVisible($, table[0])],
     bodyRowVisibility: dataRows.toArray().slice(0, retainedBodyRows.length).map((row) => isInlineVisible($, row)) };
 }

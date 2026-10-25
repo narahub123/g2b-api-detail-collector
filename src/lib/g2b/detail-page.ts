@@ -106,7 +106,8 @@ export function extractDetailPage(html: string, pageUrl: string, fileMetadata: A
       if (table) target().tables.push(table);
     }
     if (element.is("tr") && !element.closest("table[id*='grd'],table[id*='grid']").length &&
-        !element.closest("table").find("[col_id]").length) {
+        !element.closest("table").find("[col_id]").length &&
+        !element.closest("table").children("thead").length) {
       const cells = element.children("th,td").toArray();
       for (const cell of cells) {
         const td = $(cell);
