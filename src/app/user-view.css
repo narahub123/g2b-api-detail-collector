@@ -14,6 +14,7 @@
 .user-field { display: grid; grid-template-columns: minmax(160px, 28%) minmax(0, 1fr); gap: 18px; padding: 15px 0; border-bottom: 1px solid #e7eeef; font-size: 14px; line-height: 1.6; }
 .user-field dt { color: #536b75; font-weight: 700; }
 .user-field dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.user-field dd .user-table-wrap { margin-top: 8px; }
 .user-table-wrap { margin-top: 18px; overflow-x: auto; border: 1px solid #dce6e9; border-radius: 9px; }
 .user-table { width: 100%; border-collapse: collapse; font-size: 13px; line-height: 1.6; }
 .user-table th, .user-table td { min-width: 110px; padding: 11px 13px; border: 1px solid #e4ecee; text-align: left; vertical-align: top; white-space: pre-wrap; overflow-wrap: anywhere; }

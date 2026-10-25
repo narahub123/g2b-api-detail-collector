@@ -30,6 +30,24 @@ const detail: ScrapedDetail = {
 describe("NoticeUserView", () => {
   afterEach(cleanup);
 
+  it("shows a table-only field under its label while respecting hidden tables and zero-width columns", () => {
+    const nested = { columnVisibility: [true, false, true],
+      headerRows: [[{ value: "업종", column: 0, rowspan: 1, colspan: 2, visible: true },
+        { value: "구분", column: 2, rowspan: 1, colspan: 1, visible: true }]],
+      bodyRows: [[{ value: "건설업", column: 0, rowspan: 1, colspan: 2, visible: true },
+        { value: "내부코드", column: 2, rowspan: 1, colspan: 1, visible: false }]] };
+    const source: ScrapedDetail = { ...detail, sections: [{ title: "투찰제한-일반", visible: true, tables: [],
+      fields: [{ label: "업종제한사항", value: null, visible: true, tables: [nested] },
+        { label: "숨긴 표", value: null, tables: [{ ...nested, visible: false }] }] }] };
+    render(<NoticeUserView detail={source} />);
+    const field = screen.getByText("업종제한사항").closest(".user-field")!;
+    const table = within(field as HTMLElement).getByRole("table");
+    expect(table).toHaveTextContent("건설업");
+    expect(table).not.toHaveTextContent("내부코드");
+    expect(screen.queryByText("숨긴 표")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("table")).toHaveLength(1);
+  });
+
   it("shows visible section data in collapsible sections while preserving merged table cells", () => {
     render(<NoticeUserView detail={detail} />);
     const section = screen.getByText("공고일반").closest("details");

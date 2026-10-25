@@ -26,6 +26,18 @@ const detail: ScrapedDetail = {
 };
 
 describe("NoticeComparison", () => {
+  it("shows an owned grid below its field and keeps independent section grids separate", () => {
+    const owned = simpleTable(["업종"], [["건설업"]]);
+    const source: ScrapedDetail = { ...detail, sections: [{ title: "투찰제한-일반",
+      fields: [{ label: "업종제한사항", value: null, tables: [owned] }],
+      tables: [simpleTable(["별도"], [["독립 값"]])] }] };
+    render(<NoticeComparison api={null} detail={source} />);
+    const field = screen.getByText("업종제한사항").closest(".raw-field")!;
+    expect(within(field as HTMLElement).getByRole("table")).toHaveTextContent("건설업");
+    const section = screen.getByText("투찰제한-일반", { selector: "summary" }).closest("details")!;
+    expect(within(section).getAllByRole("table")).toHaveLength(2);
+    expect(screen.getByRole("table", { name: "투찰제한-일반 표 1" })).toHaveTextContent("독립 값");
+  });
   it("shows generic independent detail and a stored notice link", () => {
     render(<NoticeComparison api={null} detail={detail} otherDetails={[
       { number: "R26TA12345678", triggers: [{ index: 0, tag: "a", label: "계약번호", value: "R26TA12345678", html: "<a>조회</a>" }],

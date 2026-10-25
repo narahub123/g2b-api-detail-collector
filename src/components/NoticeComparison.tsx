@@ -17,14 +17,18 @@ function displayValue(value: unknown): string {
   return typeof value === "string" ? value : JSON.stringify(value);
 }
 
-function FieldList({ fields, apiLabels = false }: { fields: StructuredField[]; apiLabels?: boolean }) {
+/** 필드의 값과 그 필드가 소유한 표를 같은 값 영역에 표시합니다. */
+function FieldList({ fields, apiLabels = false, group = "필드" }: { fields: StructuredField[]; apiLabels?: boolean; group?: string }) {
   if (!fields.length) return <p className="muted comparison-empty">수집된 필드가 없습니다.</p>;
   return <dl className="raw-fields">{fields.map((field, index) => {
     const value = displayValue(field.value);
     const href = typeof field.value === "string" ? safeLink(field.value) : null;
     return <div className={`raw-field${value.includes("\n") ? " raw-field--multiline" : ""}`} key={`${field.label}-${index}`}>
       <dt>{apiLabels ? apiFieldDisplayName(field.label) : field.label}</dt>
-      <dd>{value ? href ? <a href={href} target="_blank" rel="noopener noreferrer">{value}</a> : value : <span className="muted">값 없음</span>}</dd>
+      <dd>{value ? href ? <a href={href} target="_blank" rel="noopener noreferrer">{value}</a> : value
+        : !field.tables?.length && <span className="muted">값 없음</span>}
+        {field.tables?.map((table, tableIndex) => <DataTable table={table}
+          name={`${group} ${field.label} 표 ${tableIndex + 1}`} key={tableIndex} />)}</dd>
     </div>;
   })}</dl>;
 }
@@ -92,12 +96,12 @@ export function NoticeComparison({ api, detail, orderPlans = [], preSpecificatio
         <div className="comparison-group"><h3>상세 페이지 섹션 · {detail.sections?.length || 0}개</h3>
           {detail.sections?.length ? detail.sections.map((section, index) => <details className="comparison-card" key={`${section.title}-${index}`} open>
             <summary>{section.title} <span>필드 {section.fields.length} · 표 {section.tables.length}</span></summary>
-            {(section.fields.length > 0 || !section.details?.length) && <FieldList fields={section.fields} />}
+            {(section.fields.length > 0 || !section.details?.length) && <FieldList fields={section.fields} group={section.title} />}
             <TableList tables={section.tables} group={section.title} />
             {section.details?.map((item, detailIndex) => <div className="comparison-detail-block" key={detailIndex}>
               <h4>{item.title}</h4>
               {item.trigger && <ClickSources triggers={[item.trigger]} />}
-              <FieldList fields={item.fields} />
+              <FieldList fields={item.fields} group={`${section.title} ${item.title}`} />
               <TableList tables={item.tables} group={`${section.title} ${item.title} ${detailIndex + 1}`} />
             </div>)}
           </details>) : <p className="muted comparison-empty">섹션별 수집 자료가 없습니다.</p>}
