@@ -11,6 +11,8 @@ import type { StoredNotice } from "./notices";
 import { getNoticeRecord } from "./notices";
 import type { ApiNotice, PostedDateRange } from "./types";
 import { saveIndependentDetails, structureNoticeDetail } from "./structured-data";
+import type { StructuredNoticeDetail } from "./structured-data";
+import { getPool, getStoredNotice, saveNoticeRelation, saveStoredNotice } from "./postgres-store";
 
 export type CollectionJob = {
   id: string;
@@ -30,6 +32,7 @@ export type CollectionJob = {
 type CollectionDependencies = {
   fetcher?: typeof fetch;
   dataDir?: string;
+  storage?: "postgres" | "json";
   scrape?: (url: string) => Promise<ScrapeResult>;
 };
 
@@ -41,8 +44,10 @@ async function saveJob(job: CollectionJob, dir: string) {
   await writeJsonAtomic(jobPath(dir, job.id), job);
 }
 
+/** 날짜 범위 API 조회와 상세 수집을 순서대로 실행하고 작업 상태를 기록합니다. */
 async function runCollection(job: CollectionJob, deps: CollectionDependencies): Promise<void> {
   const dir = deps.dataDir || defaultDataDir();
+  const dbMode = deps.storage === "postgres" || (!deps.dataDir && deps.storage !== "json");
   const scrape = deps.scrape || scrapeDetailPage;
   const seenApi = new Set<string>();
   const scraped = new Set<string>();
@@ -58,18 +63,20 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies): 
   const intentPath = (source: string, related: string) =>
     join(intentDir, `${[source, related].sort().join("__")}.json`);
   const readRecord = async (key: string): Promise<StoredNotice | null> => {
+    if (dbMode) return getStoredNotice(key);
     try { return await readJson<StoredNotice>(pathFor(key)); }
     catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
       throw error;
     }
   };
-  const saveRecord = async (key: string, record: StoredNotice) => {
+  const saveRecord = async (key: string, record: StoredNotice, structured?: StructuredNoticeDetail) => {
     const identity = parts(key);
     record.key = key;
     record.relatedNoticeKeys = [...new Set(record.relatedNoticeKeys || [])];
     record.normalized = normalizeNotice(record.api, record.detail, identity);
-    await writeJsonAtomic(pathFor(key), record);
+    if (dbMode) await saveStoredNotice(key, record, structured);
+    else await writeJsonAtomic(pathFor(key), record);
   };
   const ensureRecord = async (key: string, api: ApiNotice | null = null): Promise<StoredNotice> => {
     const identity = parts(key);
@@ -90,6 +97,7 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies): 
   };
   const addRelation = async (source: string, related: string) => {
     if (source === related) return;
+    if (dbMode) { await saveNoticeRelation(source, related); return; }
     const path = intentPath(source, related);
     await writeJsonAtomic(path, { source, related });
     await writeReciprocalRelation(source, related);
@@ -105,22 +113,9 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies): 
     job.phase = "detail";
     await saveJob(job, dir);
     const identity = parts(key);
-    try {
-      const result = await scrape(serviceDetailUrl(identity.number, identity.order));
-      const structured = structureNoticeDetail(key, result.detail);
-      await saveIndependentDetails(dir, structured);
-      record.detail = structured.detail;
-      record.orderPlanNumbers = structured.orderPlanNumbers;
-      record.preSpecificationNumbers = structured.preSpecificationNumbers;
-      record.otherDetailNumbers = structured.otherDetailNumbers;
-      record.independentTriggers = structured.independentTriggers;
-      job.errors.push(...structured.warnings);
-      record.detailError = null;
-      job.detailSucceeded++;
-      await saveRecord(key, record);
-      await saveJob(job, dir);
-      return result.relatedNoticeKeys;
-    } catch (error) {
+    let result: ScrapeResult;
+    try { result = await scrape(serviceDetailUrl(identity.number, identity.order)); }
+    catch (error) {
       record.detailError = error instanceof Error ? error.message : "상세 수집 오류";
       job.detailFailed++;
       job.errors.push(`${key}: ${record.detailError}`);
@@ -128,6 +123,19 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies): 
       await saveJob(job, dir);
       return [];
     }
+    const structured = structureNoticeDetail(key, result.detail);
+    if (!dbMode) await saveIndependentDetails(dir, structured);
+    record.detail = structured.detail;
+    record.orderPlanNumbers = structured.orderPlanNumbers;
+    record.preSpecificationNumbers = structured.preSpecificationNumbers;
+    record.otherDetailNumbers = structured.otherDetailNumbers;
+    record.independentTriggers = structured.independentTriggers;
+    record.detailError = null;
+    await saveRecord(key, record, structured);
+    job.errors.push(...structured.warnings);
+    job.detailSucceeded++;
+    await saveJob(job, dir);
+    return result.relatedNoticeKeys;
   };
   const enqueueRelated = async (source: string, relatedKeys: string[]) => {
     for (const related of relatedKeys) {
@@ -140,6 +148,7 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies): 
           else job.errors.push(`${related}: 관련 공고 탐색 한도(200건)로 상세 수집 보류`);
         }
       } catch (error) {
+        if (dbMode && error instanceof Error && !error.message.startsWith("잘못된 공고 키")) throw error;
         job.errors.push(`${source} → ${related}: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
@@ -152,6 +161,7 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies): 
     }
   };
   const recoverRelationIntents = async () => {
+    if (dbMode) return;
     let files: string[];
     try { files = await readdir(intentDir); }
     catch (error) {
@@ -203,9 +213,11 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies): 
   }
 }
 
+/** 날짜 범위 수집 작업을 생성하고 백그라운드 실행을 시작합니다. */
 export async function startCollection(range: PostedDateRange, deps: CollectionDependencies = {}): Promise<CollectionJob> {
   parsePostedDateRange(range.start, range.end);
   if (!process.env.G2B_SERVICE_KEY) throw new Error("G2B_SERVICE_KEY 환경변수를 설정하세요.");
+  if (deps.storage === "postgres" || (!deps.dataDir && deps.storage !== "json")) getPool();
   if (jobRuntime.__g2bActiveJobId) throw new Error("이미 수집 작업이 진행 중입니다.");
   const job: CollectionJob = {
     id: randomUUID(), mode: "collection", status: "running", phase: "api", range,
@@ -223,34 +235,41 @@ export async function startCollection(range: PostedDateRange, deps: CollectionDe
   }
 }
 
+/** 선택한 공고의 상세만 다시 수집하며 성공한 결과만 교체합니다. */
 async function runRefresh(job: CollectionJob, deps: CollectionDependencies): Promise<void> {
   const dir = deps.dataDir || defaultDataDir();
+  const dbMode = deps.storage === "postgres" || (!deps.dataDir && deps.storage !== "json");
   const scrape = deps.scrape || scrapeDetailPage;
   try {
     for (const result of job.results || []) {
+      const record = dbMode ? await getStoredNotice(result.key) :
+        await readJson<StoredNotice>(join(dir, "notices", `${result.key}.json`));
+      if (!record) throw new Error(`저장된 공고를 찾을 수 없습니다: ${result.key}`);
+      const [number, order] = result.key.split("--");
+      let scraped: ScrapeResult;
       try {
-        const path = join(dir, "notices", `${result.key}.json`);
-        const record = await readJson<StoredNotice>(path);
-        const [number, order] = result.key.split("--");
-        const scraped = await scrape(serviceDetailUrl(number, order));
-        const structured = structureNoticeDetail(result.key, scraped.detail);
-        await saveIndependentDetails(dir, structured);
-        const updated: StoredNotice = { ...record, key: result.key, detail: structured.detail,
-          orderPlanNumbers: structured.orderPlanNumbers, preSpecificationNumbers: structured.preSpecificationNumbers,
-          otherDetailNumbers: structured.otherDetailNumbers,
-          independentTriggers: structured.independentTriggers,
-          detailError: null };
-        updated.normalized = normalizeNotice(updated.api, updated.detail, { number, order });
-        await writeJsonAtomic(path, updated);
-        result.status = "succeeded";
-        job.detailSucceeded++;
-        job.errors.push(...structured.warnings);
+        scraped = await scrape(serviceDetailUrl(number, order));
       } catch (error) {
         result.status = "failed";
         result.error = error instanceof Error ? error.message : "상세 수집 오류";
         job.detailFailed++;
         job.errors.push(`${result.key}: ${result.error}`);
+        await saveJob(job, dir);
+        continue;
       }
+      const structured = structureNoticeDetail(result.key, scraped.detail);
+      if (!dbMode) await saveIndependentDetails(dir, structured);
+      const updated: StoredNotice = { ...record, key: result.key, detail: structured.detail,
+        orderPlanNumbers: structured.orderPlanNumbers, preSpecificationNumbers: structured.preSpecificationNumbers,
+        otherDetailNumbers: structured.otherDetailNumbers,
+        independentTriggers: structured.independentTriggers,
+        detailError: null };
+      updated.normalized = normalizeNotice(updated.api, updated.detail, { number, order });
+      if (dbMode) await saveStoredNotice(result.key, updated, structured);
+      else await writeJsonAtomic(join(dir, "notices", `${result.key}.json`), updated);
+      result.status = "succeeded";
+      job.detailSucceeded++;
+      job.errors.push(...structured.warnings);
       await saveJob(job, dir);
     }
     job.status = "completed";
@@ -265,7 +284,9 @@ async function runRefresh(job: CollectionJob, deps: CollectionDependencies): Pro
   }
 }
 
+/** 저장된 공고 키를 검증한 뒤 선택 재수집 작업을 시작합니다. */
 export async function startRefresh(keys: string[], deps: CollectionDependencies = {}): Promise<CollectionJob> {
+  if (deps.storage === "postgres" || (!deps.dataDir && deps.storage !== "json")) getPool();
   if (jobRuntime.__g2bActiveJobId) throw new Error("이미 수집 작업이 진행 중입니다.");
   if (!Array.isArray(keys) || keys.length === 0) throw new Error("재수집할 공고를 선택하세요.");
   const unique = [...new Set(keys)];
@@ -274,7 +295,8 @@ export async function startRefresh(keys: string[], deps: CollectionDependencies 
     if (typeof key !== "string" || !/^[A-Za-z0-9_.%~-]+--[A-Za-z0-9_.%~-]+$/.test(key) || key.includes("..")) {
       throw new Error(`잘못된 공고 키: ${key}`);
     }
-    if (!await getNoticeRecord(key, dir)) throw new Error(`저장된 공고를 찾을 수 없습니다: ${key}`);
+    if (!await getNoticeRecord(key, deps.storage === "postgres" ? undefined : deps.dataDir))
+      throw new Error(`저장된 공고를 찾을 수 없습니다: ${key}`);
   }
   if (jobRuntime.__g2bActiveJobId) throw new Error("이미 수집 작업이 진행 중입니다.");
   const job: CollectionJob = { id: randomUUID(), mode: "refresh", status: "running", phase: "detail", range: null,
