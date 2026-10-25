@@ -10,6 +10,43 @@ const simpleTable = (columns: string[], rows: (string | null)[][]) => ({
 });
 
 describe("extractDetailPage", () => {
+  it("keeps every form field when one value contains a grid, without adding that grid to section tables", () => {
+    const labels = ["지역제한", "참가가능지역", "업종제한", "업종제한사항", "주력분야제한여부",
+      "현장설명제한여부", "물품분류제한여부", "물품등록구분"];
+    const rows = labels.map((label) => `<tr><th>${label}</th><td data-title="${label}">${label === "업종제한사항"
+      ? `<table id="grdLcnsLmt_body_table"><thead><tr><th col_id="name">업종</th></tr></thead>
+        <tbody><tr><td col_id="name">건설업</td></tr></tbody></table>` : `${label} 값`}</td></tr>`).join("");
+    const html = `<main>${heading("공고일반")}<table><tr><th>공고명</th><td>용역</td></tr></table>
+      ${heading("투찰제한-일반")}<table><tbody>${rows}</tbody></table>
+      ${heading("별도 표")}<table id="other_grid"><thead><tr><th>항목</th></tr></thead>
+      <tbody><tr><td>별도 값</td></tr></tbody></table></main>`;
+    const sections = extractDetailPage(html, url).sections!;
+    expect(sections[1].fields.map((field) => field.label)).toEqual(labels);
+    expect(sections[1].fields[3]).toMatchObject({ label: "업종제한사항", value: null,
+      tables: [{ headerRows: [[expect.objectContaining({ value: "업종" })]],
+        bodyRows: [[expect.objectContaining({ value: "건설업" })]] }] });
+    expect(sections[1].tables).toEqual([]);
+    expect(sections[2].tables).toHaveLength(1);
+  });
+
+  it("keeps nested grids with their own repeated field and excludes grid controls from field text", () => {
+    const html = `<main>${heading("공고일반")}<table><tr><th>공고명</th><td>용역</td></tr></table>
+      ${heading("다른 섹션")}<table><tbody>
+        <tr><th>조건</th><td data-title="조건">앞 <table id="first_grid"><thead><tr><th>항목</th></tr></thead>
+          <tbody><tr><td><input value="첫 표 값"></td></tr></tbody></table> 뒤</td></tr>
+        <tr><th>조건</th><td data-title="조건"><table id="second_grid" style="display:none">
+          <thead><tr><th>항목</th></tr></thead><tbody><tr><td>둘째 표 값</td></tr></tbody></table></td></tr>
+      </tbody></table></main>`;
+    const section = extractDetailPage(html, url).sections![1];
+    expect(section.fields).toHaveLength(2);
+    expect(section.fields[0].value).toBe("앞 뒤");
+    expect(section.fields[0].tables?.[0].bodyRows[0][0].value).toBe("첫 표 값");
+    expect(section.fields[1].value).toBeNull();
+    expect(section.fields[1].tables?.[0]).toMatchObject({ visible: false,
+      bodyRows: [[expect.objectContaining({ value: "둘째 표 값", visible: false })]] });
+    expect(section.tables).toEqual([]);
+  });
+
   it("omits a grid row-selection checkbox column from collected table data", () => {
     const html = `<main>${heading("공고일반")}<table><tr><th>공고명</th><td>용역</td></tr></table>
       ${heading("파일첨부")}<table id="grdFile_body_table"><colgroup>

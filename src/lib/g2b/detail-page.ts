@@ -12,7 +12,7 @@ export type { StructuredTable, StructuredTableCell, StructuredTableContent } fro
 export type Attachment = { name: string; url: string | null };
 export type AttachmentMetadata = { orgnlAtchFileNm: string; atchFileSqno: number; scrnIndtYn?: string };
 export type ClickDownload = { cellId: string; name: string; fileNo: string; seq: number };
-export type StructuredField = { label: string; value: string | null; visible?: boolean };
+export type StructuredField = { label: string; value: string | null; visible?: boolean; tables?: StructuredTable[] };
 export type StructuredSection = { title: string; fields: StructuredField[]; tables: StructuredTable[];
   details?: { title: string; fields: StructuredField[]; tables: StructuredTable[];
     trigger?: ModalCapture["trigger"] }[]; visible?: boolean };
@@ -62,6 +62,7 @@ export function extractRelatedNoticeKeys(html: string): string[] {
   return [...new Set(keys)];
 }
 
+/** 렌더링된 상세 HTML에서 섹션·필드·표와 첨부파일을 추출합니다. */
 export function extractDetailPage(html: string, pageUrl: string, fileMetadata: AttachmentMetadata[] = [], clickDownloads: ClickDownload[] = []): ScrapedDetail {
   const url = assertG2bUrl(pageUrl);
   const $ = cheerio.load(html);
@@ -80,41 +81,78 @@ export function extractDetailPage(html: string, pageUrl: string, fileMetadata: A
     const input = cell.find("input:not([type='hidden']),textarea,select").first();
     return nonempty(input.length ? String(input.val() ?? cell.text()) : cell.text());
   };
-  const appendField = (label: string, value: string | null, visible: boolean) => {
-    if (!label) return;
+  /** 안쪽 표의 문자가 필드 값으로 중복 저장되지 않게 바깥 값만 읽습니다. */
+  const readFieldCell = (cell: any): string | null => {
+    if (!cell.find("table").length) return readCell(cell);
+    const outer = cell.clone();
+    outer.find("table").remove();
+    return readCell(outer);
+  };
+  const fieldByCell = new Map<any, StructuredField>();
+  /** 표가 있는 반복 필드는 소유 관계를 유지하도록 별도 항목으로 둡니다. */
+  const appendField = (label: string, value: string | null, visible: boolean, ownsTable = false): StructuredField | null => {
+    if (!label) return null;
     const bucket = target();
-    const sameLabel = bucket.fields.filter((field) => field.label === label);
+    const sameLabel = bucket.fields.filter((field) => field.label === label && !field.tables?.length);
+    if (ownsTable) {
+      const field: StructuredField = { label, value, visible, tables: [] };
+      bucket.fields.push(field);
+      return field;
+    }
     if (value !== null) {
       const empty = sameLabel.find((field) => field.value === null);
       if (empty) {
         empty.value = value;
         empty.visible = visible;
-      } else if (!sameLabel.some((field) => field.value === value)) bucket.fields.push({ label, value, visible });
-    } else if (!sameLabel.length) bucket.fields.push({ label, value, visible });
+        return empty;
+      }
+      const existing = sameLabel.find((field) => field.value === value);
+      if (existing) return existing;
+      const field = { label, value, visible };
+      bucket.fields.push(field);
+      return field;
+    }
+    if (sameLabel.length) return sameLabel[0];
+    const field = { label, value, visible };
+    bucket.fields.push(field);
+    return field;
   };
-  // Traverse once in document order so fields, grids and repeated headings keep their source position.
+  // 문서 순서대로 순회하여 바깥 필드를 등록한 다음 그 안의 표를 연결합니다.
   const walk = (node: any): void => {
     if (node.type !== "tag") return;
     const element = $(node);
-    // WebSquare places each section title in a dfbox header, before its field/table containers.
+    // WebSquare 섹션 제목은 필드와 표보다 앞에 있으므로 이 시점에 저장 대상을 전환합니다.
     if (element.is(".dfbox > .fl > .df_tit")) {
       const title = clean(element.text());
       if (title) { startSection(title, isVisible(node)); return; }
     }
     if (element.is("table")) {
       const table = extractDetailTable($, element, readCell);
-      if (table) target().tables.push(table);
+      if (table) {
+        const owner = element.parents("td").toArray().map((cell) => fieldByCell.get(cell)).find(Boolean);
+        if (owner) (owner.tables ||= []).push(table);
+        else target().tables.push(table);
+      }
     }
-    if (element.is("tr") && !element.closest("table[id*='grd'],table[id*='grid']").length &&
-        !element.closest("table").find("[col_id]").length &&
-        !element.closest("table").children("thead").length) {
+    const nearestTable = element.is("tr") ? element.closest("table") : null;
+    const ownRows = nearestTable?.find("tr").filter((_, row) => $(row).closest("table")[0] === nearestTable[0]);
+    const isGridRow = nearestTable && (/grd|grid/i.test(nearestTable.attr("id") || "") ||
+      Boolean(ownRows?.toArray().some((row) => $(row).children("th[col_id],td[col_id]").length)) ||
+      Boolean(nearestTable.children("thead").length));
+    if (element.is("tr") && nearestTable?.length && !isGridRow) {
       const cells = element.children("th,td").toArray();
       for (const cell of cells) {
         const td = $(cell);
-        if (td.is("td[data-title]") && !td.is("[col_id]")) appendField(clean(td.attr("data-title") || ""), readCell(td), isVisible(cell));
+        if (td.is("td[data-title]") && !td.is("[col_id]")) {
+          const field = appendField(clean(td.attr("data-title") || ""), readFieldCell(td), isVisible(cell), td.find("table").length > 0);
+          if (field) fieldByCell.set(cell, field);
+        }
         if (td.is("th")) {
           const next = td.next();
-          if (next.is("td") && !next.attr("data-title")) appendField(clean(td.text()), readCell(next), isVisible(cell) && isVisible(next[0]));
+          if (next.is("td") && !next.attr("data-title")) {
+            const field = appendField(clean(td.text()), readFieldCell(next), isVisible(cell) && isVisible(next[0]), next.find("table").length > 0);
+            if (field) fieldByCell.set(next[0], field);
+          }
         }
       }
     }
