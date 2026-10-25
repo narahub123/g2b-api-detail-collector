@@ -24,8 +24,25 @@
 .user-download-link:hover { color: #075f65; }
 .user-download-link:focus-visible { outline: 2px solid #087b80; outline-offset: 2px; }
 .user-empty { padding: 30px; margin: 0 0 56px; border: 1px dashed #cbd7db; border-radius: 12px; background: #fff; }
+/* 단계 탐색은 기존 공고 본문 바깥에 배치합니다. */
+.notice-stage-layout { margin-bottom: 0; }
+.notice-stage-tabs { display: flex; gap: 4px; overflow-x: auto; border-bottom: 1px solid #dce6e9; margin-bottom: 20px; }
+.notice-stage-tab { flex: 1 0 auto; min-width: 94px; padding: 14px 12px; border: 0; border-bottom: 3px solid transparent; background: transparent; color: #647784; font-size: 14px; font-weight: 700; cursor: pointer; }
+.notice-stage-tab:hover { color: #08747a; background: #edf5f5; }
+.notice-stage-tab.is-active { color: #075f65; border-bottom-color: #08747a; background: #eef7f6; }
+.notice-stage-tab:focus-visible, .related-notice-link:focus-visible { outline: 2px solid #087b80; outline-offset: -2px; }
+.notice-stage-panel[hidden] { display: none; }
+.notice-stage-pending { padding: 28px 20px; margin: 0 0 56px; background: #fff; border: 1px dashed #cbd7db; border-radius: 12px; color: #637784; font-size: 14px; }
+.related-notice-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin: 0 0 18px; font-size: 13px; line-height: 1.7; }
+.related-notice-label { font-weight: 700; color: #536b75; }
+.related-notice-items { overflow-wrap: anywhere; }
+.related-notice-separator { color: #9aa8ae; }
+.related-notice-link { color: #08747a; text-decoration: underline; text-underline-offset: 3px; }
+.related-notice-link:hover { color: #075f65; }
+.related-notice-current { color: #075f65; background: #d8f0eb; padding: 4px 7px; border-radius: 5px; }
 @media (max-width: 700px) {
   .user-section summary { padding: 16px; }
   .user-section-content { padding: 5px 16px 18px; }
   .user-field { grid-template-columns: 1fr; gap: 3px; }
+  .notice-stage-tab { min-width: 86px; padding: 12px 10px; font-size: 13px; }
 }

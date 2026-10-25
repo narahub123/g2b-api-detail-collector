@@ -1,5 +1,8 @@
 import { notFound } from "next/navigation";
+import { IndependentDetailsView } from "@/components/IndependentDetailsView";
 import { NoticeUserView } from "@/components/NoticeUserView";
+import { NoticeStageTabs } from "@/components/NoticeStageTabs";
+import { RelatedNoticeLine } from "@/components/RelatedNoticeLine";
 import { getNoticeRecord } from "@/lib/g2b/notices";
 
 export const runtime = "nodejs";
@@ -18,7 +21,12 @@ export default async function BidUserViewPage({ params }: { params: Promise<{ ke
       <h1>{record.normalized.title.value || "제목 정보 없음"}</h1>
       <p>{record.normalized.agency.value || "기관 정보 없음"} · 공고번호 {record.normalized.number} · {record.normalized.order}차</p>
     </div>
-    <NoticeUserView detail={record.detail} />
+    <NoticeStageTabs
+      plan={<IndependentDetailsView references={record.orderPlans} />}
+      spec={<IndependentDetailsView references={record.preSpecifications} />}>
+      <RelatedNoticeLine currentKey={key} relatedKeys={record.relatedNoticeKeys} />
+      <NoticeUserView detail={record.detail} />
+    </NoticeStageTabs>
     <footer>데이터 출처: 조달청 나라장터 · 최종 참가 조건과 제출 내용은 원문 및 첨부파일을 확인하세요.</footer>
   </main>;
 }
