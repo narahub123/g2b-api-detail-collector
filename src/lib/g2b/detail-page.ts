@@ -93,7 +93,7 @@ export function extractDetailPage(html: string, pageUrl: string, fileMetadata: A
   const appendField = (label: string, value: string | null, visible: boolean, ownsTable = false): StructuredField | null => {
     if (!label) return null;
     const bucket = target();
-    const sameLabel = bucket.fields.filter((field) => field.label === label && !field.tables?.length);
+    const sameLabel = bucket.fields.filter((field) => field.label === label && field.tables === undefined);
     if (ownsTable) {
       const field: StructuredField = { label, value, visible, tables: [] };
       bucket.fields.push(field);

@@ -161,7 +161,7 @@ function positionedRows($: cheerio.CheerioAPI, sourceRows: any[], readCell: (cel
   });
 }
 
-/** The notice page has real HTML header/body rows; preserve each source cell and its span. */
+/** 공고 페이지 표의 직접 소속 행만 읽어 원래 셀과 병합 범위를 보존합니다. */
 export function extractDetailTable($: cheerio.CheerioAPI, table: cheerio.Cheerio<any>, readCell: (cell: any) => string | null): StructuredTable | null {
   const rows = table.find("tr").filter((_, row) => $(row).closest("table")[0] === table[0]).toArray();
   if (!rows.length) return null;
@@ -170,10 +170,11 @@ export function extractDetailTable($: cheerio.CheerioAPI, table: cheerio.Cheerio
   const hasThead = rows.some((row) => $(row).closest("thead")[0]?.parent === table[0]);
   // data-title로 이미 필드가 되는 서식 표는 동일 값을 표로 다시 저장하지 않습니다.
   const isFieldTable = !/grd|grid/i.test(table.attr("id") || "") && !hasColId && !hasThead &&
-    rows.some((row) => $(row).children("td[data-title]:not([col_id])").length > 0);
+    rows.some((row) => $(row).children("td[data-title]:not([col_id])").length > 0 ||
+      $(row).children("th").toArray().some((th) => $(th).next().is("td:not([col_id])")));
   if (isFieldTable) return null;
   const isGrid = /grd|grid/i.test(table.attr("id") || "") || hasColId || hasThead ||
-    table.find("td[data-title]").length > 0 ||
+    rows.some((row) => $(row).children("td[data-title]").length > 0) ||
     (rows.length > 1 && first.length > 0 && first.filter("th").length === first.length);
   if (!isGrid) return null;
 

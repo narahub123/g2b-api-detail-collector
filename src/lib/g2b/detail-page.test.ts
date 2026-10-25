@@ -49,6 +49,32 @@ describe("extractDetailPage", () => {
     expect(section.tables).toEqual([]);
   });
 
+  it("does not merge a table-owning field with a later same-label field in the same row", () => {
+    const html = `<main>${heading("공고일반")}<table><tr><th>공고명</th><td>용역</td></tr></table>
+      ${heading("조건")}<table><tr>
+        <td data-title="조건"><table id="nested_grid"><thead><tr><th col_id="x">항목</th></tr></thead>
+          <tbody><tr><td col_id="x">표 내용</td></tr></tbody></table></td>
+        <td data-title="조건">별도 값</td></tr></table></main>`;
+    const fields = extractDetailPage(html, url).sections![1].fields;
+    expect(fields).toHaveLength(2);
+    expect(fields[0]).toMatchObject({ label: "조건", value: null,
+      tables: [{ bodyRows: [[expect.objectContaining({ value: "표 내용" })]] }] });
+    expect(fields[1]).toMatchObject({ label: "조건", value: "별도 값" });
+    expect(fields[1].tables).toBeUndefined();
+  });
+
+  it("does not store a th-td form table twice when its nested grid has data-title cells", () => {
+    const html = `<main>${heading("공고일반")}<table><tr><th>공고명</th><td>용역</td></tr></table>
+      ${heading("조건")}<table><tr><th>조건</th><td>
+        <table id="nested_grid"><thead><tr><th col_id="x">항목</th></tr></thead>
+          <tbody><tr><td col_id="x" data-title="항목">표 내용</td></tr></tbody></table>
+      </td></tr></table></main>`;
+    const section = extractDetailPage(html, url).sections![1];
+    expect(section.fields).toHaveLength(1);
+    expect(section.fields[0].tables).toHaveLength(1);
+    expect(section.tables).toEqual([]);
+  });
+
   it("omits a grid row-selection checkbox column from collected table data", () => {
     const html = `<main>${heading("공고일반")}<table><tr><th>공고명</th><td>용역</td></tr></table>
       ${heading("파일첨부")}<table id="grdFile_body_table"><colgroup>
