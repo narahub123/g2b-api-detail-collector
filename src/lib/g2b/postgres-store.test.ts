@@ -61,6 +61,22 @@ describe("noticeSummary", () => {
     expect(statements[0].sql).toContain("WHERE detail_key=$1");
   });
 
+  it("replaces an unsupported independent detail on recollection while keeping current duplicates", async () => {
+    const statements = fakePool();
+    const key = "R26BK1--000";
+    const detail = { schemaVersion: 2 as const, number: "R26DD1", title: "계획", fields: [], tables: [],
+      capturedAt: "2026-10-25T00:00:00Z", sourceNoticeKey: key };
+    await saveStoredNotice(key, { api: null, detail: null }, {
+      detail: { sourceUrl: "https://www.g2b.go.kr/", attachments: [], links: [] },
+      orderPlanNumbers: [detail.number], preSpecificationNumbers: [], otherDetailNumbers: [],
+      orderPlans: [detail], preSpecifications: [], otherDetails: [], independentTriggers: [], warnings: []
+    });
+    const insert = statements.find((item) => item.sql.includes("INSERT INTO public.independent_details"));
+    expect(insert?.sql).toContain("DO UPDATE SET payload=EXCLUDED.payload");
+    expect(insert?.sql).toContain("payload->>'schemaVersion'");
+    expect(insert?.sql).toContain("IS DISTINCT FROM '2'");
+  });
+
   it("rolls back a failed detail and reference update", async () => {
     const statements = fakePool("INSERT INTO public.notice_independent_refs");
     const key = "R26BK1--000";

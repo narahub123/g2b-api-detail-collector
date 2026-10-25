@@ -30,6 +30,7 @@ const detail: ScrapedDetail = {
 describe("NoticeUserView", () => {
   afterEach(cleanup);
 
+
   it("shows only visible pieces of a field and omits its hidden empty table", () => {
     const source: ScrapedDetail = { ...detail, sections: [{ title: "투찰제한-일반", visible: true, tables: [],
       fields: [{ label: "업종제한사항", visible: true,

@@ -34,6 +34,7 @@ function visibleFields(fields: StructuredField[]): StructuredField[] {
     (Boolean(fieldText(field.value, true)) || field.tables?.some(hasVisibleTableData)));
 }
 
+
 /** 숨겨진 하위 텍스트가 표 셀의 합쳐진 값으로 다시 노출되지 않게 합니다. */
 function visibleCellValue(cell: StructuredTable["bodyRows"][number][number]): string {
   if (cell.visible === false) return "";

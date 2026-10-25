@@ -50,6 +50,16 @@ describe("IndependentDetailsView", () => {
     expect(screen.getByText("R26BD12345678: 저장된 상세 정보가 없습니다.")).toBeInTheDocument();
   });
 
+  it("이전 형식의 독립 상세는 렌더링하지 않고 재수집을 안내합니다", () => {
+    const references = [{ number: "R26DD20902687", detail: {
+      schemaVersion: 1, number: "R26DD20902687", title: "발주계획 상세",
+      fields: [{ label: "사업명", value: "이전 값" }], tables: []
+    } }] as unknown as IndependentReference[];
+    render(<IndependentDetailsView references={references} />);
+    expect(screen.getByText(/다시 수집/)).toBeInTheDocument();
+    expect(screen.queryByTestId("stored-detail")).not.toBeInTheDocument();
+  });
+
   it("연결된 공고는 상세 링크를 표시합니다", () => {
     render(<IndependentDetailsView references={[{
       number: "R26BK01774553-001",
