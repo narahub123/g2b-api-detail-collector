@@ -22,6 +22,7 @@ describe("NoticeDetail", () => {
     expect(screen.getByRole("link", { name: "나라장터 원문 보기" })).toHaveAttribute("target", "_blank");
     expect(screen.getByRole("link", { name: "나라장터 원문 보기" })).toHaveAttribute("rel", "noopener noreferrer");
     expect(screen.getByRole("link", { name: "수집 정보 비교" })).toHaveAttribute("href", "/bids/R26BK1--000/compare");
+    expect(screen.getByRole("link", { name: "사용자 화면 보기" })).toHaveAttribute("href", "/bids/R26BK1--000/view");
   });
 
   it("keeps the summary and dedicated comparison link without the inline comparison", () => {

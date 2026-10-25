@@ -1,0 +1,31 @@
+.user-view-page { max-width: 1240px; }
+.user-view-heading { padding: 4px 0 30px; }
+.user-view-heading h1 { margin: 10px 0; font-size: clamp(27px, 3.4vw, 42px); letter-spacing: -.05em; }
+.user-view-heading p { margin: 0; color: #637784; font-size: 14px; line-height: 1.6; }
+.user-sections { display: grid; gap: 14px; padding-bottom: 56px; }
+.user-section { overflow: hidden; border: 1px solid #dce6e9; border-radius: 14px; background: #fff; }
+.user-section summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 22px; cursor: pointer; color: #1b4950; background: #f0f7f7; font-size: 17px; font-weight: 700; list-style: none; }
+.user-section summary::-webkit-details-marker { display: none; }
+.user-section summary:focus-visible { outline: 2px solid #087b80; outline-offset: -3px; }
+.user-section-toggle { display: inline-block; font-size: 23px; line-height: 1; transition: transform .15s ease; }
+.user-section:not([open]) .user-section-toggle { transform: rotate(-90deg); }
+.user-section-content { padding: 8px 22px 22px; }
+.user-fields { margin: 0; }
+.user-field { display: grid; grid-template-columns: minmax(160px, 28%) minmax(0, 1fr); gap: 18px; padding: 15px 0; border-bottom: 1px solid #e7eeef; font-size: 14px; line-height: 1.6; }
+.user-field dt { color: #536b75; font-weight: 700; }
+.user-field dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.user-table-wrap { margin-top: 18px; overflow-x: auto; border: 1px solid #dce6e9; border-radius: 9px; }
+.user-table { width: 100%; border-collapse: collapse; font-size: 13px; line-height: 1.6; }
+.user-table th, .user-table td { min-width: 110px; padding: 11px 13px; border: 1px solid #e4ecee; text-align: left; vertical-align: top; white-space: pre-wrap; overflow-wrap: anywhere; }
+.user-table th { color: #375a64; background: #f1f6f7; font-weight: 700; }
+.user-linked-detail { margin-top: 20px; padding: 18px; border: 1px solid #e1eaec; border-radius: 10px; background: #fbfdfd; }
+.user-linked-detail h3 { margin: 0 0 8px; color: #244750; font-size: 15px; }
+.user-download-link { color: #08747a; font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
+.user-download-link:hover { color: #075f65; }
+.user-download-link:focus-visible { outline: 2px solid #087b80; outline-offset: 2px; }
+.user-empty { padding: 30px; margin: 0 0 56px; border: 1px dashed #cbd7db; border-radius: 12px; background: #fff; }
+@media (max-width: 700px) {
+  .user-section summary { padding: 16px; }
+  .user-section-content { padding: 5px 16px 18px; }
+  .user-field { grid-template-columns: 1fr; gap: 3px; }
+}
