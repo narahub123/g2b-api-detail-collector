@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseNoticeFilters } from "./notice-filters";
+import { parseNoticeFilters, parseNoticePage } from "./notice-filters";
 
 describe("parseNoticeFilters", () => {
   it("빈 조건에는 공고명 검색을 기본값으로 사용합니다", () => {
@@ -24,5 +24,14 @@ describe("parseNoticeFilters", () => {
     [{ maxAmount: "1.5" }, "금액"]
   ])("잘못된 조건 %j에 오류를 반환합니다", (params, label) => {
     expect(parseNoticeFilters(params).error).toContain(label);
+  });
+});
+
+describe("parseNoticePage", () => {
+  it.each([undefined, "", "0", "-1", "1.5", "abc", "9007199254740992", ["2", "3"]])("잘못된 페이지 %j를 1로 처리합니다", (value) => {
+    expect(parseNoticePage(value)).toBe(1);
+  });
+  it("양의 안전한 정수를 사용합니다", () => {
+    expect(parseNoticePage("23")).toBe(23);
   });
 });

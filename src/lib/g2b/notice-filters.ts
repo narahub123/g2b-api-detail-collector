@@ -12,6 +12,13 @@ export type NoticeFilters = {
 export type NoticeFilterValues = Required<NoticeFilters>;
 type SearchParams = Record<string, string | string[] | undefined>;
 
+/** URL의 페이지 번호를 양의 안전한 정수로 제한합니다. */
+export function parseNoticePage(value: string | string[] | undefined): number {
+  if (typeof value !== "string" || !/^[1-9]\d*$/.test(value)) return 1;
+  const page = Number(value);
+  return Number.isSafeInteger(page) ? page : 1;
+}
+
 /** URL 조건을 화면 값과 검증된 DB 조회 조건으로 나눕니다. */
 export function parseNoticeFilters(params: SearchParams): { values: NoticeFilterValues; filters: NoticeFilters; error: string | null } {
   const value = (name: string) => { const item = params[name]; return typeof item === "string" ? item.trim() : ""; };
