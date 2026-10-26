@@ -28,6 +28,54 @@ const noticeCapture = (fields: ModalCapture["modal"]["fields"]): ModalCapture =>
 });
 
 describe("empty section filtering", () => {
+  it("filters independent and dependent modal sections by the notice content rule", () => {
+    const input = source();
+    const sections = [
+      { title: "빈 필드", fields: [{ label: "내용", value: [] }], tables: [] },
+      { title: "값 있는 필드", fields: [{ label: "내용", value: [{ text: "확인", visible: true }] }], tables: [] },
+      { title: "값 있는 표", fields: [], tables: [table("자료")] }
+    ];
+    const dependent = noticeCapture([]);
+    dependent.modal = { title: "공지사항 상세", sections };
+    const independent = noticeCapture([]);
+    independent.trigger.value = "R26DD20897516";
+    independent.modal = { title: "발주계획 상세", sections };
+    input.modalCaptures = [dependent, independent];
+
+    const result = structureNoticeDetail("R26BK1--000", input);
+
+    expect(result.detail.sections?.find((section) => section.title === "공지사항")?.details?.[0].sections
+      ?.map((section) => section.title)).toEqual(["값 있는 필드", "값 있는 표"]);
+    expect(result.orderPlans[0].sections?.map((section) => section.title)).toEqual(["값 있는 필드", "값 있는 표"]);
+  });
+
+  it("retains a modal section that contains a linked child and its attachments", () => {
+    const input = source();
+    const parent = noticeCapture([]);
+    parent.modal = { title: "공지사항 상세", sections: [
+      { title: "하위 상세", fields: [], tables: [], details: [{ title: "첨부 상세", fields: [], tables: [],
+        attachments: [{ name: "자료.hwp", url: "https://www.g2b.go.kr/file" }] }] },
+      { title: "빈 섹션", fields: [], tables: [] }
+    ] };
+    input.modalCaptures = [parent];
+
+    const result = structureNoticeDetail("R26BK1--000", input);
+
+    expect(result.detail.sections?.find((section) => section.title === "공지사항")?.details?.[0].sections)
+      .toMatchObject([{ title: "하위 상세", details: [{ attachments: [{ name: "자료.hwp" }] }] }]);
+  });
+
+  it("keeps an empty notice section when its modal ownership is unresolved", () => {
+    const input = source();
+    input.sections?.push({ title: "공지사항", fields: [], tables: [] });
+    input.modalCaptures = [noticeCapture([])];
+
+    const result = structureNoticeDetail("R26BK1--000", input);
+
+    expect(result.detail.sections?.filter((section) => section.title === "공지사항")).toHaveLength(2);
+    expect(result.detail.modalCaptures).toHaveLength(1);
+  });
+
   it("excludes empty sections after structuring and updates the summary", () => {
     const original = source();
     const result = structureNoticeDetail("R26BK1--000", original);

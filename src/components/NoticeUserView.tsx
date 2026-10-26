@@ -1,6 +1,6 @@
 "use client";
 
-import type { ScrapedDetail, StructuredField, StructuredTable } from "@/lib/g2b/detail-page";
+import type { ScrapedDetail, StructuredField, StructuredSection, StructuredTable } from "@/lib/g2b/detail-page";
 import { attachmentLinkMap } from "@/lib/g2b/attachment-map";
 import { tableForUserDisplay } from "@/lib/g2b/structured-table";
 import { fieldText } from "@/lib/g2b/field-value";
@@ -66,6 +66,19 @@ function hasVisibleTableData(table: StructuredTable): boolean {
     cells.some((cell) => Boolean(visibleCellValue(cell).trim())));
 }
 
+type LinkedDetail = NonNullable<StructuredSection["details"]>[number];
+
+/** 하위 상세까지 살펴 사용자에게 표시할 내용이 있는 섹션인지 판별합니다. */
+function hasVisibleSectionContent(section: StructuredSection): boolean {
+  return section.visible !== false && (visibleFields(section.fields).length > 0 ||
+    section.tables.some(hasVisibleTableData) || section.details?.some(hasVisibleDetailContent) === true);
+}
+
+/** 모달의 실제 표시 가능한 섹션을 최상위 섹션과 같은 기준으로 찾습니다. */
+function hasVisibleDetailContent(detail: LinkedDetail): boolean {
+  return contentSections(detail, detail.title).some(hasVisibleSectionContent);
+}
+
 /** 저장된 표의 행·열 병합 구조를 사용자 화면에 표시합니다. */
 function UserTable({ table, label, links, section }: { table: StructuredTable; label: string;
   links: Map<string, string>; section?: string }) {
@@ -104,15 +117,30 @@ function UserFields({ fields, links }: { fields: StructuredField[]; links: Map<s
   </div>; })}</dl>;
 }
 
+/** 연결된 모달의 섹션과 그 안의 하위 상세를 같은 표시 기준으로 렌더링합니다. */
+function UserLinkedDetail({ item, sectionTitle }: { item: LinkedDetail; sectionTitle: string }) {
+  const links = attachmentLinkMap(item.attachments || []);
+  return <div className="user-linked-detail">
+    <h3>{item.title}</h3>
+    {contentSections(item, item.title).filter(hasVisibleSectionContent).map((part, partIndex) =>
+      <div key={partIndex}>
+        {item.sections && <h4>{part.title}</h4>}
+        <UserFields fields={part.fields} links={links} />
+        {part.tables.map((table, tableIndex) => <UserTable table={table}
+          label={`${sectionTitle} ${item.title} ${part.title} 표 ${tableIndex + 1}`}
+          links={links} section={part.title} key={tableIndex} />)}
+        {part.details?.filter(hasVisibleDetailContent).map((child, childIndex) =>
+          <UserLinkedDetail item={child} sectionTitle={part.title} key={childIndex} />)}
+      </div>)}
+  </div>;
+}
+
 /** 섹션의 필드·표·연결된 상세를 표시 상태에 맞춰 제공합니다. */
 export function NoticeUserView({ detail }: { detail: ScrapedDetail | null }) {
   if (!detail) return <p className="muted user-empty">상세 페이지 수집 자료가 없습니다.</p>;
   const links = attachmentLinkMap(detail.attachments);
   // 표시 가능한 값이 없는 섹션은 빈 카드로 남기지 않습니다.
-  const sections = (detail.sections || []).filter((section) => section.visible !== false && (
-    visibleFields(section.fields).length > 0 || section.tables.some(hasVisibleTableData) ||
-    section.details?.some((item) => contentSections(item, item.title).some((part) =>
-      visibleFields(part.fields).length > 0 || part.tables.some(hasVisibleTableData)))));
+  const sections = (detail.sections || []).filter(hasVisibleSectionContent);
   if (!sections.length) return <p className="muted user-empty">표시할 상세 정보가 없습니다.</p>;
   return <div className="user-sections">{sections.map((section, index) => <details
     className="user-section" key={`${section.title}-${index}`} open>
@@ -121,19 +149,8 @@ export function NoticeUserView({ detail }: { detail: ScrapedDetail | null }) {
       <UserFields fields={section.fields} links={links} />
       {section.tables.map((table, tableIndex) => <UserTable table={table}
         label={`${section.title} 표 ${tableIndex + 1}`} links={links} section={section.title} key={tableIndex} />)}
-      {section.details?.filter((item) => contentSections(item, item.title).some((part) =>
-        visibleFields(part.fields).length > 0 || part.tables.some(hasVisibleTableData)))
-        .map((item, detailIndex) => <div className="user-linked-detail" key={detailIndex}>
-        <h3>{item.title}</h3>
-        {contentSections(item, item.title).filter((part) => part.visible !== false).map((part, partIndex) =>
-          <div key={partIndex}>
-            {item.sections && <h4>{part.title}</h4>}
-            <UserFields fields={part.fields} links={attachmentLinkMap(item.attachments || [])} />
-            {part.tables.map((table, tableIndex) => <UserTable table={table}
-              label={`${section.title} ${item.title} ${part.title} 표 ${tableIndex + 1}`}
-              links={attachmentLinkMap(item.attachments || [])} section={part.title} key={tableIndex} />)}
-          </div>)}
-      </div>)}
+      {section.details?.filter(hasVisibleDetailContent).map((item, detailIndex) =>
+        <UserLinkedDetail item={item} sectionTitle={section.title} key={detailIndex} />)}
     </div>
   </details>)}</div>;
 }
