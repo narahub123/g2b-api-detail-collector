@@ -32,6 +32,60 @@ async function collect(items: { bidNtceNo: string; bidNtceOrd: string; bidNtceNm
 }
 
 describe("related notices", () => {
+  it("fills a related notice API without replacing its detail or relation", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "g2b-related-")); dirs.push(dir);
+    process.env.G2B_SERVICE_KEY = "test-key";
+    const queries: string[] = [];
+    const api = async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      queries.push(url.searchParams.get("inqryDiv")!);
+      const items = url.searchParams.get("inqryDiv") === "1"
+        ? [{ bidNtceNo: "R26BK1", bidNtceOrd: "002", bidNtceNm: "현재" }]
+        : [{ bidNtceNo: "R26BK1", bidNtceOrd: "001", bidNtceNm: "이전" }];
+      return new Response(JSON.stringify({ response: { header: { resultCode: "00" }, body: { totalCount: items.length, items } } }));
+    };
+    const job = await startCollection({ start: "2026-10-16", end: "2026-10-16" }, {
+      dataDir: dir, fetcher: api as typeof fetch,
+      scrape: async (url) => {
+        const order = new URL(url).searchParams.get("bidPbancOrd")!;
+        return { detail: detail("R26BK1", order), relatedNoticeKeys: order === "002" ? ["R26BK1--001"] : [] };
+      }
+    });
+    for (let i = 0; i < 100 && (await getCollectionJob(job.id, dir))?.status === "running"; i++)
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    const related = await getNoticeRecord("R26BK1--001", dir);
+    expect(queries).toEqual(["1", "2"]);
+    expect(related?.api?.bidNtceNm).toBe("이전");
+    expect(related?.detail?.sections?.[0].title).toBe("공고일반");
+    expect(related?.relatedNoticeKeys).toEqual(["R26BK1--002"]);
+  });
+
+  it("continues related detail collection when the extra API request fails", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "g2b-related-")); dirs.push(dir);
+    process.env.G2B_SERVICE_KEY = "test-key";
+    const fetcher = async (input: RequestInfo | URL) => {
+      if (new URL(String(input)).searchParams.get("inqryDiv") === "2") throw new Error("API 장애");
+      return new Response(JSON.stringify({ response: { header: { resultCode: "00" }, body: {
+        totalCount: 1, items: [{ bidNtceNo: "R26BK1", bidNtceOrd: "002" }]
+      } } }));
+    };
+    const job = await startCollection({ start: "2026-10-16", end: "2026-10-16" }, {
+      dataDir: dir, fetcher: fetcher as typeof fetch,
+      scrape: async (url) => {
+        const order = new URL(url).searchParams.get("bidPbancOrd")!;
+        return { detail: detail("R26BK1", order), relatedNoticeKeys: order === "002" ? ["R26BK1--001"] : [] };
+      }
+    });
+    for (let i = 0; i < 100 && (await getCollectionJob(job.id, dir))?.status === "running"; i++)
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    const state = await getCollectionJob(job.id, dir);
+    expect(state?.status).toBe("completed");
+    expect(state?.detailSucceeded).toBe(2);
+    expect(state?.errors).toContain("R26BK1--001: API 보완 조회 실패: API 장애");
+    expect((await getNoticeRecord("R26BK1--001", dir))?.api).toBeNull();
+    expect((await getNoticeRecord("R26BK1--001", dir))?.detail?.sections?.[0].title).toBe("공고일반");
+  });
+
   it("does not overwrite an existing notice when its JSON cannot be read", async () => {
     const dir = await mkdtemp(join(tmpdir(), "g2b-related-")); dirs.push(dir);
     const path = join(dir, "notices", "R26BK1--002.json");
