@@ -4,6 +4,9 @@ import { apiFieldDisplayName } from "@/lib/g2b/api-field-labels";
 import type { IndependentReference } from "@/lib/g2b/notices";
 import { tableForDisplay } from "@/lib/g2b/structured-table";
 import { safeAttachmentLink } from "@/lib/g2b/attachment-links";
+import { contentSections } from "@/lib/g2b/content-sections";
+import { attachmentLinkMap } from "@/lib/g2b/attachment-map";
+import { fieldText } from "@/lib/g2b/field-value";
 
 function safeLink(value: string): string | null {
   try {
@@ -17,36 +20,53 @@ function displayValue(value: unknown): string {
   return typeof value === "string" ? value : JSON.stringify(value);
 }
 
-function FieldList({ fields, apiLabels = false }: { fields: StructuredField[]; apiLabels?: boolean }) {
+/** 확인된 첨부 URL이 있는 파일명만 다운로드 링크로 표시합니다. */
+function LinkedValue({ value, links }: { value: string; links?: ReadonlyMap<string, string> }) {
+  const href = links?.get(value.replace(/\s+/g, " ").trim());
+  return href ? <a href={href} download>{value}</a> : value;
+}
+
+/** 필드의 값과 그 필드가 소유한 표를 같은 값 영역에 표시합니다. */
+function FieldList({ fields, apiLabels = false, group = "필드", links }: { fields: StructuredField[];
+  apiLabels?: boolean; group?: string; links?: ReadonlyMap<string, string> }) {
   if (!fields.length) return <p className="muted comparison-empty">수집된 필드가 없습니다.</p>;
   return <dl className="raw-fields">{fields.map((field, index) => {
-    const value = displayValue(field.value);
-    const href = typeof field.value === "string" ? safeLink(field.value) : null;
+    const value = apiLabels ? field.value[0]?.text || "" : fieldText(field.value) || "";
+    const href = safeLink(value);
     return <div className={`raw-field${value.includes("\n") ? " raw-field--multiline" : ""}`} key={`${field.label}-${index}`}>
       <dt>{apiLabels ? apiFieldDisplayName(field.label) : field.label}</dt>
-      <dd>{value ? href ? <a href={href} target="_blank" rel="noopener noreferrer">{value}</a> : value : <span className="muted">값 없음</span>}</dd>
+      <dd>{value ? links?.has(value.replace(/\s+/g, " ").trim()) ? <LinkedValue value={value} links={links} /> :
+        href ? <a href={href} target="_blank" rel="noopener noreferrer">{value}</a> : value
+        : !field.tables?.length && <span className="muted">값 없음</span>}
+        {field.tables?.map((table, tableIndex) => <DataTable table={table}
+          name={`${group} ${field.label} 표 ${tableIndex + 1}`} links={links} key={tableIndex} />)}</dd>
     </div>;
   })}</dl>;
 }
 
-function DataTable({ table, name }: { table: StructuredTable; name: string }) {
+/** 추출된 표 셀의 파일명을 해당 자료에서 확인한 다운로드 URL과 연결합니다. */
+function DataTable({ table, name, links }: { table: StructuredTable; name: string; links?: ReadonlyMap<string, string> }) {
   const structured = tableForDisplay(table);
   if (!structured.bodyRows.some((row) => row.some((cell) => Boolean(cell.value?.trim()))))
     return <p className="muted comparison-empty">표에 값이 없습니다.</p>;
   return <div className="comparison-table-wrap"><table className="comparison-table" aria-label={name}>
     <thead>{structured.headerRows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) =>
-      <th key={cellIndex} scope={cell.colspan > 1 ? "colgroup" : "col"} rowSpan={cell.rowspan} colSpan={cell.colspan}>{cell.value || ""}</th>
+      <th key={cellIndex} scope={cell.colspan > 1 ? "colgroup" : "col"} rowSpan={cell.rowspan} colSpan={cell.colspan}>
+        <LinkedValue value={cell.value || ""} links={links} /></th>
     )}</tr>)}</thead>
     <tbody>{structured.bodyRows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) =>
-      <td key={cellIndex} rowSpan={cell.rowspan} colSpan={cell.colspan}>{cell.value ?? ""}</td>
+      <td key={cellIndex} rowSpan={cell.rowspan} colSpan={cell.colspan}>
+        <LinkedValue value={cell.value ?? ""} links={links} /></td>
     )}</tr>)}</tbody>
   </table></div>;
 }
 
-function TableList({ tables, group }: { tables: StructuredTable[]; group: string }) {
+/** 한 자료에 속한 표와 다운로드 링크를 함께 표시합니다. */
+function TableList({ tables, group, links }: { tables: StructuredTable[]; group: string;
+  links?: ReadonlyMap<string, string> }) {
   if (!tables.length) return null;
   return <div className="comparison-tables">{tables.map((table, index) => <div className="comparison-table-block" key={index}>
-    <h5>표 {index + 1}</h5><DataTable table={table} name={`${group} 표 ${index + 1}`} />
+    <h5>표 {index + 1}</h5><DataTable table={table} name={`${group} 표 ${index + 1}`} links={links} />
   </div>)}</div>;
 }
 
@@ -63,14 +83,18 @@ function ClickSources({ triggers }: { triggers: ModalCapture["trigger"][] }) {
  * @param props 읽은 공고 자료와 번호로 연결한 독립 상세 참조
  * @returns 원문 필드 및 참조 상세를 표시하는 비교 화면
  */
-export function NoticeComparison({ api, detail, orderPlans = [], preSpecifications = [], otherDetails = [] }: { api: ApiNotice | null; detail: ScrapedDetail | null;
-  orderPlans?: IndependentReference[]; preSpecifications?: IndependentReference[]; otherDetails?: IndependentReference[] }) {
-  const apiFields = Object.entries(api || {}).map(([label, value]) => ({ label, value: displayValue(value) }));
+export function NoticeComparison({ api, detail, orderPlans = [], preSpecifications = [], otherDetails = [], openingDetails = [] }: { api: ApiNotice | null; detail: ScrapedDetail | null;
+  orderPlans?: IndependentReference[]; preSpecifications?: IndependentReference[]; otherDetails?: IndependentReference[];
+  openingDetails?: IndependentReference[] }) {
+  const apiFields = Object.entries(api || {}).map(([label, value]) => ({ label,
+    value: [{ text: displayValue(value), visible: true }] }));
   const detailFieldCount = detail?.sections?.reduce((count, section) => count + section.fields.length, 0) || 0;
+  const pageLinks = attachmentLinkMap(detail?.attachments || []);
   const captures = [...(detail?.modalCaptures || []), ...(detail?.baseAmountCaptures || []), ...(detail?.changeNoticeCaptures || [])];
   const independent = [...orderPlans.map((item) => ({ ...item, kind: "발주계획" })),
     ...preSpecifications.map((item) => ({ ...item, kind: "사전규격" })),
-    ...otherDetails.map((item) => ({ ...item, kind: item.number.slice(3, 5) === "TA" ? "계약" : "입찰공고" }))];
+    ...otherDetails.map((item) => ({ ...item, kind: item.number.slice(3, 5) === "TA" ? "계약" : "입찰공고" })),
+    ...openingDetails.map((item) => ({ ...item, kind: "개찰" }))];
 
   return <>
     <nav className="comparison-jumps" aria-label="비교 항목 바로가기">
@@ -92,13 +116,20 @@ export function NoticeComparison({ api, detail, orderPlans = [], preSpecificatio
         <div className="comparison-group"><h3>상세 페이지 섹션 · {detail.sections?.length || 0}개</h3>
           {detail.sections?.length ? detail.sections.map((section, index) => <details className="comparison-card" key={`${section.title}-${index}`} open>
             <summary>{section.title} <span>필드 {section.fields.length} · 표 {section.tables.length}</span></summary>
-            {(section.fields.length > 0 || !section.details?.length) && <FieldList fields={section.fields} />}
-            <TableList tables={section.tables} group={section.title} />
+            {(section.fields.length > 0 || !section.details?.length) && <FieldList fields={section.fields} group={section.title} links={pageLinks} />}
+            <TableList tables={section.tables} group={section.title} links={pageLinks} />
             {section.details?.map((item, detailIndex) => <div className="comparison-detail-block" key={detailIndex}>
               <h4>{item.title}</h4>
               {item.trigger && <ClickSources triggers={[item.trigger]} />}
-              <FieldList fields={item.fields} />
-              <TableList tables={item.tables} group={`${section.title} ${item.title} ${detailIndex + 1}`} />
+              {contentSections(item, item.title).map((part, partIndex) => <div key={partIndex}>
+                {item.sections && <h5>{part.title}</h5>}
+                <FieldList fields={part.fields} group={`${section.title} ${item.title} ${part.title}`}
+                  links={attachmentLinkMap(item.attachments || [])} />
+                <TableList tables={part.tables} group={item.sections
+                  ? `${section.title} ${item.title} ${part.title} ${detailIndex + 1}`
+                  : `${section.title} ${item.title} ${detailIndex + 1}`}
+                  links={attachmentLinkMap(item.attachments || [])} />
+              </div>)}
             </div>)}
           </details>) : <p className="muted comparison-empty">섹션별 수집 자료가 없습니다.</p>}
         </div>
@@ -117,11 +148,17 @@ export function NoticeComparison({ api, detail, orderPlans = [], preSpecificatio
         <section className="comparison-group" id="comparison-clicked" aria-label="클릭 상세 정보"><h3>클릭 상세 정보 · {captures.length}개</h3>
           {captures.length ? captures.map((capture, index) => <details className="comparison-card" key={`${capture.trigger.index}-${index}`} open>
             <summary>{capture.trigger.label} · {capture.modal.title || "제목 없음"}
-              <span>필드 {capture.modal.fields.length} · 표 {capture.modal.tables.length}</span></summary>
+              <span>필드 {contentSections(capture.modal).reduce((count, part) => count + part.fields.length, 0)} · 표 {contentSections(capture.modal).reduce((count, part) => count + part.tables.length, 0)}</span></summary>
             {capture.trigger.parentModalTitle && <p className="muted">{capture.trigger.parentModalTitle}에서 열림</p>}
             {capture.settling?.status === "timeout" && <p className="comparison-failures">값 로딩 확인 시간 초과 · 일부 값이 누락되었을 수 있습니다.</p>}
-            <FieldList fields={capture.modal.fields} />
-            <TableList tables={capture.modal.tables} group={capture.trigger.label} />
+            {contentSections(capture.modal, capture.modal.title || capture.trigger.label).map((part, partIndex) =>
+              <div key={partIndex}>
+                {capture.modal.sections && <h4>{part.title}</h4>}
+                <FieldList fields={part.fields} links={attachmentLinkMap(capture.modal.attachments || [])} />
+                <TableList tables={part.tables} group={capture.modal.sections
+                  ? `${capture.trigger.label} ${part.title}` : capture.trigger.label}
+                  links={attachmentLinkMap(capture.modal.attachments || [])} />
+              </div>)}
             {capture.modal.text && <div className="comparison-text-block"><h4>팝업 본문</h4><p>{capture.modal.text}</p></div>}
           </details>) : <p className="muted comparison-empty">수집된 클릭 상세 정보가 없습니다.</p>}
           {detail.modalDiscovery?.failures.length ? <p className="comparison-failures">수집 실패 {detail.modalDiscovery.failures.length}건: {detail.modalDiscovery.failures.join(" · ")}</p> : null}
@@ -132,8 +169,23 @@ export function NoticeComparison({ api, detail, orderPlans = [], preSpecificatio
             <summary>{item.kind} · {item.number}</summary>
             <ClickSources triggers={item.triggers?.length ? item.triggers : item.detail?.trigger ? [item.detail.trigger] : []} />
             {item.detail?.sourceNoticeKey && <p className="muted">최초 저장 공고: {item.detail.sourceNoticeKey}</p>}
-            {item.detail ? <><FieldList fields={item.detail.fields} />
-              <TableList tables={item.detail.tables} group={`${item.kind} ${item.number}`} /></>
+            {item.detail ? contentSections(item.detail, item.detail.title || item.number).map((part, partIndex) =>
+              <div key={partIndex}>
+                {item.detail?.sections && <h4>{part.title}</h4>}
+                <FieldList fields={part.fields} links={attachmentLinkMap(item.detail?.attachments || [])} />
+                <TableList tables={part.tables} group={`${item.kind} ${item.number} ${part.title}`}
+                  links={attachmentLinkMap(item.detail?.attachments || [])} />
+                {part.details?.map((child, childIndex) => <div className="comparison-detail-block" key={childIndex}>
+                  <h5>{child.title}</h5>
+                  {child.trigger && <ClickSources triggers={[child.trigger]} />}
+                  {contentSections(child, child.title).map((childPart, childPartIndex) => <div key={childPartIndex}>
+                    {child.sections && <h6>{childPart.title}</h6>}
+                    <FieldList fields={childPart.fields} links={attachmentLinkMap(child.attachments || [])} />
+                    <TableList tables={childPart.tables} group={`${item.kind} ${child.title} ${childPart.title}`}
+                      links={attachmentLinkMap(child.attachments || [])} />
+                  </div>)}
+                </div>)}
+              </div>)
               : item.noticeKey ? <a href={`/bids/${encodeURIComponent(item.noticeKey)}`}>{item.number} 공고 보기</a>
               : <p className="muted comparison-empty">참조한 상세 정보가 없습니다.</p>}
           </details>)}

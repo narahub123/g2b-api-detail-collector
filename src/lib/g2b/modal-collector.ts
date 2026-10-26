@@ -1,11 +1,18 @@
 import * as cheerio from "cheerio";
-import { extractModalGrid, isInlineVisible, tableHasValue } from "./structured-table";
+import { extractCommonSections } from "./common-content-extractor";
+import { collectAttachments } from "./attachment-collector";
+import { collectClickDownloads } from "./attachment-identity";
+import { tableHasValue } from "./structured-table";
 import { createModalDeduplication } from "./modal-deduplication";
 import type { StructuredTable } from "./structured-table";
+import { fieldText } from "./field-value";
 import type {
   ModalCapture,
   ScrapedDetail,
   StructuredField,
+  StructuredSection,
+  ClickDownload,
+  ModalTriggerStep,
 } from "./detail-page";
 
 // 화면 텍스트 비교와 필드 레이블 추출에 사용할 공백 정규화 함수입니다.
@@ -18,106 +25,27 @@ const nonempty = (value: string): string | null => clean(value) || null;
  * G2B WebSquare는 필드에 td[data-title], 그리드 데이터에 col_id를 사용하며,
  * 그리드 헤더는 필드 레이블로 취급하지 않습니다.
  * @param html 열린 모달의 HTML 스냅샷
- * @returns 모달 제목, 필드 및 구조화된 테이블
+ * @param baseUrl 상대 파일 링크를 해석할 현재 페이지 URL
+ * @param attachmentOptions 파일 식별자와 저장할 모달 순서
+ * @returns 모달 제목, 섹션, 필드, 표 및 확인된 첨부 URL
  */
-export function extractModalStructure(html: string): {
+export function extractModalStructure(html: string, baseUrl?: string,
+  attachmentOptions: { noticeKey?: string; clickDownloads?: ClickDownload[]; modalIndex?: number } = {}): {
   title: string | null;
+  sections: StructuredSection[];
   fields: StructuredField[];
   tables: StructuredTable[];
+  attachments: { name: string; url: string }[];
 } {
-  // 다른 모달이 섞이지 않도록 대화상자 영역을 우선 추출 대상으로 사용합니다.
   const $ = cheerio.load(html);
-  $("script,style").remove();
-  const root = $("[role='dialog']").first().length
-    ? $("[role='dialog']").first()
-    : $("body");
-  const title = nonempty(
-    root
-      .find("[id$='_header_title'],.w2window_header_title,h1,h2,h3")
-      .first()
-      .text(),
-  );
-  const fields: StructuredField[] = [];
-  const tables: StructuredTable[] = [];
-  // HTML 속성뿐 아니라 입력 컨트롤의 현재 값과 일반 텍스트를 함께 읽습니다.
-  const readValue = (cell: cheerio.Cheerio<any>): string | null => {
-    const controls = cell
-      .find("input,textarea,select")
-      .filter(
-        (_, el) =>
-          !$(el).is("[type='checkbox'],[type='radio'],[type='hidden']"),
-      );
-    const values = controls
-      .toArray()
-      .map((el) => {
-        const input = $(el);
-        if (input.is("textarea"))
-          return nonempty(input.val()?.toString() || input.text());
-        if (input.is("select"))
-          return nonempty(
-            input.find("option:selected").text() ||
-              input.val()?.toString() ||
-              "",
-          );
-        return nonempty(input.attr("value") || input.val()?.toString() || "");
-      })
-      .filter((value): value is string => value !== null);
-    // 입력값은 위에서 별도로 수집했으므로 텍스트 추출 시 컨트롤을 제거해 중복을 피합니다.
-    const plain = cell.clone();
-    plain.find("input,textarea,select,button,script,style").remove();
-    // 줄바꿈 태그는 공백 정규화 후에도 구분되도록 임시 표식으로 보존합니다.
-    const breakMarker = "\uE000";
-    plain.find("br").replaceWith(breakMarker);
-    const plainText = clean(plain.text())
-      .split(breakMarker)
-      .map(clean)
-      .join("\n");
-    return [...values, plainText].filter(Boolean).join(" ") || null;
-  };
-  // data-title 셀 하나를 필드 하나로 취급하며, 짝이 되는 th는 중복 수집하지 않습니다.
-  const fieldIndex = new Map<string, number>();
-  root.find("td[data-title]").each((_, element) => {
-    const cell = $(element);
-    if (cell.closest("[role='dialog']").length && root.is("body")) return;
-    if (
-      cell
-        .closest("table")
-        .attr("id")
-        ?.match(/grd|grid/i) ||
-      cell.is("[col_id]")
-    )
-      return;
-    const label = clean(cell.attr("data-title") || "");
-    if (!label) return;
-    const value = readValue(cell);
-    const visible = isInlineVisible($, element);
-    // 같은 레이블이 반복되면 먼저 확보한 값을 유지하되, 기존 값이 비어 있을 때만 보완합니다.
-    const previous = fieldIndex.get(label);
-    if (previous === undefined) {
-      fieldIndex.set(label, fields.length);
-      fields.push({ label, value, visible });
-    } else if (fields[previous].value === null && value !== null) {
-      fields[previous].value = value;
-      fields[previous].visible = visible;
-    }
-  });
-  // data-title이 없는 실제 인접 th/td 쌍에만 대체 추출 방식을 적용합니다.
-  root.find("th.w2tb_th").each((_, element) => {
-    const th = $(element);
-    const next = th.next();
-    if (!next.is("td") || next.attr("data-title")) return;
-    const label = clean(th.text());
-    if (label) fields.push({ label, value: readValue(next),
-      visible: isInlineVisible($, element) && isInlineVisible($, next[0]) });
-  });
-  // WebSquare 그리드에서는 행 상태나 체크박스 컨트롤이 아닌 실제 데이터 셀(col_id)만 추출합니다.
-  root.find("table").each((_, element) => {
-    const table = extractModalGrid($, $(element), readValue);
-    if (table) tables.push(table);
-  });
-  return { title, fields, tables };
+  const root = $("[role='dialog']").first().length ? $("[role='dialog']").first() : $("body");
+  const title = nonempty(root.find("[id$='_header_title'],.w2window_header_title,h1,h2,h3").first().text());
+  const sections = extractCommonSections(html, "modal");
+  const attachments = collectAttachments(html, { baseUrl, includeOtherLinks: true, ...attachmentOptions })
+    .filter((item): item is { name: string; url: string } => Boolean(item.url));
+  return { title, sections, fields: sections.flatMap((section) => section.fields),
+    tables: sections.flatMap((section) => section.tables), attachments };
 }
-
 // 모달 원본 내용을 먼저 수집하고, 의미 해석 및 구조화는 별도 단계에서 수행합니다.
 // 제출, 데이터 변경·삭제, 다운로드 링크, 다른 페이지로 이동하는 동작은 탐색하지 않습니다.
 // 여러 UI 구현 방식에서 표시되는 모달을 공통으로 찾기 위한 선택자입니다.
@@ -459,10 +387,12 @@ async function clickCandidates(
  * 페이지의 모달 상태를 유지하면서 클릭 후보와 중첩 모달을 탐색합니다.
  * 개별 클릭 및 모달 종료 실패는 탐색을 중단하지 않고 discovery에 기록합니다.
  * @param page 탐색할 상세 페이지
+ * @param noticeKey 공고번호와 차수로 만든 첨부 다운로드 키
  * @returns 모달 원본 수집 결과와 탐색 건수 및 실패 내역
  */
 export async function collectModalContents(
   page: import("playwright-core").Page,
+  noticeKey?: string,
 ): Promise<{
   captures: ModalCapture[];
   discovery: NonNullable<ScrapedDetail["modalDiscovery"]>;
@@ -481,6 +411,7 @@ export async function collectModalContents(
     dialogId: string | null,
     parentModalTitle: string | null,
     depth: number,
+    path: ModalTriggerStep[],
   ): Promise<void> => {
     // 순환 경로에서 탐색이 무한히 이어지지 않도록 깊이와 클릭 시도 횟수를 제한합니다.
     // 중첩 깊이는 4단계, 전체 클릭 시도는 60회로 제한하여 탐색이 무한히 확장되지 않게 합니다.
@@ -519,12 +450,18 @@ export async function collectModalContents(
         );
         if (fresh) {
           // 모달 HTML을 구조화하고, 실제 저장할 만한 데이터가 있는지 기존 기준으로 판단합니다.
-          const structured = extractModalStructure(fresh.html);
+          const currentPath = [...path, { id: candidate.id, index: candidate.index,
+            label: candidate.label, value: candidate.value }];
+          const modalIndex = captures.length;
+          const clickDownloads = fresh.id
+            ? await collectClickDownloads(page, page.locator(`[id=${JSON.stringify(fresh.id)}]`)) : [];
+          const structured = extractModalStructure(fresh.html, page.url(),
+            { noticeKey, clickDownloads, modalIndex });
           // 필드 값, 테이블 값 또는 제목 외의 충분한 본문 텍스트 중 하나가 있으면 저장 대상입니다.
           // 필드 값·테이블 값이 하나라도 있거나 제목을 뺀 본문이 20자를 넘으면 저장할 데이터가 있다고 봅니다.
           // 이 기준은 저장 여부 판단용이며 하위 탐색을 막는 조건으로 사용하지 않습니다.
           const hasData =
-            structured.fields.some((field) => field.value) ||
+            structured.fields.some((field) => Boolean(fieldText(field.value))) ||
             structured.tables.some(tableHasValue) ||
             fresh.text.replace(fresh.title || "", "").trim().length > 20;
           // 저장 여부와 무관하게 동일한 모달 내용인지 한 번만 확인합니다.
@@ -547,8 +484,10 @@ export async function collectModalContents(
                 sectionHint: candidate.sectionHint,
                 html: candidate.html,
                 parentModalTitle,
+                path: currentPath,
               },
-              modal: { text: fresh.text, ...structured },
+              modal: { text: fresh.text, title: structured.title, sections: structured.sections,
+                attachments: structured.attachments },
               settling: {
                 status: settling.status,
                 elapsedMs: settling.elapsedMs,
@@ -559,7 +498,7 @@ export async function collectModalContents(
           // 데이터 저장 여부와 독립적으로 새로운 모달의 하위 컨트롤을 탐색합니다.
           // 이미 확인한 동일 내용의 모달은 다시 탐색하지 않습니다.
           if (fresh.id && !isDuplicate) {
-            await explore(fresh.id, fresh.title, depth + 1);
+            await explore(fresh.id, fresh.title, depth + 1, currentPath);
           }
         }
       } catch (error) {
@@ -600,7 +539,7 @@ export async function collectModalContents(
   };
   // 최상위 페이지부터 시작하고, 저장 결과와 탐색 통계를 함께 반환합니다.
   // 페이지 본문에서 시작하여 새 모달을 발견할 때마다 재귀적으로 하위 후보를 탐색합니다.
-  await explore(null, null, 0);
+  await explore(null, null, 0, []);
   return {
     captures,
     discovery: {
@@ -612,4 +551,25 @@ export async function collectModalContents(
       failures,
     },
   };
+}
+
+/** 저장된 조회 경로를 다시 열어 첨부파일이 들어 있는 모달을 찾습니다. */
+export async function replayModalPath(page: import("playwright-core").Page,
+  path: ModalTriggerStep[]): Promise<import("playwright-core").Locator> {
+  if (!path.length || path.length > 5) throw new Error("모달 경로가 올바르지 않습니다.");
+  let dialogId: string | null = null;
+  for (const step of path) {
+    const candidates = await clickCandidates(page, dialogId);
+    const candidate = candidates.find((item) => item.index === step.index && item.id === step.id &&
+      item.label === step.label && item.value === step.value);
+    if (!candidate) throw new Error("저장된 모달 열기 요소를 찾을 수 없습니다.");
+    const before = await visibleDialogs(page);
+    const root = dialogId ? page.locator(`[id=${JSON.stringify(dialogId)}]`) : page.locator("body");
+    await root.locator(CLICK_SELECTOR).nth(step.index).dispatchEvent("click", undefined, { timeout: 2500 });
+    await waitForModalDataSettled(page, before);
+    const fresh = (await visibleDialogs(page)).find((item) => !before.some((old) => old.id === item.id));
+    if (!fresh?.id) throw new Error("첨부파일 모달을 열 수 없습니다.");
+    dialogId = fresh.id;
+  }
+  return page.locator(`[id=${JSON.stringify(dialogId)}]`);
 }

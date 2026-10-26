@@ -1,4 +1,4 @@
-import type { StructuredField } from "./detail-page";
+import type { StructuredField, StructuredSection } from "./detail-page";
 import type { StructuredTable } from "./structured-table";
 
 type ModalContent = {
@@ -6,12 +6,14 @@ type ModalContent = {
   title: string | null;
   fields: StructuredField[];
   tables: StructuredTable[];
+  sections?: StructuredSection[];
+  attachments?: { name: string; url: string }[];
 };
 
 /**
  * 모달 수집 내용의 중복 여부를 판별하는 객체를 생성합니다.
  *
- * 중복 비교에는 모달의 텍스트, 제목, 필드, 테이블을 사용합니다.
+ * 중복 비교에는 모달의 텍스트, 제목, 섹션, 필드, 테이블, 첨부 URL을 사용합니다.
  * 클릭 경로, DOM ID, 데이터 안정화 대기 시간 등은 비교하지 않습니다.
  *
  * 비교 기록은 이 함수를 호출할 때마다 새로 생성되므로
@@ -39,6 +41,8 @@ export function createModalDeduplication() {
         title: modal.title,
         fields: modal.fields,
         tables: modal.tables,
+        sections: modal.sections,
+        attachments: modal.attachments,
       });
       if (contents.includes(serialized)) return true;
       contents.push(serialized);

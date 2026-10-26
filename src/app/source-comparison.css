@@ -25,6 +25,8 @@
   overflow-wrap: anywhere;
 }
 
+.raw-field dd .comparison-table-wrap { margin-top: 8px; }
+
 .raw-field a {
   color: #08747a;
   text-decoration: underline;

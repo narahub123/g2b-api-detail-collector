@@ -1,0 +1,53 @@
+.user-view-page { max-width: 1240px; }
+.user-view-heading { padding: 4px 0 30px; }
+.user-view-heading h1 { margin: 10px 0; font-size: clamp(27px, 3.4vw, 42px); letter-spacing: -.05em; }
+.user-view-heading p { margin: 0; color: #637784; font-size: 14px; line-height: 1.6; }
+.user-sections { display: grid; gap: 14px; padding-bottom: 56px; }
+.user-section { overflow: hidden; border: 1px solid #dce6e9; border-radius: 14px; background: #fff; }
+.user-section summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 22px; cursor: pointer; color: #1b4950; background: #f0f7f7; font-size: 17px; font-weight: 700; list-style: none; }
+.user-section summary::-webkit-details-marker { display: none; }
+.user-section summary:focus-visible { outline: 2px solid #087b80; outline-offset: -3px; }
+.user-section-toggle { display: inline-block; font-size: 23px; line-height: 1; transition: transform .15s ease; }
+.user-section:not([open]) .user-section-toggle { transform: rotate(-90deg); }
+.user-section-content { padding: 8px 22px 22px; }
+.user-fields { margin: 0; }
+.user-field { display: grid; grid-template-columns: minmax(160px, 28%) minmax(0, 1fr); gap: 18px; padding: 15px 0; border-bottom: 1px solid #e7eeef; font-size: 14px; line-height: 1.6; }
+.user-field dt { color: #536b75; font-weight: 700; }
+.user-field dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.user-field dd .user-table-wrap { margin-top: 8px; }
+.user-table-wrap { margin-top: 18px; overflow-x: auto; border: 1px solid #dce6e9; border-radius: 9px; }
+.user-table { width: 100%; border-collapse: collapse; font-size: 13px; line-height: 1.6; }
+.user-table th, .user-table td { min-width: 110px; padding: 11px 13px; border: 1px solid #e4ecee; text-align: left; vertical-align: top; white-space: pre-wrap; overflow-wrap: anywhere; }
+.user-table th { color: #375a64; background: #f1f6f7; font-weight: 700; }
+.user-linked-detail { margin-top: 20px; padding: 18px; border: 1px solid #e1eaec; border-radius: 10px; background: #fbfdfd; }
+.user-linked-detail h3 { margin: 0 0 8px; color: #244750; font-size: 15px; }
+.user-download-link { color: #08747a; font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
+.user-download-link:hover { color: #075f65; }
+.user-download-link:focus-visible { outline: 2px solid #087b80; outline-offset: 2px; }
+.user-navigation-link, .user-navigation-button { color: #08747a; font: inherit; font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
+.user-navigation-button { padding: 0; border: 0; background: transparent; cursor: pointer; }
+.user-navigation-link:hover, .user-navigation-button:hover { color: #075f65; }
+.user-navigation-link:focus-visible, .user-navigation-button:focus-visible { outline: 2px solid #087b80; outline-offset: 2px; }
+.user-empty { padding: 30px; margin: 0 0 56px; border: 1px dashed #cbd7db; border-radius: 12px; background: #fff; }
+/* 단계 탐색은 기존 공고 본문 바깥에 배치합니다. */
+.notice-stage-layout { margin-bottom: 0; }
+.notice-stage-tabs { display: flex; gap: 4px; overflow-x: auto; border-bottom: 1px solid #dce6e9; margin-bottom: 20px; }
+.notice-stage-tab { flex: 1 0 auto; min-width: 94px; padding: 14px 12px; border: 0; border-bottom: 3px solid transparent; background: transparent; color: #647784; font-size: 14px; font-weight: 700; cursor: pointer; }
+.notice-stage-tab:hover { color: #08747a; background: #edf5f5; }
+.notice-stage-tab.is-active { color: #075f65; border-bottom-color: #08747a; background: #eef7f6; }
+.notice-stage-tab:focus-visible, .related-notice-link:focus-visible { outline: 2px solid #087b80; outline-offset: -2px; }
+.notice-stage-panel[hidden] { display: none; }
+.notice-stage-pending { padding: 28px 20px; margin: 0 0 56px; background: #fff; border: 1px dashed #cbd7db; border-radius: 12px; color: #637784; font-size: 14px; }
+.related-notice-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin: 0 0 18px; font-size: 13px; line-height: 1.7; }
+.related-notice-label { font-weight: 700; color: #536b75; }
+.related-notice-items { overflow-wrap: anywhere; }
+.related-notice-separator { color: #9aa8ae; }
+.related-notice-link { color: #08747a; text-decoration: underline; text-underline-offset: 3px; }
+.related-notice-link:hover { color: #075f65; }
+.related-notice-current { color: #075f65; background: #d8f0eb; padding: 4px 7px; border-radius: 5px; }
+@media (max-width: 700px) {
+  .user-section summary { padding: 16px; }
+  .user-section-content { padding: 5px 16px 18px; }
+  .user-field { grid-template-columns: 1fr; gap: 3px; }
+  .notice-stage-tab { min-width: 86px; padding: 12px 10px; font-size: 13px; }
+}

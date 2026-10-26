@@ -1,6 +1,7 @@
 import { chromium } from "playwright-core";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { collectClickDownloads, collectModalContents } from "./detail-page";
+import { replayModalPath } from "./modal-collector";
 
 let browser: Awaited<ReturnType<typeof chromium.launch>>;
 beforeAll(async () => {
@@ -26,6 +27,30 @@ it("discovers clickable attachment identity from any WebSquare file grid", async
     ]);
   } finally { await page.close(); }
 });
+
+it("href 없는 모달 파일 셀도 공통 첨부 식별자로 저장한다", async () => {
+  const page = await browser.newPage();
+  try {
+    await page.setContent(`<a id="open" href="javascript:void(null)">상세 규격</a>
+      <div id="specDialog" role="dialog" style="display:none"><h2>상세 규격</h2><button data-close>닫기</button>
+        <table id="specGrid_body_table"><tr><th col_id="orgnlAtchFileNm">파일명</th></tr>
+          <tr><td id="specGrid_cell_0_0" col_id="orgnlAtchFileNm"><nobr>규격서.hwp</nobr></td></tr></table></div>
+      <script>
+        window.$w = { getComponentById: () => ({ getRowCount: () => 1, getRowJSON: () => ({
+          fileUntyAtchFileNo: 'de557b90-5d96-430d-9dd4-06b2d7b3627c', fileAtchFileSqno: 2 }) }) };
+        document.querySelector('#open').onclick = () => document.querySelector('#specDialog').style.display = 'block';
+        document.querySelector('[data-close]').onclick = () => document.querySelector('#specDialog').style.display = 'none';
+      </script>`);
+    const result = await collectModalContents(page, "R26BK1--000");
+    expect(result.captures[0].modal.attachments).toEqual([{ name: "규격서.hwp",
+      url: "/api/attachments/R26BK1--000?fileNo=de557b90-5d96-430d-9dd4-06b2d7b3627c&seq=2&modal=0" }]);
+    expect(result.captures[0].trigger.path).toMatchObject([{ id: "open" }]);
+    await replayModalPath(page, result.captures[0].trigger.path || []);
+    expect(await collectClickDownloads(page, page.locator("#specDialog"))).toMatchObject([
+      { name: "규격서.hwp", seq: 2 }
+    ]);
+  } finally { await page.close(); }
+}, 30000);
 
 it("assigns modal triggers to their structural section, or null when none owns them", async () => {
   const page = await browser.newPage();
@@ -107,9 +132,9 @@ it("captures a notice and its nested dialog once while avoiding unsafe controls"
       "추가 상세",
       "후속 안내",
     ]);
-    expect(result.captures[0].modal.fields).toContainEqual({
+    expect(result.captures[0].modal.sections?.flatMap((section) => section.fields)).toContainEqual({
       label: "내용",
-      value: "입찰참가자격 제한사항 재검토",
+      value: [{ text: "입찰참가자격 제한사항 재검토", visible: true }],
       visible: true,
     });
     expect(result.captures[1].trigger.parentModalTitle).toBe("공지사항 상세");
@@ -149,9 +174,9 @@ it("waits for asynchronously populated modal fields to settle before capture", a
     expect(result.discovery.attempted).toBe(1);
     expect(result.discovery.failures).toEqual([]);
     expect(result.captures).toHaveLength(1);
-    expect(result.captures[0].modal.fields).toContainEqual({
+    expect(result.captures[0].modal.sections?.flatMap((section) => section.fields)).toContainEqual({
       label: "내용",
-      value: "최종 응답",
+      value: [{ text: "최종 응답", visible: true }],
       visible: true,
     });
     expect(result.captures[0].settling?.status).toBe("settled");
@@ -185,9 +210,9 @@ it("does not report a modal-settling timeout as a collection failure", async () 
     expect(result.discovery.attempted).toBe(1);
     expect(result.discovery.failures).toEqual([]);
     expect(result.captures).toHaveLength(1);
-    expect(result.captures[0].modal.fields).toContainEqual({
+    expect(result.captures[0].modal.sections?.flatMap((section) => section.fields)).toContainEqual({
       label: "내용",
-      value: null,
+      value: [],
       visible: true,
     });
     expect(result.captures[0].settling?.status).toBe("timeout");

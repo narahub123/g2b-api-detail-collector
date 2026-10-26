@@ -6,17 +6,25 @@ import { normalizeNotice, type NormalizedNotice } from "./normalize";
 import type { ModalCapture, ScrapedDetail } from "./detail-page";
 import type { ApiNotice } from "./types";
 import type { IndependentDetail } from "./structured-data";
+import { getStoredIndependentDetail, getStoredNotice, listStoredNoticeKeys } from "./postgres-store";
 
 export type StoredNotice = { key?: string; api: ApiNotice | null; detail: ScrapedDetail | null; relatedNoticeKeys?: string[]; detailError?: string | null; normalized?: NormalizedNotice;
-  orderPlanNumbers?: string[]; preSpecificationNumbers?: string[]; otherDetailNumbers?: string[];
+  orderPlanNumbers?: string[]; preSpecificationNumbers?: string[]; otherDetailNumbers?: string[]; openingDetailKeys?: string[];
   independentTriggers?: { number: string; trigger: ModalCapture["trigger"] }[] };
 export type IndependentReference = { number: string; detail: IndependentDetail | null; noticeKey?: string;
   triggers?: ModalCapture["trigger"][] };
 export type NoticeRecord = { api: ApiNotice | null; detail: ScrapedDetail | null; relatedNoticeKeys: string[]; detailError: string | null; normalized: NormalizedNotice;
-  orderPlans: IndependentReference[]; preSpecifications: IndependentReference[]; otherDetails: IndependentReference[] };
+  orderPlans: IndependentReference[]; preSpecifications: IndependentReference[]; otherDetails: IndependentReference[];
+  openingDetails: IndependentReference[] };
 const defaultDataDir = () => join(process.cwd(), "data");
 
-export async function listNotices(dataDir = defaultDataDir()): Promise<NormalizedNotice[]> {
+/** 저장된 공고를 목록 화면의 게시일 역순으로 반환합니다. */
+export async function listNotices(dataDir?: string): Promise<NormalizedNotice[]> {
+  if (!dataDir) {
+    const keys = await listStoredNoticeKeys();
+    const notices = await Promise.all(keys.map((key) => getNotice(key)));
+    return notices.filter((notice): notice is NormalizedNotice => notice !== null);
+  }
   const dir = join(dataDir, "notices");
   let files: string[];
   try { files = await readdir(dir); } catch { return []; }
@@ -29,7 +37,8 @@ export async function listNotices(dataDir = defaultDataDir()): Promise<Normalize
   return result.sort((a, b) => (b.postedAt.value || "").localeCompare(a.postedAt.value || ""));
 }
 
-export async function getNotice(key: string, dataDir = defaultDataDir()): Promise<NormalizedNotice | null> {
+/** 번호와 차수로 공고의 요약 정보를 조회합니다. */
+export async function getNotice(key: string, dataDir?: string): Promise<NormalizedNotice | null> {
   return (await getNoticeRecord(key, dataDir))?.normalized || null;
 }
 
@@ -39,8 +48,29 @@ export async function getNotice(key: string, dataDir = defaultDataDir()): Promis
  * @param dataDir 공고와 독립 상세 파일의 데이터 디렉터리
  * @returns 유효한 공고 및 참조 자료, 없거나 잘못된 공고는 null
  */
-export async function getNoticeRecord(key: string, dataDir = defaultDataDir()): Promise<NoticeRecord | null> {
+export async function getNoticeRecord(key: string, dataDir?: string): Promise<NoticeRecord | null> {
   if (!/^[A-Za-z0-9_.%~-]+--[A-Za-z0-9_.%~-]+$/.test(key) || key.includes("..")) return null;
+  if (!dataDir) {
+    const record = await getStoredNotice(key);
+    if (!record) return null;
+    const [number, order] = key.split("--");
+    const resolve = async (numbers: string[]): Promise<IndependentReference[]> => Promise.all(numbers.map(async (item) => {
+      const match = /^(R\d{2}BK\d{8})-(\d{3})$/.exec(item);
+      const linkedNotice = match ? await getStoredNotice(`${match[1]}--${match[2]}`) : null;
+      const detail = linkedNotice?.detail ? null : await getStoredIndependentDetail(item);
+      const reference: IndependentReference = { number: item, detail,
+        triggers: record.independentTriggers?.filter((trigger) => trigger.number === item).map((trigger) => trigger.trigger) };
+      if (linkedNotice?.detail && match) reference.noticeKey = `${match[1]}--${match[2]}`;
+      return reference;
+    }));
+    return { api: record.api, detail: record.detail, detailError: record.detailError || null,
+      relatedNoticeKeys: record.relatedNoticeKeys || [],
+      normalized: normalizeNotice(record.api, record.detail, { number, order }),
+      orderPlans: await resolve(record.orderPlanNumbers || []),
+      preSpecifications: await resolve(record.preSpecificationNumbers || []),
+      otherDetails: await resolve(record.otherDetailNumbers || []),
+      openingDetails: await resolve(record.openingDetailKeys || []) };
+  }
   try {
     const record = await readJson<StoredNotice>(join(dataDir, "notices", `${key}.json`));
     const [number, order] = key.split("--");
@@ -71,6 +101,7 @@ export async function getNoticeRecord(key: string, dataDir = defaultDataDir()): 
     return { api: record.api, detail: record.detail, relatedNoticeKeys, detailError: record.detailError || null,
       normalized: normalizeNotice(record.api, record.detail, { number, order }),
       orderPlans: await resolve("order-plans", record.orderPlanNumbers || []),
-      preSpecifications: await resolve("pre-specifications", record.preSpecificationNumbers || []), otherDetails };
+      preSpecifications: await resolve("pre-specifications", record.preSpecificationNumbers || []), otherDetails,
+      openingDetails: await resolve("independent-details", record.openingDetailKeys || []) };
   } catch { return null; }
 }

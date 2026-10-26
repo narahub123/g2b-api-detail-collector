@@ -31,6 +31,20 @@ describe("attachment download request", () => {
     expect(open).not.toHaveBeenCalled();
   });
 
+  it("모달 파일은 저장된 URL과 열기 경로가 일치할 때 해당 경로로 연다", async () => {
+    const modalUrl = attachmentDownloadUrl(key, fileNo, 2, 0);
+    const path = [{ id: "openSpec", index: 3, label: "상세 규격", value: "상세 규격" }];
+    const open = vi.fn(async () => ({ filename: "규격서.hwp", stream: Readable.from([Buffer.from("file")]),
+      cleanup: async () => undefined }));
+    const load = async () => ({ detail: { attachments: [], modalAttachmentSources: [{ url: modalUrl, path }] } });
+    const response = await handleAttachmentRequest(request(modalUrl), key, { load, open });
+    expect(response.status).toBe(200);
+    expect(open).toHaveBeenCalledWith(key, fileNo, 2, expect.any(AbortSignal), path);
+    expect(await response.text()).toBe("file");
+    expect((await handleAttachmentRequest(request(attachmentDownloadUrl(key, fileNo, 2, 1)), key,
+      { load, open })).status).toBe(404);
+  });
+
   it("sends completed bytes and closes resources after the response stream", async () => {
     const cleanup = vi.fn(async () => undefined);
     const response = await handleAttachmentRequest(request(), key, { load: async () => record,

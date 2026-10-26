@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import "./source-comparison.css";
+import "./user-view.css";
 
 export const metadata: Metadata = {
   title: "나라장터 용역 입찰공고",

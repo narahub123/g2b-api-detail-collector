@@ -8,6 +8,29 @@ import { NoticeComparison } from "../../components/NoticeComparison";
 import { extractDetailPage, scrapeDetailPage, serviceDetailUrl } from "./detail-page";
 import { handleAttachmentRequest, openG2bDownload } from "./attachment-download";
 import { attachmentDownloadUrl } from "./attachment-links";
+import { tableForUserDisplay } from "./structured-table";
+
+it.skipIf(!process.env.LIVE_G2B)("aligns the live attachment grid using colgroup widths", async () => {
+  const { detail } = await scrapeDetailPage(serviceDetailUrl("R26BK01765444", "000"));
+  const table = detail.sections?.find((section) => section.title === "파일첨부")?.tables[0];
+  expect(table?.columnVisibility).toContain(false);
+  const shown = tableForUserDisplay(table!);
+  const header = shown.headerRows[0].map((cell) => cell.value);
+  const body = shown.bodyRows[0].map((cell) => cell.value);
+  expect(header).toContain("파일명");
+  expect(body.some((value) => value?.includes("입찰공고서"))).toBe(true);
+  expect(shown.bodyRows[0].reduce((width, cell) => width + cell.colspan, 0))
+    .toBe(shown.headerRows[0].reduce((width, cell) => width + cell.colspan, 0));
+}, 120_000);
+
+it.skipIf(!process.env.LIVE_G2B)("실제 R26BK01784794 사전규격 모달의 링크 없는 파일 셀을 수집한다", async () => {
+  const key = "R26BK01784794--000";
+  const { detail } = await scrapeDetailPage(serviceDetailUrl("R26BK01784794", "000"));
+  const capture = detail.modalCaptures?.find((item) => item.modal.title === "사전규격상세조회");
+  const attachment = capture?.modal.attachments?.find((item) => item.name.includes("제안요청서.hwpx"));
+  expect(attachment?.url).toMatch(/^\/api\/attachments\/R26BK01784794--000\?fileNo=[0-9a-f-]+&seq=1&modal=\d+$/);
+  expect(detail.modalAttachmentSources).toContainEqual({ url: attachment?.url, path: capture?.trigger.path });
+}, 180_000);
 
 it.skipIf(!process.env.LIVE_G2B)("resolves the R26BK01765444 proposal document and downloads it through the app", async () => {
   const key = "R26BK01765444--000";
@@ -20,7 +43,8 @@ it.skipIf(!process.env.LIVE_G2B)("resolves the R26BK01765444 proposal document a
     expect.stringContaining("fileSeq=1"), expect.stringContaining("fileSeq=2")
   ]);
   const request = new Request(`http://localhost${attachmentDownloadUrl(key, fileNo, 1)}`);
-  const response = await handleAttachmentRequest(request, key, { load: async () => ({ detail }), open: openG2bDownload });
+  const response = await handleAttachmentRequest(request, key, { load: async () => ({ detail }),
+    open: (noticeKey, fileId, seq, signal) => openG2bDownload(noticeKey, fileId, seq, signal) });
   expect(response.status).toBe(200);
   expect((await response.arrayBuffer()).byteLength).toBeGreaterThan(0);
 }, 180_000);
@@ -113,8 +137,8 @@ it.skipIf(!process.env.LIVE_G2B)("captures a public notice's basic-price dialog"
   const capture = detail.modalCaptures?.find((item) => item.trigger.label === "기초금액조회");
   expect(detail.attachments).toHaveLength(3);
   expect(capture?.modal.title).toBe("기초가격상세조회");
-  expect(capture?.modal.fields).toContainEqual(expect.objectContaining({
-    label: "입찰공고번호", value: "R26BK01764337-000"
+  expect(capture?.modal.sections?.flatMap((section) => section.fields)).toContainEqual(expect.objectContaining({
+    label: "입찰공고번호", value: [{ text: "R26BK01764337-000", visible: true }]
   }));
   expect(detail.modalDiscovery?.failures).toEqual([]);
   const titles = detail.sections?.map((section) => section.title) || [];
@@ -130,6 +154,7 @@ it.skipIf(!process.env.LIVE_G2B)("captures the notice dialog and related orders 
   const { detail, relatedNoticeKeys } = await scrapeDetailPage("https://www.g2b.go.kr/link/PNPE027_01/single/?bidPbancNo=R26BK01766517&bidPbancOrd=002");
   expect(relatedNoticeKeys).toEqual(expect.arrayContaining(["R26BK01766517--001", "R26BK01766517--000"]));
   const noticeCapture = detail.modalCaptures?.find((capture) => capture.modal.title?.includes("공지사항"));
-  expect(noticeCapture?.modal.fields.some((field) => Boolean(field.value)) || (noticeCapture?.modal.text?.length || 0) > 50).toBe(true);
+  expect(noticeCapture?.modal.sections?.some((section) => section.fields.some((field) => Boolean(field.value))) ||
+    (noticeCapture?.modal.text?.length || 0) > 50).toBe(true);
   expect(detail.modalCaptures?.some((capture) => capture.modal.title?.includes("발주계획"))).toBe(true);
 }, 180_000);

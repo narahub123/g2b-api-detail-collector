@@ -27,7 +27,7 @@ async function finished(id: string, dir: string) {
 }
 const saved = (dir: string, key: string) => readFile(join(dir, "notices", `${key}.json`), "utf8");
 const scrape = async (url: string): Promise<ScrapeResult> => ({ detail: {
-  sourceUrl: url, sections: [{ title: "공고일반", fields: [], tables: [], visible: true }], attachments: [], links: []
+  sourceUrl: url, sections: [{ title: "공고일반", fields: [{ label: "공고명", value: [{ text: "재수집 공고", visible: true }] }], tables: [], visible: true }], attachments: [], links: []
 }, relatedNoticeKeys: keys });
 
 describe("selected notice refresh", () => {

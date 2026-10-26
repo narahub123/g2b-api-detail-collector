@@ -35,11 +35,11 @@ describe("collection flow", () => {
     expect((await collect(async () => { throw new Error("일시 실패"); }))?.detailFailed).toBe(1);
     expect(JSON.parse(await readFile(path, "utf8")).detail.text).toBe("기존 본문");
     expect((await collect(async () => ({ detail: { sourceUrl: "new", sections: [{ title: "공고일반", fields: [
-      { label: "공고명", value: "신규" }
+      { label: "공고명", value: [{ text: "신규", visible: true }] }
     ], tables: [] }], text: "신규 본문", attachments: [], links: [] }, relatedNoticeKeys: [] })))?.detailSucceeded).toBe(1);
     const saved = JSON.parse(await readFile(path, "utf8"));
     expect(saved.detail).not.toHaveProperty("fields");
-    expect(saved.detail.sections[0].fields).toContainEqual({ label: "공고명", value: "신규" });
+    expect(saved.detail.sections[0].fields).toContainEqual({ label: "공고명", value: [{ text: "신규", visible: true }] });
     expect(saved.detail.sections[0]).not.toHaveProperty("text");
     expect(saved.detail).not.toHaveProperty("text");
     expect(saved.orderPlanNumbers).toEqual([]);
@@ -58,11 +58,11 @@ describe("collection flow", () => {
       scrape: async (url) => {
         const newer = url.includes("bidPbancOrd=001");
         return { detail: { sourceUrl: url, capturedAt: newer ? "2026-10-19T02:00:00Z" : "2026-10-19T01:00:00Z",
-          sections: [{ title: "공고일반", fields: [{ label: "공고명", value: "용역" }], tables: [] }],
+          sections: [{ title: "공고일반", fields: [{ label: "공고명", value: [{ text: "용역", visible: true }] }], tables: [] }],
           text: "전체 본문", attachments: [], links: [],
           modalCaptures: [{ trigger: { index: 0, tag: "a", label: "발주계획번호", value: "R26DD20897516", sectionHint: null, html: "<a>조회</a>" },
             modal: { title: "발주계획상세조회", text: newer ? "최신" : "이전", html: "<div>원본</div>",
-              fields: [{ label: "발주계획번호", value: "R26DD20897516" }], tables: [] } }] }, relatedNoticeKeys: [] };
+              fields: [{ label: "발주계획번호", value: [{ text: "R26DD20897516", visible: true }] }], tables: [] } }] }, relatedNoticeKeys: [] };
       }
     });
     let state = await getCollectionJob(job.id, dataDir);
@@ -99,7 +99,7 @@ describe("collection flow", () => {
       scrape: async (url) => {
         if (url.includes("bidPbancOrd=001")) throw new Error("상세 페이지 접근 실패");
         return { detail: { sourceUrl: url, sections: [{ title: "공고일반", fields: [
-          { label: "공고명", value: "첫 차수 상세" }, { label: "입찰자격", value: "중소기업" }
+          { label: "공고명", value: [{ text: "첫 차수 상세", visible: true }] }, { label: "입찰자격", value: [{ text: "중소기업", visible: true }] }
         ], tables: [] }], text: "첫 차수 상세", attachments: [], links: [] }, relatedNoticeKeys: [] };
       }
     });

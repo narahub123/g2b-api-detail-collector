@@ -11,6 +11,7 @@ function amount(value: string | null) {
   return Number.isFinite(number) ? `${number.toLocaleString("ko-KR")}원` : value;
 }
 
+/** 저장된 공고 목록과 재수집 작업, 사용자 화면 진입점을 제공합니다. */
 export function NoticeList({ notices, fetcher = fetch }: { notices: NormalizedNotice[]; fetcher?: typeof fetch }) {
   const router = useRouter();
   const [selected, setSelected] = useState<string[]>([]);
@@ -80,6 +81,7 @@ export function NoticeList({ notices, fetcher = fetch }: { notices: NormalizedNo
         </span></div>
       <h3><a href={`/bids/${encodeURIComponent(notice.key)}`}>{notice.title.value || "제목 정보 없음"}</a></h3>
       <p className="agency">{notice.agency.value || "기관 정보 없음"}</p>
+      <a className="notice-user-link" href={`/bids/${encodeURIComponent(notice.key)}/view`}>사용자 화면 보기</a>
       <div className="notice-facts">
         <span><small>게시</small>{notice.postedAt.value || "정보 없음"}</span>
         <span><small>마감</small>{notice.deadline.value || "정보 없음"}</span>

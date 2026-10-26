@@ -12,25 +12,66 @@ const simpleTable = (columns: string[], rows: (string | null)[][]): StructuredTa
 const detail: ScrapedDetail = {
   sourceUrl: "https://www.g2b.go.kr/", text: "상세 원문 샘플",
   attachments: [], links: [],
-  sections: [{ title: "가격", fields: [{ label: "공고명", value: "조사 용역" }, { label: "기초금액", value: "3,000원" }],
+  sections: [{ title: "가격", fields: [{ label: "공고명", value: [{ text: "조사 용역", visible: true }] }, { label: "기초금액", value: [{ text: "3,000원", visible: true }] }],
     tables: [simpleTable(["구분", "금액"], [["기초금액", "3,000원"], [null, null]])] }],
   modalCaptures: [
     { trigger: { index: 1, tag: "button", label: "기초금액조회", value: "기초금액조회", sectionHint: "가격", html: "<button>기초금액조회</button>" },
       modal: { title: "기초가격상세조회", text: "기초금액 안내", html: "<div></div>",
-        fields: [{ label: "기초금액", value: "3,000원" }], tables: [] } },
+        fields: [{ label: "기초금액", value: [{ text: "3,000원", visible: true }] }], tables: [] } },
     { trigger: { index: 2, tag: "a", label: "발주계획번호", value: "R26DD1", sectionHint: "연관정보", html: "<a>R26DD1</a>" },
       modal: { title: "발주계획상세조회", text: "발주계획 본문", html: "<div></div>",
-        fields: [{ label: "계약방법", value: "제한경쟁" }],
+        fields: [{ label: "계약방법", value: [{ text: "제한경쟁", visible: true }] }],
         tables: [simpleTable(["파일명", "크기"], [["계획서.hwp", "12 KB"]])] } }
   ]
 };
 
 describe("NoticeComparison", () => {
+  it("개찰 독립 상세와 그 안의 하위 모달을 함께 표시합니다", () => {
+    render(<NoticeComparison api={null} detail={detail} openingDetails={[{
+      number: "opening--R26BK1--000--002",
+      detail: { schemaVersion: 5, number: "opening--R26BK1--000--002", title: "개찰결과상세조회",
+        sections: [{ title: "개찰결과상세조회", fields: [{ label: "개찰상태", value: [{ text: "완료", visible: true }] }],
+          tables: [], details: [{ title: "예비가격산정결과", fields: [{ label: "예정가격", value: [{ text: "100원", visible: true }] }], tables: [] }] }],
+        capturedAt: "2026-10-25T00:00:00Z", sourceNoticeKey: "R26BK1--000" }
+    }]} />);
+    const independent = screen.getByRole("region", { name: "독립 상세 정보" });
+    expect(within(independent).getByText("개찰 · opening--R26BK1--000--002")).toBeInTheDocument();
+    expect(within(independent).getByText("예비가격산정결과")).toBeInTheDocument();
+    expect(within(independent).getByText("100원")).toBeInTheDocument();
+  });
+  it("공고와 모달 표의 파일명을 확인된 다운로드 URL로 표시한다", () => {
+    const source: ScrapedDetail = { ...detail,
+      attachments: [{ name: "공고문.pdf", url: "https://www.g2b.go.kr/notice.pdf" }],
+      sections: [{ title: "파일첨부", fields: [], tables: [simpleTable(["파일명"], [["공고문.pdf"]])] }],
+      modalCaptures: [{ trigger: detail.modalCaptures![0].trigger, modal: {
+        title: "첨부 상세", sections: [{ title: "첨부", fields: [],
+          tables: [simpleTable(["파일명"], [["계획서.hwp"]])] }],
+        attachments: [{ name: "계획서.hwp", url: "https://www.g2b.go.kr/plan.hwp" }]
+      } }]
+    };
+    render(<NoticeComparison api={null} detail={source} />);
+    expect(within(screen.getByRole("table", { name: "파일첨부 표 1" })).getByRole("link", { name: "공고문.pdf" }))
+      .toHaveAttribute("href", "https://www.g2b.go.kr/notice.pdf");
+    expect(within(screen.getByRole("table", { name: "기초금액조회 첨부 표 1" })).getByRole("link", { name: "계획서.hwp" }))
+      .toHaveAttribute("href", "https://www.g2b.go.kr/plan.hwp");
+  });
+  it("shows an owned grid below its field and keeps independent section grids separate", () => {
+    const owned = simpleTable(["업종"], [["건설업"]]);
+    const source: ScrapedDetail = { ...detail, sections: [{ title: "투찰제한-일반",
+      fields: [{ label: "업종제한사항", value: [], tables: [owned] }],
+      tables: [simpleTable(["별도"], [["독립 값"]])] }] };
+    render(<NoticeComparison api={null} detail={source} />);
+    const field = screen.getByText("업종제한사항").closest(".raw-field")!;
+    expect(within(field as HTMLElement).getByRole("table")).toHaveTextContent("건설업");
+    const section = screen.getByText("투찰제한-일반", { selector: "summary" }).closest("details")!;
+    expect(within(section).getAllByRole("table")).toHaveLength(2);
+    expect(screen.getByRole("table", { name: "투찰제한-일반 표 1" })).toHaveTextContent("독립 값");
+  });
   it("shows generic independent detail and a stored notice link", () => {
     render(<NoticeComparison api={null} detail={detail} otherDetails={[
       { number: "R26TA12345678", triggers: [{ index: 0, tag: "a", label: "계약번호", value: "R26TA12345678", html: "<a>조회</a>" }],
-        detail: { schemaVersion: 1, number: "R26TA12345678",
-        title: "계약 상세", fields: [{ label: "계약", value: "완료" }], tables: [],
+        detail: { schemaVersion: 2, number: "R26TA12345678",
+        title: "계약 상세", fields: [{ label: "계약", value: [{ text: "완료", visible: true }] }], tables: [],
         capturedAt: "2026-10-19T00:00:00Z", sourceNoticeKey: "R26BK01774553--000" } },
       { number: "R26BK12345678-000", detail: null, noticeKey: "R26BK12345678--000" }
     ]} />);
@@ -42,7 +83,7 @@ describe("NoticeComparison", () => {
   });
   it("shows the click source beside a section's modal detail", () => {
     const withSource: ScrapedDetail = { ...detail, sections: [{ title: "공지사항", fields: [], tables: [], details: [
-      { title: "공지사항 상세", fields: [{ label: "내용", value: "안내" }], tables: [],
+      { title: "공지사항 상세", fields: [{ label: "내용", value: [{ text: "안내", visible: true }] }], tables: [],
         trigger: { index: 2, tag: "button", label: "보기", value: "보기", sectionHint: "공지사항",
           parentModalTitle: "상위 팝업", html: "<button>보기</button>" } }
     ] }] };
@@ -62,7 +103,7 @@ describe("NoticeComparison", () => {
   });
   it("shows resolved independent details and an unresolved reference", () => {
     render(<NoticeComparison api={null} detail={detail} orderPlans={[{ number: "R26DD1", detail: {
-      schemaVersion: 1, number: "R26DD1", title: "발주계획상세조회", fields: [{ label: "발주계획번호", value: "R26DD1" }],
+      schemaVersion: 2, number: "R26DD1", title: "발주계획상세조회", fields: [{ label: "발주계획번호", value: [{ text: "R26DD1", visible: true }] }],
       tables: [], capturedAt: "2026-10-19T00:00:00Z", sourceNoticeKey: "R26BK1--000"
     } }]} preSpecifications={[{ number: "R26BD1", detail: null }]} />);
     expect(screen.getByText("발주계획 · R26DD1")).toBeInTheDocument();
@@ -72,9 +113,9 @@ describe("NoticeComparison", () => {
   afterEach(cleanup);
   it("shows every section detail beneath its section fields and tables", () => {
     const withDetails: ScrapedDetail = { ...detail, sections: [{ ...detail.sections![0], details: [
-      { title: "기초가격상세조회", fields: [{ label: "기초금액", value: "3,100원" }],
+      { title: "기초가격상세조회", fields: [{ label: "기초금액", value: [{ text: "3,100원", visible: true }] }],
         tables: [simpleTable(["차수", "금액"], [["1", "3,100원"]])] },
-      { title: "기초가격상세조회", fields: [{ label: "기초금액", value: "3,200원" }], tables: [] }
+      { title: "기초가격상세조회", fields: [{ label: "기초금액", value: [{ text: "3,200원", visible: true }] }], tables: [] }
     ] }] };
     render(<NoticeComparison api={null} detail={withDetails} />);
     const section = within(screen.getByRole("region", { name: "상세 정보 추출" }))
@@ -89,7 +130,7 @@ describe("NoticeComparison", () => {
   });
   it("keeps a multiline notice body inside its styled detail block", () => {
     const withNotice: ScrapedDetail = { ...detail, sections: [{ title: "공지사항", fields: [], tables: [], details: [
-      { title: "공지사항 상세", fields: [{ label: "내용", value: "변경공고가 게시되었습니다.\n\n공고명 변경" }], tables: [] }
+      { title: "공지사항 상세", fields: [{ label: "내용", value: [{ text: "변경공고가 게시되었습니다.\n\n공고명 변경", visible: true }] }], tables: [] }
     ] }] };
     render(<NoticeComparison api={null} detail={withNotice} />);
     const section = screen.getByText("공지사항", { selector: "summary" }).closest("details")!;

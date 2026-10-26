@@ -3,6 +3,7 @@ import { serviceDetailUrl } from "./detail-page";
 import { noticeKeyFromParts } from "./identity";
 import type { ApiNotice } from "./types";
 import { safeAttachmentLink } from "./attachment-links";
+import { fieldText } from "./field-value";
 
 export type FieldValue = { value: string | null; source: "api" | "detail" | null };
 export type ValidationIssue = { field: string; message: string };
@@ -35,7 +36,7 @@ function pick(api: ApiNotice | null, detail: ScrapedDetail | null, detailKeys: s
   for (const key of detailKeys) {
     for (const section of detail?.sections || []) {
       for (const field of section.fields) {
-        const value = field.label === key ? field.value?.trim() : null;
+        const value = field.label === key && field.visible !== false ? fieldText(field.value, true) : null;
         if (value) return { value, source: "detail" };
       }
     }
