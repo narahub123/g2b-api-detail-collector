@@ -11,6 +11,24 @@ const simpleTable = (columns: string[], rows: (string | null)[][]) => ({
 });
 
 describe("extractDetailPage", () => {
+  it("직접 배치된 제목으로 공고 본문을 찾아 필드를 올바른 섹션에 넣는다", () => {
+    const html = `<div class="pop_contents"><div class="sub_contents">
+      <div class="w2group">무관한 내용</div>
+      <div class="w2group"><div class="w2group dfbox frst_ttl">
+        <div class="w2textbox df_tit fl">공고일반</div></div>
+        <table><tr><th>공고명</th><td>용역</td></tr></table></div>
+      <div class="w2group">${heading("계약정보")}
+        <table><tr><th>계약방법</th><td>일반경쟁</td></tr></table></div>
+    </div></div>`;
+
+    const sections = extractDetailPage(html, url).sections;
+
+    expect(sections?.map((section) => section.title)).toEqual(["공고일반", "계약정보"]);
+    expect(sections?.map((section) => section.fields.map((field) => field.label))).toEqual([
+      ["공고명"], ["계약방법"]
+    ]);
+  });
+
   it("stores visible and hidden field text separately without grid helper text", () => {
     const html = `<main>${heading("공고일반")}<table><tr><th>공고명</th><td>용역</td></tr></table>
       ${heading("투찰제한-일반")}<table><tr><th>업종제한사항</th><td data-title="업종제한사항">
@@ -565,6 +583,24 @@ describe("extractDetailPage", () => {
 });
 
 describe("extractModalStructure", () => {
+  it("직접 배치된 제목과 기존 중첩 제목을 각각 한 번씩 추출하고 내용을 분리한다", () => {
+    const html = `<div role="dialog"><div class="w2window_header_title">공지사항 상세</div>
+      <div class="w2group dfbox frst_ttl"><div class="w2textbox df_tit fl">게시물 상세</div></div>
+      <table><tr><th>내용</th><td>변경 안내</td></tr></table>
+      <table id="notice_grid"><thead><tr><th col_id="file">파일명</th></tr></thead>
+        <tbody><tr><td col_id="file">안내문.hwp</td></tr></tbody></table>
+      ${heading("게시물 첨부파일")}
+      <table><tr><th>파일 수</th><td>1</td></tr></table></div>`;
+
+    const sections = extractModalStructure(html).sections;
+
+    expect(sections.map((section) => section.title)).toEqual(["게시물 상세", "게시물 첨부파일"]);
+    expect(sections[0].fields.map((field) => field.label)).toEqual(["내용"]);
+    expect(sections[0].tables[0].bodyRows[0][0].value).toBe("안내문.hwp");
+    expect(sections[1].fields.map((field) => field.label)).toEqual(["파일 수"]);
+    expect(sections[1].tables).toEqual([]);
+  });
+
   it("모달 표의 실제 파일 링크만 첨부 URL로 수집한다", () => {
     const modal = extractModalStructure(`<div role="dialog"><table id="file_grid"><tr>
       <td col_id="orgnlAtchFileNm"><a href="/pn/file.do?seq=1">계획서.hwp</a></td>

@@ -6,6 +6,8 @@ import type { StructuredField, StructuredSection } from "./detail-page";
 type ContentKind = "page" | "modal";
 
 const clean = (value: string) => value.replace(/\s+/g, " ").trim();
+// 제목이 .fl 내부에 있거나 .fl과 같은 요소에 있는 WebSquare 구조를 함께 인식합니다.
+const SECTION_TITLE_SELECTOR = ".dfbox > .fl > .df_tit, .dfbox > .df_tit.fl";
 
 /**
  * 상세 본문과 모달에서 제목·필드·표를 같은 문서 순회 규칙으로 수집합니다.
@@ -58,7 +60,7 @@ export function extractCommonSections(html: string, kind: ContentKind): Structur
   const walk = (node: any): void => {
     if (node.type !== "tag") return;
     const element = $(node);
-    if (element.is(".dfbox > .fl > .df_tit")) {
+    if (element.is(SECTION_TITLE_SELECTOR)) {
       const title = clean(element.text());
       if (title) { startSection(title, isInlineVisible($, node)); return; }
     }
@@ -96,9 +98,9 @@ export function extractCommonSections(html: string, kind: ContentKind): Structur
     const dialog = $("[role='dialog']").first();
     for (const child of (dialog.length ? dialog : $("body")).children().toArray()) walk(child);
   } else {
-    const pane = $(".pop_contents > .sub_contents").filter((_, node) => $(node).find(".dfbox > .fl > .df_tit").length > 0).first();
+    const pane = $(".pop_contents > .sub_contents").filter((_, node) => $(node).find(SECTION_TITLE_SELECTOR).length > 0).first();
     if (pane.length) {
-      for (const child of pane.children().toArray()) if ($(child).find(".dfbox > .fl > .df_tit").length) walk(child);
+      for (const child of pane.children().toArray()) if ($(child).find(SECTION_TITLE_SELECTOR).length) walk(child);
     } else walk($("body")[0]);
   }
   return sections;
