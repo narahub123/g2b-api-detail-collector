@@ -1,5 +1,3 @@
-import Link from "next/link";
-
 /** 공고 차수에 따라 정렬하고, 다른 공고번호가 연결된 경우 전체 번호로 구분합니다. */
 export function RelatedNoticeLine({
   currentKey,
@@ -41,12 +39,12 @@ export function RelatedNoticeLine({
                   {label}
                 </strong>
               ) : (
-                <Link
+                <a
                   className="related-notice-link"
                   href={`/bids/${encodeURIComponent(key)}/view`}
                 >
                   {label}
-                </Link>
+                </a>
               )}
             </span>
           );

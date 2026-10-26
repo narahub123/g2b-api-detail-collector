@@ -22,6 +22,11 @@ export default async function BidUserViewPage({ params }: { params: Promise<{ ke
       <p>{record.normalized.agency.value || "기관 정보 없음"} · 공고번호 {record.normalized.number} · {record.normalized.order}차</p>
     </div>
     <NoticeStageTabs
+      targets={{ currentKey: key, relatedKeys: [...new Set([...record.relatedNoticeKeys,
+        ...record.otherDetails.flatMap((item) => item.noticeKey ? [item.noticeKey] : [])])],
+        planNumbers: record.orderPlans.map((item) => item.number),
+        specNumbers: record.preSpecifications.map((item) => item.number),
+        opening: record.openingDetails.map((item) => ({ number: item.number, triggers: item.triggers })) }}
       plan={<IndependentDetailsView references={record.orderPlans} />}
       spec={<IndependentDetailsView references={record.preSpecifications} />}
       opening={record.openingDetails.length ? <IndependentDetailsView references={record.openingDetails} /> : undefined}>

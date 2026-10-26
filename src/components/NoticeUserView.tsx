@@ -1,18 +1,38 @@
+"use client";
+
 import type { ScrapedDetail, StructuredField, StructuredTable } from "@/lib/g2b/detail-page";
 import { attachmentLinkMap } from "@/lib/g2b/attachment-map";
 import { tableForUserDisplay } from "@/lib/g2b/structured-table";
 import { fieldText } from "@/lib/g2b/field-value";
 import { contentSections } from "@/lib/g2b/content-sections";
+import { openingTargetForCell, splitNavigationValue, type NavigationTarget } from "@/lib/g2b/notice-navigation";
+import { useNoticeNavigation } from "./NoticeNavigationContext";
 
 /** 화면 문자열과 수집된 첨부파일명을 같은 기준으로 비교합니다. */
 function fileNameKey(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
 
-/** 추출된 표시 문자열이 첨부파일명과 일치하면 다운로드 링크로 표시합니다. */
-function DownloadValue({ value, links }: { value: string; links: Map<string, string> }) {
+/** 첨부파일 연결을 우선하고, 확인된 다른 단계의 식별자만 클릭 요소로 표시합니다. */
+function DownloadValue({ value, links, section, row, column }: { value: string; links: Map<string, string>;
+  section?: string; row?: number; column?: number }) {
   const href = links.get(fileNameKey(value));
-  return href ? <a className="user-download-link" href={href} download>{value}</a> : value;
+  const navigation = useNoticeNavigation();
+  if (href) return <a className="user-download-link" href={href} download>{value}</a>;
+  if (!navigation) return value;
+  const renderTarget = (text: string, target: NavigationTarget, key: number) => {
+    if ("href" in target) return <a className="user-navigation-link" href={target.href} key={key}>{text}</a>;
+    if (target.stage === navigation.active) return text;
+    return <button className="user-navigation-button" type="button" key={key}
+      onClick={() => navigation.navigate(target.stage, target.reference)}>{text}</button>;
+  };
+  // 번호가 아닌 상태값은 저장된 개찰 트리거와 셀 위치가 모두 확인될 때만 연결합니다.
+  if (section && row !== undefined && column !== undefined) {
+    const opening = openingTargetForCell(section, row, column, value, navigation.targets.opening);
+    if (opening) return renderTarget(value, opening, 0);
+  }
+  return splitNavigationValue(value, navigation.targets).map((part, index) =>
+    part.target ? renderTarget(part.text, part.target, index) : part.text);
 }
 
 /** 사용자에게 노출할 수 있는 필드만 반환합니다. */
@@ -47,7 +67,8 @@ function hasVisibleTableData(table: StructuredTable): boolean {
 }
 
 /** 저장된 표의 행·열 병합 구조를 사용자 화면에 표시합니다. */
-function UserTable({ table, label, links }: { table: StructuredTable; label: string; links: Map<string, string> }) {
+function UserTable({ table, label, links, section }: { table: StructuredTable; label: string;
+  links: Map<string, string>; section?: string }) {
   if (!hasVisibleTableData(table)) return null;
   const structured = tableForUserDisplay(table);
   const bodyRows = structured.bodyRows.map((cells, index) => ({ cells, index }))
@@ -64,7 +85,8 @@ function UserTable({ table, label, links }: { table: StructuredTable; label: str
     <tbody>{bodyRows.map(({ cells, index }) => <tr key={index}>
       {cells.map((cell, cellIndex) => <td key={cellIndex}
         rowSpan={visibleRowSpan(structured.bodyRowVisibility, index, cell.rowspan)} colSpan={cell.colspan}>
-        <DownloadValue value={visibleCellValue(cell)} links={links} /></td>)}
+        <DownloadValue value={visibleCellValue(cell)} links={links} section={section}
+          row={index} column={cell.column} /></td>)}
     </tr>)}</tbody>
   </table></div>;
 }
@@ -98,7 +120,7 @@ export function NoticeUserView({ detail }: { detail: ScrapedDetail | null }) {
     <div className="user-section-content">
       <UserFields fields={section.fields} links={links} />
       {section.tables.map((table, tableIndex) => <UserTable table={table}
-        label={`${section.title} 표 ${tableIndex + 1}`} links={links} key={tableIndex} />)}
+        label={`${section.title} 표 ${tableIndex + 1}`} links={links} section={section.title} key={tableIndex} />)}
       {section.details?.filter((item) => contentSections(item, item.title).some((part) =>
         visibleFields(part.fields).length > 0 || part.tables.some(hasVisibleTableData)))
         .map((item, detailIndex) => <div className="user-linked-detail" key={detailIndex}>
@@ -109,7 +131,7 @@ export function NoticeUserView({ detail }: { detail: ScrapedDetail | null }) {
             <UserFields fields={part.fields} links={attachmentLinkMap(item.attachments || [])} />
             {part.tables.map((table, tableIndex) => <UserTable table={table}
               label={`${section.title} ${item.title} ${part.title} 표 ${tableIndex + 1}`}
-              links={attachmentLinkMap(item.attachments || [])} key={tableIndex} />)}
+              links={attachmentLinkMap(item.attachments || [])} section={part.title} key={tableIndex} />)}
           </div>)}
       </div>)}
     </div>
