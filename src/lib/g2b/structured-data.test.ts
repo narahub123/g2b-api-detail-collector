@@ -44,7 +44,7 @@ describe("structureNoticeDetail", () => {
     expect(result.detail.sections?.find((section) => section.title === "공지사항")?.details?.[0].sections).toEqual(sections);
     expect(result.detail.sections?.find((section) => section.title === "공지사항")?.details?.[0].attachments)
       .toEqual(linked.modal.attachments);
-    expect(result.orderPlans[0]).toMatchObject({ schemaVersion: 4, sections });
+    expect(result.orderPlans[0]).toMatchObject({ schemaVersion: 5, sections });
     expect(result.orderPlans[0].attachments).toEqual(independent.modal.attachments);
     expect(result.orderPlans[0]).not.toHaveProperty("fields");
   });
@@ -88,7 +88,7 @@ describe("structureNoticeDetail", () => {
     await expect(readFile(join(dir, "independent-details", "R26BK12345678-000.json"), "utf8"))
       .rejects.toMatchObject({ code: "ENOENT" });
   });
-  it("이전 독립 상세는 첨부 URL 형식으로 갱신하고 버전 4는 유지한다", async () => {
+  it("이전 독립 상세는 첨부 URL 형식으로 갱신하고 버전 5는 유지한다", async () => {
     const dir = await mkdtemp(join(tmpdir(), "g2b-upgrade-")); dirs.push(dir);
     await mkdir(join(dir, "order-plans"));
     const path = join(dir, "order-plans", "R26DD20897516.json");
@@ -97,7 +97,7 @@ describe("structureNoticeDetail", () => {
     const structured = structureNoticeDetail("R26BK1--000", detail([source]));
     await saveIndependentDetails(dir, structured);
     const upgraded = JSON.parse(await readFile(path, "utf8"));
-    expect(upgraded).toMatchObject({ schemaVersion: 4, sections: [{ fields: [{ label: "사업명" }] }], attachments: [] });
+    expect(upgraded).toMatchObject({ schemaVersion: 5, sections: [{ fields: [{ label: "사업명" }] }], attachments: [] });
     source.modal.fields![0].value = [{ text: "다른 사업", visible: true }];
     await saveIndependentDetails(dir, structureNoticeDetail("R26BK1--000", detail([source])));
     expect(JSON.parse(await readFile(path, "utf8"))).toEqual(upgraded);
@@ -110,7 +110,7 @@ describe("structureNoticeDetail", () => {
     const result = structureNoticeDetail("R26BK01774553--000", detail([numbered, sectionModal]));
     expect(result.orderPlanNumbers).toEqual(["R26DD20897516"]);
     expect(result.orderPlans[0].trigger).toMatchObject({ value: " R26DD20897516 ", label: "임의 제목" });
-    expect(result.orderPlans[0].schemaVersion).toBe(3);
+    expect(result.orderPlans[0].schemaVersion).toBe(5);
     expect(result.detail.sections?.find((item) => item.title === "공지사항")?.details?.[0].fields)
       .toEqual([{ label: "내용", value: [{ text: "안내", visible: true }] }]);
     expect(result.detail.sections?.find((item) => item.title === "공지사항")?.details?.[0].trigger)

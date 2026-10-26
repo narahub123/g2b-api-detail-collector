@@ -1,6 +1,7 @@
 import * as cheerio from "cheerio";
 import { extractCommonSections } from "./common-content-extractor";
-import { resolveAttachmentHref } from "./attachment-links";
+import { collectAttachments } from "./attachment-collector";
+import { collectClickDownloads } from "./attachment-identity";
 import { tableHasValue } from "./structured-table";
 import { createModalDeduplication } from "./modal-deduplication";
 import type { StructuredTable } from "./structured-table";
@@ -10,6 +11,8 @@ import type {
   ScrapedDetail,
   StructuredField,
   StructuredSection,
+  ClickDownload,
+  ModalTriggerStep,
 } from "./detail-page";
 
 // 화면 텍스트 비교와 필드 레이블 추출에 사용할 공백 정규화 함수입니다.
@@ -23,9 +26,11 @@ const nonempty = (value: string): string | null => clean(value) || null;
  * 그리드 헤더는 필드 레이블로 취급하지 않습니다.
  * @param html 열린 모달의 HTML 스냅샷
  * @param baseUrl 상대 파일 링크를 해석할 현재 페이지 URL
+ * @param attachmentOptions 파일 식별자와 저장할 모달 순서
  * @returns 모달 제목, 섹션, 필드, 표 및 확인된 첨부 URL
  */
-export function extractModalStructure(html: string, baseUrl?: string): {
+export function extractModalStructure(html: string, baseUrl?: string,
+  attachmentOptions: { noticeKey?: string; clickDownloads?: ClickDownload[]; modalIndex?: number } = {}): {
   title: string | null;
   sections: StructuredSection[];
   fields: StructuredField[];
@@ -36,16 +41,8 @@ export function extractModalStructure(html: string, baseUrl?: string): {
   const root = $("[role='dialog']").first().length ? $("[role='dialog']").first() : $("body");
   const title = nonempty(root.find("[id$='_header_title'],.w2window_header_title,h1,h2,h3").first().text());
   const sections = extractCommonSections(html, "modal");
-  const attachments: { name: string; url: string }[] = [];
-  // 모달의 모든 파일 링크를 확인하되 실제 href가 없는 클릭 요소에서는 URL을 추측하지 않습니다.
-  root.find("a[href]").each((_, anchor) => {
-    const element = $(anchor);
-    const name = clean(element.text());
-    const fileCell = /file|atch|첨부/i.test(element.closest("td").attr("col_id") || "");
-    if (!name || !(fileCell || element.is("[download]") || /\.[a-z0-9]{2,8}$/i.test(name))) return;
-    const url = resolveAttachmentHref(element.attr("href"), baseUrl);
-    if (url && !attachments.some((item) => item.name === name && item.url === url)) attachments.push({ name, url });
-  });
+  const attachments = collectAttachments(html, { baseUrl, includeOtherLinks: true, ...attachmentOptions })
+    .filter((item): item is { name: string; url: string } => Boolean(item.url));
   return { title, sections, fields: sections.flatMap((section) => section.fields),
     tables: sections.flatMap((section) => section.tables), attachments };
 }
@@ -390,10 +387,12 @@ async function clickCandidates(
  * 페이지의 모달 상태를 유지하면서 클릭 후보와 중첩 모달을 탐색합니다.
  * 개별 클릭 및 모달 종료 실패는 탐색을 중단하지 않고 discovery에 기록합니다.
  * @param page 탐색할 상세 페이지
+ * @param noticeKey 공고번호와 차수로 만든 첨부 다운로드 키
  * @returns 모달 원본 수집 결과와 탐색 건수 및 실패 내역
  */
 export async function collectModalContents(
   page: import("playwright-core").Page,
+  noticeKey?: string,
 ): Promise<{
   captures: ModalCapture[];
   discovery: NonNullable<ScrapedDetail["modalDiscovery"]>;
@@ -412,6 +411,7 @@ export async function collectModalContents(
     dialogId: string | null,
     parentModalTitle: string | null,
     depth: number,
+    path: ModalTriggerStep[],
   ): Promise<void> => {
     // 순환 경로에서 탐색이 무한히 이어지지 않도록 깊이와 클릭 시도 횟수를 제한합니다.
     // 중첩 깊이는 4단계, 전체 클릭 시도는 60회로 제한하여 탐색이 무한히 확장되지 않게 합니다.
@@ -450,7 +450,13 @@ export async function collectModalContents(
         );
         if (fresh) {
           // 모달 HTML을 구조화하고, 실제 저장할 만한 데이터가 있는지 기존 기준으로 판단합니다.
-          const structured = extractModalStructure(fresh.html, page.url());
+          const currentPath = [...path, { id: candidate.id, index: candidate.index,
+            label: candidate.label, value: candidate.value }];
+          const modalIndex = captures.length;
+          const clickDownloads = fresh.id
+            ? await collectClickDownloads(page, page.locator(`[id=${JSON.stringify(fresh.id)}]`)) : [];
+          const structured = extractModalStructure(fresh.html, page.url(),
+            { noticeKey, clickDownloads, modalIndex });
           // 필드 값, 테이블 값 또는 제목 외의 충분한 본문 텍스트 중 하나가 있으면 저장 대상입니다.
           // 필드 값·테이블 값이 하나라도 있거나 제목을 뺀 본문이 20자를 넘으면 저장할 데이터가 있다고 봅니다.
           // 이 기준은 저장 여부 판단용이며 하위 탐색을 막는 조건으로 사용하지 않습니다.
@@ -478,6 +484,7 @@ export async function collectModalContents(
                 sectionHint: candidate.sectionHint,
                 html: candidate.html,
                 parentModalTitle,
+                path: currentPath,
               },
               modal: { text: fresh.text, title: structured.title, sections: structured.sections,
                 attachments: structured.attachments },
@@ -491,7 +498,7 @@ export async function collectModalContents(
           // 데이터 저장 여부와 독립적으로 새로운 모달의 하위 컨트롤을 탐색합니다.
           // 이미 확인한 동일 내용의 모달은 다시 탐색하지 않습니다.
           if (fresh.id && !isDuplicate) {
-            await explore(fresh.id, fresh.title, depth + 1);
+            await explore(fresh.id, fresh.title, depth + 1, currentPath);
           }
         }
       } catch (error) {
@@ -532,7 +539,7 @@ export async function collectModalContents(
   };
   // 최상위 페이지부터 시작하고, 저장 결과와 탐색 통계를 함께 반환합니다.
   // 페이지 본문에서 시작하여 새 모달을 발견할 때마다 재귀적으로 하위 후보를 탐색합니다.
-  await explore(null, null, 0);
+  await explore(null, null, 0, []);
   return {
     captures,
     discovery: {
@@ -544,4 +551,25 @@ export async function collectModalContents(
       failures,
     },
   };
+}
+
+/** 저장된 조회 경로를 다시 열어 첨부파일이 들어 있는 모달을 찾습니다. */
+export async function replayModalPath(page: import("playwright-core").Page,
+  path: ModalTriggerStep[]): Promise<import("playwright-core").Locator> {
+  if (!path.length || path.length > 5) throw new Error("모달 경로가 올바르지 않습니다.");
+  let dialogId: string | null = null;
+  for (const step of path) {
+    const candidates = await clickCandidates(page, dialogId);
+    const candidate = candidates.find((item) => item.index === step.index && item.id === step.id &&
+      item.label === step.label && item.value === step.value);
+    if (!candidate) throw new Error("저장된 모달 열기 요소를 찾을 수 없습니다.");
+    const before = await visibleDialogs(page);
+    const root = dialogId ? page.locator(`[id=${JSON.stringify(dialogId)}]`) : page.locator("body");
+    await root.locator(CLICK_SELECTOR).nth(step.index).dispatchEvent("click", undefined, { timeout: 2500 });
+    await waitForModalDataSettled(page, before);
+    const fresh = (await visibleDialogs(page)).find((item) => !before.some((old) => old.id === item.id));
+    if (!fresh?.id) throw new Error("첨부파일 모달을 열 수 없습니다.");
+    dialogId = fresh.id;
+  }
+  return page.locator(`[id=${JSON.stringify(dialogId)}]`);
 }

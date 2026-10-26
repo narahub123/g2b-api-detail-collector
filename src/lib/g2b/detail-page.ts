@@ -3,23 +3,27 @@ import { chromium } from "playwright-core";
 import { noticeKeyFromParts } from "./identity";
 import { extractCommonSections } from "./common-content-extractor";
 import type { StructuredTable } from "./structured-table";
-import { attachmentDownloadUrl, resolveAttachmentHref } from "./attachment-links";
+import { collectAttachments } from "./attachment-collector";
 import { collectModalContents } from "./modal-collector";
+import { collectClickDownloads } from "./attachment-identity";
 import { fieldText } from "./field-value";
 import type { FieldValuePart } from "./field-value";
 export { collectModalContents, extractModalStructure } from "./modal-collector";
+export { collectClickDownloads } from "./attachment-identity";
 
 export type { StructuredTable, StructuredTableCell, StructuredTableContent } from "./structured-table";
 
 export type Attachment = { name: string; url: string | null };
 export type AttachmentMetadata = { orgnlAtchFileNm: string; atchFileSqno: number; scrnIndtYn?: string };
 export type ClickDownload = { cellId: string; name: string; fileNo: string; seq: number };
+export type ModalTriggerStep = { id: string; index: number; label: string; value: string };
 export type StructuredField = { label: string; value: FieldValuePart[]; visible?: boolean; tables?: StructuredTable[] };
 export type StructuredSection = { title: string; fields: StructuredField[]; tables: StructuredTable[];
   details?: { title: string; sections?: StructuredSection[]; fields?: StructuredField[]; tables?: StructuredTable[];
     attachments?: Attachment[]; trigger?: ModalCapture["trigger"] }[]; visible?: boolean };
 export type ModalCapture = {
-  trigger: { index: number; tag: string; label: string; value: string; sectionHint?: string | null; html: string; parentModalTitle?: string | null };
+  trigger: { index: number; tag: string; label: string; value: string; sectionHint?: string | null; html: string;
+    parentModalTitle?: string | null; path?: ModalTriggerStep[] };
   modal: { text?: string; html?: string; title: string | null; sections?: StructuredSection[];
     fields?: StructuredField[]; tables?: StructuredTable[]; attachments?: Attachment[] };
   settling?: { status: "settled" | "timeout"; elapsedMs: number };
@@ -35,6 +39,7 @@ export type ScrapedDetail = {
   baseAmountCaptures?: ModalCapture[];
   changeNoticeCaptures?: ModalCapture[];
   modalDiscovery?: { candidates: number; attempted: number; captured: number; skipped: number; failures: string[] };
+  modalAttachmentSources?: { url: string; path: ModalTriggerStep[] }[];
   summary?: { sectionCount: number; fieldCount: number; nonemptyFieldCount: number; tableCount: number; tableRowCount: number; attachmentCount: number; linkCount: number };
   attachments: Attachment[];
   links: { label: string; url: string }[];
@@ -72,41 +77,7 @@ export function extractDetailPage(html: string, pageUrl: string, fileMetadata: A
   const sections = extractCommonSections(html, "page");
   const number = url.searchParams.get("bidPbancNo") || "";
   const order = url.searchParams.get("bidPbancOrd") || "";
-  const attachments: Attachment[] = [];
-  const sequenceByName = new Map(fileMetadata.map((file) => [clean(cheerio.load(file.orgnlAtchFileNm).text()), file.atchFileSqno]));
-  const attachmentUrl = (sequence: number | undefined): string | null => {
-    if (!sequence || !Number.isSafeInteger(sequence) || sequence <= 0) return null;
-    const download = new URL("https://www.g2b.go.kr/pn/pnp/pnpe/UntyAtchFile/downloadFile.do");
-    download.searchParams.set("bidPbancNo", number);
-    download.searchParams.set("bidPbancOrd", order);
-    download.searchParams.set("fileSeq", String(sequence));
-    download.searchParams.set("fileType", "");
-    return download.toString();
-  };
-  const clickByCellId = new Map(clickDownloads.map((file) => [file.cellId, file]));
-  const seenAttachments = new Set<string>();
-  const addAttachment = (name: string, downloadUrl: string | null) => {
-    const identity = `${name}\u0000${downloadUrl || ""}`;
-    if (!name || seenAttachments.has(identity)) return;
-    attachments.push({ name, url: downloadUrl });
-    seenAttachments.add(identity);
-  };
-  $("td[col_id='orgnlAtchFileNm']").each((_, cell) => {
-    const name = clean($(cell).text());
-    if (!name) return;
-    const click = clickByCellId.get($(cell).attr("id") || "");
-    const direct = resolveAttachmentHref($(cell).find("a[href]").first().attr("href"), pageUrl);
-    const clickUrl = click && click.name === name ? attachmentDownloadUrl(`${number}--${order}`, click.fileNo, click.seq) : null;
-    const metadataUrl = $(cell).find("a").length && !direct ? null : attachmentUrl(sequenceByName.get(name));
-    addAttachment(name, direct || clickUrl || metadataUrl);
-  });
-  // The grid can still be rendering when its attachment-list response is complete.
-  for (const file of fileMetadata) {
-    if (file.scrnIndtYn === "N") continue;
-    const name = clean(cheerio.load(file.orgnlAtchFileNm).text());
-    if (!name || attachments.some((item) => item.name === name)) continue;
-    addAttachment(name, attachmentUrl(file.atchFileSqno));
-  }
+  const attachments = collectAttachments(html, { baseUrl: pageUrl, noticeKey: `${number}--${order}`, fileMetadata, clickDownloads });
   const links: ScrapedDetail["links"] = [];
   const detailRoot = $(".pop_contents > .sub_contents").filter((_, node) =>
     $(node).find(".dfbox > .fl > .df_tit").length > 0).first();
@@ -146,41 +117,6 @@ export function extractDetailPage(html: string, pageUrl: string, fileMetadata: A
   };
 }
 
-/** Read the file identity behind WebSquare's href-less download cells. */
-export async function collectClickDownloads(page: import("playwright-core").Page): Promise<ClickDownload[]> {
-  return page.locator("td[col_id='orgnlAtchFileNm']").evaluateAll((cells) => {
-    const results: ClickDownload[] = [];
-    for (const cell of cells) {
-      if (!(cell instanceof HTMLElement) || !cell.id) continue;
-      const action = cell.querySelector("a,button");
-      if (!action) continue;
-      const href = action.getAttribute("href");
-      if (href && !href.startsWith("#") && !/^javascript:/i.test(href)) continue;
-      const table = cell.closest("table[id$='_body_table']");
-      const rowMatch = /_cell_(\d+)_\d+$/.exec(cell.id);
-      if (!table || !rowMatch) continue;
-      const gridId = table.id.slice(0, -"_body_table".length);
-      const grid = (window as any).$w?.getComponentById?.(gridId);
-      const rowIndex = Number(rowMatch[1]);
-      if (!grid || rowIndex >= grid.getRowCount?.()) continue;
-      const row = grid.getRowJSON?.(rowIndex) as Record<string, unknown> | undefined;
-      if (!row) continue;
-      for (const key of Object.keys(row)) {
-        const match = /^(.*?)(?:UntyAtchFileNo|untyAtchFileNo)$/.exec(key);
-        if (!match) continue;
-        const fileNo = row[key];
-        const seq = row[`${match[1]}AtchFileSqno`] ?? row[`${match[1]}atchFileSqno`];
-        const number = Number(seq);
-        if (typeof fileNo !== "string" || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(fileNo) ||
-            !Number.isSafeInteger(number) || number <= 0) continue;
-        const name = cell.textContent?.replace(/\s+/g, " ").trim() || "";
-        if (name) results.push({ cellId: cell.id, name, fileNo, seq: number });
-      }
-    }
-    return results;
-  });
-}
-
 export type ScrapeResult = { detail: ScrapedDetail; relatedNoticeKeys: string[] };
 
 export async function scrapeDetailPage(url: string): Promise<ScrapeResult> {
@@ -209,9 +145,12 @@ export async function scrapeDetailPage(url: string): Promise<ScrapeResult> {
     const relatedNoticeKeys = extractRelatedNoticeKeys(html);
     // Preserve the original extraction independently of modal exploration failures.
     try {
-      const { captures, discovery } = await collectModalContents(page);
+      const { captures, discovery } = await collectModalContents(page, detail.noticeKey);
       detail.modalCaptures = captures;
       detail.modalDiscovery = discovery;
+      detail.modalAttachmentSources = captures.flatMap((capture) =>
+        (capture.modal.attachments || []).filter((attachment) => attachment.url?.includes("&modal="))
+          .map((attachment) => ({ url: attachment.url!, path: capture.trigger.path || [] })));
     } catch (error) {
       detail.modalCaptures = [];
       detail.modalDiscovery = { candidates: 0, attempted: 0, captured: 0, skipped: 0,

@@ -34,7 +34,8 @@ it.skipIf(!process.env.LIVE_G2B)("resolves the R26BK01765444 proposal document a
     expect.stringContaining("fileSeq=1"), expect.stringContaining("fileSeq=2")
   ]);
   const request = new Request(`http://localhost${attachmentDownloadUrl(key, fileNo, 1)}`);
-  const response = await handleAttachmentRequest(request, key, { load: async () => ({ detail }), open: openG2bDownload });
+  const response = await handleAttachmentRequest(request, key, { load: async () => ({ detail }),
+    open: (noticeKey, fileId, seq, signal) => openG2bDownload(noticeKey, fileId, seq, signal) });
   expect(response.status).toBe(200);
   expect((await response.arrayBuffer()).byteLength).toBeGreaterThan(0);
 }, 180_000);

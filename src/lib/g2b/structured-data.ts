@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { readJson, writeJsonAtomic } from "./json-store";
 
 export type IndependentDetail = {
-  schemaVersion: 2 | 3 | 4;
+  schemaVersion: 2 | 3 | 4 | 5;
   number: string;
   title: string | null;
   sections?: ScrapedDetail["sections"];
@@ -88,7 +88,7 @@ export function structureNoticeDetail(key: string, detail: ScrapedDetail): Struc
     if (number) {
       if (isCurrentNotice(number, key)) continue;
       independentTriggers.push({ number, trigger: capture.trigger });
-      const entity: IndependentDetail = { schemaVersion: 4, number, title,
+      const entity: IndependentDetail = { schemaVersion: 5, number, title,
         sections: contentSections(capture.modal, title || "미분류"),
         attachments: capture.modal.attachments || [], capturedAt: detail.capturedAt || new Date().toISOString(),
         settling: capture.settling, sourceNoticeKey: key, trigger: capture.trigger };
@@ -171,7 +171,7 @@ export async function saveIndependentDetails(dataDir: string, structured: Struct
       }
       const path = join(dataDir, folder, `${entity.number}.json`);
       // 현재 형식으로 수집한 값은 유지하고 이전 형식만 갱신합니다.
-      try { if ((await readJson<IndependentDetail>(path)).schemaVersion === 4) continue; }
+      try { if ((await readJson<IndependentDetail>(path)).schemaVersion === 5) continue; }
       catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       }

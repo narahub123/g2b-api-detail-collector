@@ -101,7 +101,7 @@ export async function saveStoredNotice(key: string, record: StoredNotice,
           // 현재 형식의 최초 저장값은 유지하고, 재수집한 이전 형식만 새 자료로 교체합니다.
           await db.query(`INSERT INTO ${table("independent_details")}(detail_key,category,payload) VALUES($1,$2,$3::jsonb)
             ON CONFLICT(detail_key) DO UPDATE SET payload=EXCLUDED.payload
-            WHERE (independent_details.payload->>'schemaVersion') IS DISTINCT FROM '4'`,
+            WHERE (independent_details.payload->>'schemaVersion') IS DISTINCT FROM '5'`,
             [detail.number, category, JSON.stringify(detail)]);
         }
         const triggers = structured.independentTriggers.filter((item) => item.number === detail.number).map((item) => item.trigger);
