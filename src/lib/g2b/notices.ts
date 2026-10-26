@@ -7,6 +7,7 @@ import type { ModalCapture, ScrapedDetail } from "./detail-page";
 import type { ApiNotice } from "./types";
 import type { IndependentDetail } from "./structured-data";
 import { getStoredIndependentDetail, getStoredNotice, listStoredNoticeKeys } from "./postgres-store";
+import type { NoticeFilters } from "./notice-filters";
 
 export type StoredNotice = { key?: string; api: ApiNotice | null; detail: ScrapedDetail | null; relatedNoticeKeys?: string[]; detailError?: string | null; normalized?: NormalizedNotice;
   orderPlanNumbers?: string[]; preSpecificationNumbers?: string[]; otherDetailNumbers?: string[]; openingDetailKeys?: string[];
@@ -19,9 +20,9 @@ export type NoticeRecord = { api: ApiNotice | null; detail: ScrapedDetail | null
 const defaultDataDir = () => join(process.cwd(), "data");
 
 /** 저장된 공고를 목록 화면의 게시일 역순으로 반환합니다. */
-export async function listNotices(dataDir?: string): Promise<NormalizedNotice[]> {
+export async function listNotices(dataDir?: string, filters: NoticeFilters = {}): Promise<NormalizedNotice[]> {
   if (!dataDir) {
-    const keys = await listStoredNoticeKeys();
+    const keys = await listStoredNoticeKeys(filters);
     const notices = await Promise.all(keys.map((key) => getNotice(key)));
     return notices.filter((notice): notice is NormalizedNotice => notice !== null);
   }

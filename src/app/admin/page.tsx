@@ -11,7 +11,7 @@ export default async function AdminPage() {
   return <main className="site-shell">
     <header className="site-header"><a className="brand-link" href="/admin"><div className="brand-mark">N</div><div><strong>나라장터 용역 공고 관리</strong><span>LOCAL BID EXPLORER</span></div></a></header>
     <section className="page-intro"><span className="eyebrow">PROCUREMENT ADMIN</span>
-      <h1>용역 공고를<br /><em>수집하고 관리하세요.</em></h1>
+      <h2>용역 공고를<em> 수집하고 관리하세요.</em></h2>
       <p>공고 게시일 범위로 수집하거나 저장된 공고를 다시 수집할 수 있습니다.</p>
     </section>
     <CollectionForm />

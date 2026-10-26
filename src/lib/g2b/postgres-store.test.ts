@@ -67,6 +67,32 @@ describe("noticeSummary", () => {
     expect(statements[0].sql).toContain("FROM public.notices");
   });
 
+  it("검색과 날짜·금액 범위를 SQL 조건에 함께 적용합니다", async () => {
+    const statements = fakePool();
+    runtime.__g2bPgPool = { query: async (sql: string, values?: unknown[]) => { statements.push({ sql, values }); return { rows: [] }; } };
+    await listStoredNoticeKeys({ searchField: "notice_number", query: "R26%", postedFrom: "2026-10-01", postedTo: "2026-10-31",
+      deadlineFrom: "2026-11-01", deadlineTo: "2026-11-30", minAmount: "1000", maxAmount: "5000" });
+    expect(statements[0].sql).toContain("strpos(lower(notice_number), lower($1)) > 0");
+    expect(statements[0].sql).toContain("posted_at >= $2::date");
+    expect(statements[0].sql).toContain("posted_at < ($3::date + interval '1 day')");
+    expect(statements[0].sql).toContain("deadline_at >= $4::date");
+    expect(statements[0].sql).toContain("deadline_at < ($5::date + interval '1 day')");
+    expect(statements[0].sql).toContain("amount >= $6::numeric");
+    expect(statements[0].sql).toContain("amount <= $7::numeric");
+    expect(statements[0].values).toEqual(["R26%", "2026-10-01", "2026-10-31", "2026-11-01", "2026-11-30", "1000", "5000"]);
+  });
+
+  it("지정하지 않은 조건은 SQL에 추가하지 않습니다", async () => {
+    const statements = fakePool();
+    runtime.__g2bPgPool = { query: async (sql: string, values?: unknown[]) => { statements.push({ sql, values }); return { rows: [] }; } };
+    await listStoredNoticeKeys({ searchField: "title", query: "용역", maxAmount: "0" });
+    expect(statements[0].sql).toContain("strpos(lower(title), lower($1)) > 0");
+    expect(statements[0].sql).toContain("amount <= $2::numeric");
+    expect(statements[0].sql).not.toContain("posted_at >=");
+    expect(statements[0].sql).not.toContain("deadline_at >=");
+    expect(statements[0].values).toEqual(["용역", "0"]);
+  });
+
   it("queries independent details by a text key", async () => {
     const statements = fakePool();
     runtime.__g2bPgPool = { query: async (sql: string) => { statements.push({ sql }); return { rows: [] }; } };
