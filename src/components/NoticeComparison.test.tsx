@@ -26,6 +26,20 @@ const detail: ScrapedDetail = {
 };
 
 describe("NoticeComparison", () => {
+  it("공고와 모달 표의 파일명을 확인된 다운로드 URL로 표시한다", () => {
+    const source: ScrapedDetail = { ...detail,
+      attachments: [{ name: "공고문.pdf", url: "https://www.g2b.go.kr/notice.pdf" }],
+      sections: [{ title: "파일첨부", fields: [], tables: [simpleTable(["파일명"], [["공고문.pdf"]])] }],
+      modalCaptures: [{ trigger: detail.modalCaptures![0].trigger, modal: {
+        title: "첨부 상세", sections: [{ title: "첨부", fields: [],
+          tables: [simpleTable(["파일명"], [["계획서.hwp"]])] }],
+        attachments: [{ name: "계획서.hwp", url: "https://www.g2b.go.kr/plan.hwp" }]
+      } }]
+    };
+    render(<NoticeComparison api={null} detail={source} />);
+    expect(screen.getByRole("link", { name: "공고문.pdf" })).toHaveAttribute("href", "https://www.g2b.go.kr/notice.pdf");
+    expect(screen.getByRole("link", { name: "계획서.hwp" })).toHaveAttribute("href", "https://www.g2b.go.kr/plan.hwp");
+  });
   it("shows an owned grid below its field and keeps independent section grids separate", () => {
     const owned = simpleTable(["업종"], [["건설업"]]);
     const source: ScrapedDetail = { ...detail, sections: [{ title: "투찰제한-일반",

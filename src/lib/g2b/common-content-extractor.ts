@@ -1,6 +1,6 @@
 import * as cheerio from "cheerio";
 import { extractFieldValue, fieldText } from "./field-value";
-import { extractDetailTable, extractModalGrid, isInlineVisible } from "./structured-table";
+import { extractDetailTable, isInlineVisible } from "./structured-table";
 import type { StructuredField, StructuredSection } from "./detail-page";
 
 type ContentKind = "page" | "modal";
@@ -10,7 +10,7 @@ const clean = (value: string) => value.replace(/\s+/g, " ").trim();
 /**
  * 상세 본문과 모달에서 제목·필드·표를 같은 문서 순회 규칙으로 수집합니다.
  * @param html 현재 입력값을 반영한 HTML
- * @param kind 대상 영역과 WebSquare 표 형식을 선택하는 종류
+ * @param kind 대상 영역을 선택하는 종류
  * @returns 문서 순서대로 정리한 섹션
  */
 export function extractCommonSections(html: string, kind: ContentKind): StructuredSection[] {
@@ -63,9 +63,7 @@ export function extractCommonSections(html: string, kind: ContentKind): Structur
       if (title) { startSection(title, isInlineVisible($, node)); return; }
     }
     if (element.is("table")) {
-      const table = kind === "modal"
-        ? extractModalGrid($, element, readCell) || extractDetailTable($, element, readCell)
-        : extractDetailTable($, element, readCell);
+      const table = extractDetailTable($, element, readCell);
       if (table) {
         const owner = element.parents("td").toArray().map((cell) => fieldByCell.get(cell)).find(Boolean);
         if (owner) (owner.tables ||= []).push(table);

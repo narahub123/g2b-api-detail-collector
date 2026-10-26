@@ -161,7 +161,7 @@ function positionedRows($: cheerio.CheerioAPI, sourceRows: any[], readCell: (cel
   });
 }
 
-/** 공고 페이지 표의 직접 소속 행만 읽어 원래 셀과 병합 범위를 보존합니다. */
+/** 상세페이지와 모달 표의 직접 소속 행만 읽어 셀·병합·열 표시 상태를 같은 규칙으로 보존합니다. */
 export function extractDetailTable($: cheerio.CheerioAPI, table: cheerio.Cheerio<any>, readCell: (cell: any) => string | null): StructuredTable | null {
   const rows = table.find("tr").filter((_, row) => $(row).closest("table")[0] === table[0]).toArray();
   if (!rows.length) return null;
@@ -190,7 +190,17 @@ export function extractDetailTable($: cheerio.CheerioAPI, table: cheerio.Cheerio
   const headerNodes = rows.slice(0, headerLength);
   const bodyNodes = rows.slice(headerLength);
   const columns = columnVisibility($, table);
-  const headerRows = positionedRows($, headerNodes, (cell) => nonempty(cell.text()));
+  let headerRows = positionedRows($, headerNodes, (cell) => nonempty(cell.text()));
+  // 헤더가 없는 col_id 그리드는 첫 데이터 행의 열 이름으로 공통 헤더를 만듭니다.
+  const generatedHeader = !headerRows.length && hasColId;
+  if (generatedHeader) {
+    const firstData = bodyNodes.find((row) => $(row).children("td[col_id]").length > 0);
+    headerRows = [$(firstData).children("td[col_id]").toArray().map((cell, column) => {
+      const id = $(cell).attr("col_id") || "";
+      return { value: id, column, rowspan: 1, colspan: 1,
+        visible: isInlineVisible($, table[0]), contents: [] };
+    })];
+  }
   const headerWidth = Math.max(0, ...headerRows.flat().map((cell) => cell.column + cell.colspan));
   const rawBodyRows = positionedRows($, bodyNodes, readCell);
   const excluded = selectionColumns($, headerNodes, headerRows);
@@ -209,40 +219,9 @@ export function extractDetailTable($: cheerio.CheerioAPI, table: cheerio.Cheerio
     bodyRows: projectedBody,
     ...(retainedColumns ? { columnVisibility: retainedColumns } : {}),
     visible: isInlineVisible($, table[0]),
-    headerRowVisibility: headerNodes.map((row) => isInlineVisible($, row)),
+    headerRowVisibility: generatedHeader ? [isInlineVisible($, table[0])] :
+      headerNodes.map((row) => isInlineVisible($, row)),
     bodyRowVisibility: bodyNodes.slice(0, projectedBody.length).map((row) => isInlineVisible($, row)) } : null;
-}
-
-/** Modal WebSquare grids identify columns by col_id, which need not match their HTML row positions. */
-export function extractModalGrid($: cheerio.CheerioAPI, table: cheerio.Cheerio<any>, readCell: (cell: any) => string | null): StructuredTable | null {
-  const ownRows = table.find("tr").filter((_, row) => $(row).closest("table")[0] === table[0]).toArray();
-  const dataRows = table.find("tr").filter((_, row) =>
-    $(row).closest("table")[0] === table[0] && $(row).children("td[col_id]").length > 0);
-  if (!dataRows.length) return null;
-  const ids = dataRows.first().children("td[col_id]").toArray().map((cell) => $(cell).attr("col_id") || "").filter(Boolean);
-  if (!ids.length) return null;
-  const headerNodes = ownRows.slice(0, ownRows.indexOf(dataRows[0])).filter((row) => $(row).children("th").length > 0);
-  const headerRows: StructuredTableCell[][] = headerNodes.length
-    ? positionedRows($, headerNodes, (cell) => nonempty(cell.text()))
-    : [ids.map((id, column) => {
-      const header = table.find("th[col_id]").filter((_, th) => $(th).attr("col_id") === id).first();
-      return { value: nonempty(header.text()) || id, column, rowspan: 1, colspan: 1,
-        visible: isInlineVisible($, header[0] || table[0]), contents: header.length ? cellContents($, header[0]) : [] };
-    })];
-  const mergedBody = dataRows.toArray().some((row) => $(row).children("td[col_id]").toArray().some((cell) =>
-    Number($(cell).attr("rowspan") || 1) !== 1 || Number($(cell).attr("colspan") || 1) !== 1));
-  const bodyRows = mergedBody ? positionedRows($, dataRows.toArray(), readCell) : dataRows.toArray().map((row) => ids.flatMap((id, column) => {
-    const cell = $(row).children("td[col_id]").filter((_, td) => $(td).attr("col_id") === id).first();
-    return cell.length ? [{ value: readCell(cell), column, rowspan: 1, colspan: 1,
-      visible: isInlineVisible($, cell[0]), contents: cellContents($, cell[0]) }] : [];
-  }));
-  const retainedBodyRows = withoutTrailingEmptyRows(bodyRows,
-    (index) => $(dataRows[index]).hasClass("w2grid_hidedRow"));
-  const excluded = new Set(ids.flatMap((id, index) => /^(?:chk|checkbox|row.?select|select)$/i.test(id) ? [index] : []));
-  return { headerRows: withoutColumns(headerRows, excluded),
-    bodyRows: withoutColumns(retainedBodyRows, excluded), visible: isInlineVisible($, table[0]),
-    headerRowVisibility: headerNodes.length ? headerNodes.map((row) => isInlineVisible($, row)) : [isInlineVisible($, table[0])],
-    bodyRowVisibility: dataRows.toArray().slice(0, retainedBodyRows.length).map((row) => isInlineVisible($, row)) };
 }
 
 export function tableHasValue(table: StructuredTable): boolean {

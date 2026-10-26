@@ -565,6 +565,23 @@ describe("extractDetailPage", () => {
 });
 
 describe("extractModalStructure", () => {
+  it("모달 표의 실제 파일 링크만 첨부 URL로 수집한다", () => {
+    const modal = extractModalStructure(`<div role="dialog"><table id="file_grid"><tr>
+      <td col_id="orgnlAtchFileNm"><a href="/pn/file.do?seq=1">계획서.hwp</a></td>
+      <td col_id="orgnlAtchFileNm"><a href="javascript:void(0)">미확인.hwp</a></td>
+    </tr></table></div>`, "https://www.g2b.go.kr/");
+    expect(modal.attachments).toEqual([{ name: "계획서.hwp", url: "https://www.g2b.go.kr/pn/file.do?seq=1" }]);
+  });
+  it("같은 WebSquare 표에 상세페이지와 모달의 열·표시 규칙을 동일하게 적용한다", () => {
+    const grid = `<table id="amount_grid"><colgroup><col style="width:0px"><col style="width:120px"></colgroup>
+      <thead><tr><th col_id="internal">내부</th><th col_id="amount">금액</th></tr></thead>
+      <tbody><tr><td col_id="internal">숨긴 값</td><td col_id="amount">1,000원</td></tr></tbody></table>`;
+    const page = extractDetailPage(`<main>${heading("공고일반")}<table><tr><td data-title="공고명">용역</td></tr></table>
+      ${heading("기초금액")}${grid}</main>`, url);
+    const modal = extractModalStructure(`<div role="dialog">${heading("기초금액")}${grid}</div>`);
+    expect(modal.sections?.[0].tables).toEqual(page.sections?.[1].tables);
+    expect(modal.sections?.[0].tables[0].columnVisibility).toEqual([false, true]);
+  });
   it("상세페이지와 모달에서 같은 섹션 구조를 추출한다", () => {
     const content = `${heading("계약정보")}<table><tr><th>계약방법</th><td data-title="계약방법">일반경쟁</td></tr></table>
       ${heading("담당자정보")}<table><tr><td data-title="담당자">홍길동</td></tr></table>`;
