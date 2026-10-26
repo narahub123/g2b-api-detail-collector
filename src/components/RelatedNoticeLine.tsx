@@ -41,7 +41,7 @@ export function RelatedNoticeLine({
               ) : (
                 <a
                   className="related-notice-link"
-                  href={`/bids/${encodeURIComponent(key)}/view`}
+                  href={`/bids/${encodeURIComponent(key)}`}
                 >
                   {label}
                 </a>

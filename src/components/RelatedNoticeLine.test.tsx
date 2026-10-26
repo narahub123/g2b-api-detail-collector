@@ -20,15 +20,15 @@ describe("RelatedNoticeLine", () => {
     const items = nav.querySelectorAll(".related-notice-item");
     expect(Array.from(items, (item) => item.textContent?.trim())).toEqual(["000", "- 001", "- 002"]);
     expect(within(nav).getByText("001")).toHaveAttribute("aria-current", "page");
-    expect(within(nav).getByRole("link", { name: "000" })).toHaveAttribute("href", "/bids/R26BK01774553--000/view");
-    expect(within(nav).getByRole("link", { name: "002" })).toHaveAttribute("href", "/bids/R26BK01774553--002/view");
+    expect(within(nav).getByRole("link", { name: "000" })).toHaveAttribute("href", "/bids/R26BK01774553--000");
+    expect(within(nav).getByRole("link", { name: "002" })).toHaveAttribute("href", "/bids/R26BK01774553--002");
     expect(within(nav).getAllByRole("link")).toHaveLength(2);
   });
 
   it("서로 다른 공고번호가 연결되면 번호 전체를 표시합니다", () => {
     render(<RelatedNoticeLine currentKey="R26BK01774553--000" relatedKeys={["R26BK01774554--001"]} />);
     expect(screen.getByRole("link", { name: "R26BK01774554-001" }))
-      .toHaveAttribute("href", "/bids/R26BK01774554--001/view");
+      .toHaveAttribute("href", "/bids/R26BK01774554--001");
   });
 
   it("중복 및 유효하지 않은 관계 키를 표시하지 않습니다", () => {

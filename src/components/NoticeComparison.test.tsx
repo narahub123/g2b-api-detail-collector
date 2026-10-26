@@ -79,7 +79,7 @@ describe("NoticeComparison", () => {
     expect(screen.getByText("완료")).toBeInTheDocument();
     expect(screen.getByText("클릭 출처: 계약번호 · R26TA12345678")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "R26BK12345678-000 공고 보기" }))
-      .toHaveAttribute("href", "/bids/R26BK12345678--000");
+      .toHaveAttribute("href", "/admin/bids/R26BK12345678--000");
   });
   it("shows the click source beside a section's modal detail", () => {
     const withSource: ScrapedDetail = { ...detail, sections: [{ title: "공지사항", fields: [], tables: [], details: [

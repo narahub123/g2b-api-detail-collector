@@ -50,7 +50,7 @@ export function NoticeDetail({ notice, relatedNoticeKeys = [], relatedNoticeStat
       <div className="section-heading"><span className="eyebrow">RELATED</span><h2>관련 공고</h2></div>
       <ul className="attachment-list">{relatedNoticeKeys.map((key) => {
         const [number, order] = key.split("--");
-        return <li key={key}><a href={`/bids/${encodeURIComponent(key)}`}>{number} · {order}차</a>
+        return <li key={key}><a href={`/admin/bids/${encodeURIComponent(key)}`}>{number} · {order}차</a>
           {relatedNoticeStates[key] === "failed" && <span className="muted"> · 수집 실패</span>}
           {relatedNoticeStates[key] === "unavailable" && <span className="muted"> · 상세 정보 없음</span>}
         </li>;
@@ -58,8 +58,8 @@ export function NoticeDetail({ notice, relatedNoticeKeys = [], relatedNoticeStat
     </section>}
 
     <div className="detail-actions">
-      <a className="source-link" href={`/bids/${encodeURIComponent(notice.key)}/view`}>사용자 화면 보기</a>
-      <a className="source-link" href={`/bids/${encodeURIComponent(notice.key)}/compare`}>수집 정보 비교</a>
+      <a className="source-link" href={`/bids/${encodeURIComponent(notice.key)}`}>사용자 화면 보기</a>
+      <a className="source-link" href={`/admin/bids/${encodeURIComponent(notice.key)}/compare`}>수집 정보 비교</a>
       <a className="source-link" href={notice.originalUrl} target="_blank" rel="noopener noreferrer">나라장터 원문 보기 <span aria-hidden="true">↗</span></a>
     </div>
   </>;

@@ -92,7 +92,7 @@ describe("NoticeStageTabs", () => {
     const noticePanel = screen.getByRole("tabpanel", { name: "공고" });
     expect(noticePanel).toHaveTextContent("R26BK01766517-000, R26BK01766517-001");
     expect(within(noticePanel).getAllByRole("link", { name: "R26BK01766517-000" })[0])
-      .toHaveAttribute("href", "/bids/R26BK01766517--000/view");
+      .toHaveAttribute("href", "/bids/R26BK01766517--000");
     expect(within(noticePanel).getAllByRole("link", { name: "R26BK01766517-000" })).toHaveLength(2);
     expect(within(noticePanel).queryByRole("button", { name: "R26BK01766517-001" })).not.toBeInTheDocument();
     fireEvent.click(within(noticePanel).getByRole("button", { name: "R26DD20897516" }));
