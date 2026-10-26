@@ -1,0 +1,112 @@
+.user-notice-filters {
+  background: #fff;
+  border: 1px solid #dfe6e8;
+  border-radius: 14px;
+  padding: 22px;
+  margin-bottom: 20px;
+}
+.filter-search,
+.filter-ranges {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+.filter-search {
+  grid-template-columns: minmax(150px, 1fr) minmax(260px, 3fr);
+}
+.filter-ranges {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.user-notice-filters label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: #52616c;
+  font-size: 12px;
+  font-weight: 700;
+  min-width: 0;
+}
+.user-notice-filters input,
+.user-notice-filters select {
+  width: 100%;
+  height: 42px;
+  border: 1px solid #ced9df;
+  border-radius: 8px;
+  padding: 0 10px;
+  background: #fff;
+  color: #172335;
+  font: inherit;
+}
+.user-notice-filters fieldset {
+  border: 1px solid #e0e6e9;
+  border-radius: 9px;
+  padding: 12px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  min-width: 0;
+}
+.user-notice-filters legend {
+  padding: 0 4px;
+  color: #52616c;
+  font-size: 13px;
+  font-weight: 700;
+}
+.filter-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 18px;
+}
+.filter-actions button {
+  height: 42px;
+  border: 0;
+  border-radius: 8px;
+  background: #08747a;
+  color: #fff;
+  padding: 0 18px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.filter-actions a {
+  color: #3e7478;
+  font-size: 13px;
+  font-weight: 700;
+}
+.filter-actions a:hover {
+  text-decoration: underline;
+}
+@media (max-width: 900px) {
+  .filter-ranges {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 600px) {
+  .filter-search {
+    grid-template-columns: 1fr;
+  }
+  .user-notice-filters fieldset {
+    grid-template-columns: 1fr;
+  }
+}
+.notice-pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 22px;
+}
+.notice-pagination a,
+.notice-pagination span {
+  min-width: 36px;
+  padding: 9px 11px;
+  border: 1px solid #ced9df;
+  border-radius: 8px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 700;
+}
+.notice-pagination a:hover { background: #eaf5f5; }
+.notice-pagination .page-current { background: #08747a; border-color: #08747a; color: #fff; }
+.notice-pagination .page-disabled { color: #9aa8af; background: #f2f5f6; }

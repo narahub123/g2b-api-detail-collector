@@ -79,9 +79,9 @@ export function NoticeList({ notices, fetcher = fetch }: { notices: NormalizedNo
         <span className={notice.scrapeStatus === "succeeded" ? "status-pill" : "status-pill warning"}>
           {notice.scrapeStatus === "succeeded" ? "상세 수집 완료" : "상세 수집 실패"}
         </span></div>
-      <h3><a href={`/bids/${encodeURIComponent(notice.key)}`}>{notice.title.value || "제목 정보 없음"}</a></h3>
+      <h3><a href={`/admin/bids/${encodeURIComponent(notice.key)}`}>{notice.title.value || "제목 정보 없음"}</a></h3>
       <p className="agency">{notice.agency.value || "기관 정보 없음"}</p>
-      <a className="notice-user-link" href={`/bids/${encodeURIComponent(notice.key)}/view`}>사용자 화면 보기</a>
+      <a className="notice-user-link" href={`/bids/${encodeURIComponent(notice.key)}`}>사용자 화면 보기</a>
       <div className="notice-facts">
         <span><small>게시</small>{notice.postedAt.value || "정보 없음"}</span>
         <span><small>마감</small>{notice.deadline.value || "정보 없음"}</span>

@@ -21,7 +21,7 @@ function targetForNumber(value: string, targets: NavigationTargets): NavigationT
   if (!bid) return null;
   const key = `${bid[1]}--${bid[2]}`;
   if (key === targets.currentKey) return { stage: "notice" };
-  return targets.relatedKeys.includes(key) ? { href: `/bids/${encodeURIComponent(key)}/view` } : null;
+    return targets.relatedKeys.includes(key) ? { href: `/bids/${encodeURIComponent(key)}` } : null;
 }
 
 /** 이어 붙은 공고번호 사이에 표시용 구분자를 넣고 각 이동 대상을 판별합니다. */

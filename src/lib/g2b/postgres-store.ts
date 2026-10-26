@@ -4,6 +4,7 @@ import { normalizeNotice } from "./normalize";
 import type { StoredNotice } from "./notices";
 import type { IndependentDetail, StructuredNoticeDetail } from "./structured-data";
 import type { ModalCapture } from "./detail-page";
+import type { NoticeFilters } from "./notice-filters";
 
 type Category = "order-plan" | "pre-specification" | "other" | "opening";
 type Queryable = Pick<pg.PoolClient, "query">;
@@ -144,9 +145,43 @@ export async function getStoredNotice(key: string): Promise<StoredNotice | null>
     independentTriggers: refs.rows.flatMap((item) => item.triggers.map((trigger) => ({ number: item.detail_key, trigger }))) };
 }
 
-/** 목록 화면에 표시할 공고 키를 게시일 역순으로 반환합니다. */
-export async function listStoredNoticeKeys(): Promise<string[]> {
-  const result = await getPool().query<{ key: string }>(`SELECT key FROM ${table("notices")} ORDER BY posted_at DESC NULLS LAST, key`);
+/** 건수와 목록 조회에 공통으로 적용할 검색·필터 SQL을 구성합니다. */
+function noticeWhere(filters: NoticeFilters): { where: string; values: string[] } {
+  const clauses: string[] = [];
+  const values: string[] = [];
+  const add = (sql: (index: number) => string, value: string | undefined) => {
+    if (value === undefined) return;
+    values.push(value);
+    clauses.push(sql(values.length));
+  };
+
+  // 검색 컬럼은 허용된 두 컬럼 중에서만 선택하고 값은 매개변수로 전달합니다.
+  if (filters.query) {
+    const column = filters.searchField === "notice_number" ? "notice_number" : "title";
+    add((index) => `strpos(lower(${column}), lower($${index})) > 0`, filters.query);
+  }
+  add((index) => `posted_at >= $${index}::date`, filters.postedFrom);
+  add((index) => `posted_at < ($${index}::date + interval '1 day')`, filters.postedTo);
+  add((index) => `deadline_at >= $${index}::date`, filters.deadlineFrom);
+  add((index) => `deadline_at < ($${index}::date + interval '1 day')`, filters.deadlineTo);
+  add((index) => `amount >= $${index}::numeric`, filters.minAmount);
+  add((index) => `amount <= $${index}::numeric`, filters.maxAmount);
+  return { where: clauses.length ? ` WHERE ${clauses.join(" AND ")}` : "", values };
+}
+
+/** 검색·필터 조건에 맞는 전체 공고 수를 DB에서 조회합니다. */
+export async function countStoredNotices(filters: NoticeFilters = {}): Promise<number> {
+  const { where, values } = noticeWhere(filters);
+  const result = await getPool().query<{ total: string }>(`SELECT COUNT(*) AS total FROM ${table("notices")}${where}`, values);
+  return Number(result.rows[0]?.total || 0);
+}
+
+/** 지정한 조건을 DB에서 적용하고 목록에 표시할 공고 키를 게시일 역순으로 반환합니다. */
+export async function listStoredNoticeKeys(filters: NoticeFilters = {}, pagination?: { limit: number; offset: number }): Promise<string[]> {
+  const { where, values } = noticeWhere(filters);
+  const pageClause = pagination ? ` LIMIT $${values.length + 1} OFFSET $${values.length + 2}` : "";
+  const params: (string | number)[] = pagination ? [...values, pagination.limit, pagination.offset] : values;
+  const result = await getPool().query<{ key: string }>(`SELECT key FROM ${table("notices")}${where} ORDER BY posted_at DESC NULLS LAST, key${pageClause}`, params);
   return result.rows.map((row) => row.key);
 }
 

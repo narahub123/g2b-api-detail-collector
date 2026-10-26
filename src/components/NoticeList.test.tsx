@@ -19,7 +19,7 @@ describe("NoticeList", () => {
   it("links different orders of one announcement to different detail pages", () => {
     render(<NoticeList notices={[base, { ...base, key: "R26BK1--001", order: "001" }]} />);
     expect(screen.getAllByRole("link", { name: "조사 용역" }).map((link) => link.getAttribute("href")))
-      .toEqual(["/bids/R26BK1--000", "/bids/R26BK1--001"]);
+      .toEqual(["/admin/bids/R26BK1--000", "/admin/bids/R26BK1--001"]);
   });
 
   it("submits only checked notices and displays each refresh result", async () => {

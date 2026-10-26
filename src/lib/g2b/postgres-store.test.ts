@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { getStoredIndependentDetail, listStoredNoticeKeys, noticeSummary, saveNoticeRelation, saveStoredNotice } from "./postgres-store";
+import { countStoredNotices, getStoredIndependentDetail, listStoredNoticeKeys, noticeSummary, saveNoticeRelation, saveStoredNotice } from "./postgres-store";
 
 const runtime = globalThis as typeof globalThis & { __g2bPgPool?: unknown };
 const originalUrl = process.env.DATABASE_URL;
@@ -65,6 +65,48 @@ describe("noticeSummary", () => {
     runtime.__g2bPgPool = { query: async (sql: string) => { statements.push({ sql }); return { rows: [] }; } };
     await listStoredNoticeKeys();
     expect(statements[0].sql).toContain("FROM public.notices");
+  });
+
+  it("검색과 날짜·금액 범위를 SQL 조건에 함께 적용합니다", async () => {
+    const statements = fakePool();
+    runtime.__g2bPgPool = { query: async (sql: string, values?: unknown[]) => { statements.push({ sql, values }); return { rows: [] }; } };
+    await listStoredNoticeKeys({ searchField: "notice_number", query: "R26%", postedFrom: "2026-10-01", postedTo: "2026-10-31",
+      deadlineFrom: "2026-11-01", deadlineTo: "2026-11-30", minAmount: "1000", maxAmount: "5000" });
+    expect(statements[0].sql).toContain("strpos(lower(notice_number), lower($1)) > 0");
+    expect(statements[0].sql).toContain("posted_at >= $2::date");
+    expect(statements[0].sql).toContain("posted_at < ($3::date + interval '1 day')");
+    expect(statements[0].sql).toContain("deadline_at >= $4::date");
+    expect(statements[0].sql).toContain("deadline_at < ($5::date + interval '1 day')");
+    expect(statements[0].sql).toContain("amount >= $6::numeric");
+    expect(statements[0].sql).toContain("amount <= $7::numeric");
+    expect(statements[0].values).toEqual(["R26%", "2026-10-01", "2026-10-31", "2026-11-01", "2026-11-30", "1000", "5000"]);
+  });
+
+  it("지정하지 않은 조건은 SQL에 추가하지 않습니다", async () => {
+    const statements = fakePool();
+    runtime.__g2bPgPool = { query: async (sql: string, values?: unknown[]) => { statements.push({ sql, values }); return { rows: [] }; } };
+    await listStoredNoticeKeys({ searchField: "title", query: "용역", maxAmount: "0" });
+    expect(statements[0].sql).toContain("strpos(lower(title), lower($1)) > 0");
+    expect(statements[0].sql).toContain("amount <= $2::numeric");
+    expect(statements[0].sql).not.toContain("posted_at >=");
+    expect(statements[0].sql).not.toContain("deadline_at >=");
+    expect(statements[0].values).toEqual(["용역", "0"]);
+  });
+
+  it("건수와 페이지 조회에 동일한 검색·필터 조건을 적용합니다", async () => {
+    const statements = fakePool();
+    runtime.__g2bPgPool = { query: async (sql: string, values?: unknown[]) => {
+      statements.push({ sql, values }); return { rows: sql.includes("COUNT(*)") ? [{ total: "21" }] : [] };
+    } };
+    const filters = { searchField: "title" as const, query: "용역", postedTo: "2026-10-31", minAmount: "1000" };
+    expect(await countStoredNotices(filters)).toBe(21);
+    await listStoredNoticeKeys(filters, { limit: 10, offset: 10 });
+    const [count, page] = statements;
+    expect(count.sql).toContain("SELECT COUNT(*)");
+    expect(page.sql).toContain("ORDER BY posted_at DESC NULLS LAST, key LIMIT $4 OFFSET $5");
+    expect(count.sql.match(/WHERE (.*)/)?.[1]).toBe(page.sql.match(/WHERE (.*) ORDER BY/)?.[1]);
+    expect(count.values).toEqual(["용역", "2026-10-31", "1000"]);
+    expect(page.values).toEqual(["용역", "2026-10-31", "1000", 10, 10]);
   });
 
   it("queries independent details by a text key", async () => {

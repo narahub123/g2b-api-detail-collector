@@ -13,9 +13,9 @@ describe("공고 본문 이동 대상 판별", () => {
   it("구분자 없이 이어진 공고번호를 차수별로 나누고 현재 공고도 구별한다", () => {
     expect(splitNavigationValue("이전 R26BK01766517-002R26BK01766517-000 끝", targets)).toEqual([
       { text: "이전 " },
-      { text: "R26BK01766517-002", target: { href: "/bids/R26BK01766517--002/view" } },
+      { text: "R26BK01766517-002", target: { href: "/bids/R26BK01766517--002" } },
       { text: ", " },
-      { text: "R26BK01766517-000", target: { href: "/bids/R26BK01766517--000/view" } },
+      { text: "R26BK01766517-000", target: { href: "/bids/R26BK01766517--000" } },
       { text: " 끝" },
     ]);
     expect(splitNavigationValue("R26BK01766517 - 001", targets)).toEqual([
@@ -25,9 +25,9 @@ describe("공고 본문 이동 대상 판별", () => {
 
   it("이미 쉼표로 구분된 공고번호에는 구분자를 중복하지 않는다", () => {
     expect(splitNavigationValue("R26BK01766517-002, R26BK01766517-000", targets)).toEqual([
-      { text: "R26BK01766517-002", target: { href: "/bids/R26BK01766517--002/view" } },
+      { text: "R26BK01766517-002", target: { href: "/bids/R26BK01766517--002" } },
       { text: ", " },
-      { text: "R26BK01766517-000", target: { href: "/bids/R26BK01766517--000/view" } },
+      { text: "R26BK01766517-000", target: { href: "/bids/R26BK01766517--000" } },
     ]);
   });
 

@@ -186,7 +186,7 @@ export function NoticeComparison({ api, detail, orderPlans = [], preSpecificatio
                   </div>)}
                 </div>)}
               </div>)
-              : item.noticeKey ? <a href={`/bids/${encodeURIComponent(item.noticeKey)}`}>{item.number} 공고 보기</a>
+              : item.noticeKey ? <a href={`/admin/bids/${encodeURIComponent(item.noticeKey)}`}>{item.number} 공고 보기</a>
               : <p className="muted comparison-empty">참조한 상세 정보가 없습니다.</p>}
           </details>)}
         </section>}

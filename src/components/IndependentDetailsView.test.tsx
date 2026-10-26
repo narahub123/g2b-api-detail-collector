@@ -78,6 +78,6 @@ describe("IndependentDetailsView", () => {
       noticeKey: "R26BK01774553--001",
     }]} />);
     expect(screen.getByRole("link", { name: "R26BK01774553-001 공고 상세 보기" }))
-      .toHaveAttribute("href", "/bids/R26BK01774553--001/view");
+      .toHaveAttribute("href", "/bids/R26BK01774553--001");
   });
 });

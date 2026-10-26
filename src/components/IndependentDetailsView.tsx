@@ -13,7 +13,7 @@ export function IndependentDetailsView({ references }: { references: Independent
     const targetProps = { id: referenceElementId(reference.number), tabIndex: -1 };
     if (reference.noticeKey) {
       return <p key={reference.number} {...targetProps}>
-        <a href={`/bids/${encodeURIComponent(reference.noticeKey)}/view`}>{reference.number} 공고 상세 보기</a>
+        <a href={`/bids/${encodeURIComponent(reference.noticeKey)}`}>{reference.number} 공고 상세 보기</a>
       </p>;
     }
     if (!reference.detail) {

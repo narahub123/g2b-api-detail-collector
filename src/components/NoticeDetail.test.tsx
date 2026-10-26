@@ -21,14 +21,14 @@ describe("NoticeDetail", () => {
     expect(screen.getByRole("link", { name: "공고문.pdf" })).toHaveAttribute("download");
     expect(screen.getByRole("link", { name: "나라장터 원문 보기" })).toHaveAttribute("target", "_blank");
     expect(screen.getByRole("link", { name: "나라장터 원문 보기" })).toHaveAttribute("rel", "noopener noreferrer");
-    expect(screen.getByRole("link", { name: "수집 정보 비교" })).toHaveAttribute("href", "/bids/R26BK1--000/compare");
-    expect(screen.getByRole("link", { name: "사용자 화면 보기" })).toHaveAttribute("href", "/bids/R26BK1--000/view");
+    expect(screen.getByRole("link", { name: "수집 정보 비교" })).toHaveAttribute("href", "/admin/bids/R26BK1--000/compare");
+    expect(screen.getByRole("link", { name: "사용자 화면 보기" })).toHaveAttribute("href", "/bids/R26BK1--000");
   });
 
   it("keeps the summary and dedicated comparison link without the inline comparison", () => {
     render(<NoticeDetail notice={notice} />);
     expect(screen.getByRole("heading", { name: "주요 항목 요약" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "수집 정보 비교" })).toHaveAttribute("href", "/bids/R26BK1--000/compare");
+    expect(screen.getByRole("link", { name: "수집 정보 비교" })).toHaveAttribute("href", "/admin/bids/R26BK1--000/compare");
     expect(screen.queryByRole("heading", { name: "수집 데이터 비교" })).not.toBeInTheDocument();
   });
 
@@ -36,7 +36,7 @@ describe("NoticeDetail", () => {
     render(<NoticeDetail notice={notice} relatedNoticeKeys={["R26BK2--001", "R26BK3--000"]} />);
     const related = screen.getByRole("region", { name: "관련 공고" });
     expect(related.querySelectorAll("a")).toHaveLength(2);
-    expect(screen.getByRole("link", { name: "R26BK2 · 001차" })).toHaveAttribute("href", "/bids/R26BK2--001");
+    expect(screen.getByRole("link", { name: "R26BK2 · 001차" })).toHaveAttribute("href", "/admin/bids/R26BK2--001");
     expect(screen.queryByRole("link", { name: /R26BK4/ })).not.toBeInTheDocument();
   });
 
@@ -44,7 +44,7 @@ describe("NoticeDetail", () => {
     render(<NoticeDetail notice={{ ...notice, key: "R26BK2--001", number: "R26BK2", order: "001",
       title: { value: "관련 공고 상세", source: "detail" } }} relatedNoticeKeys={["R26BK1--000"]} />);
     expect(screen.getByRole("heading", { name: "관련 공고 상세" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "R26BK1 · 000차" })).toHaveAttribute("href", "/bids/R26BK1--000");
+    expect(screen.getByRole("link", { name: "R26BK1 · 000차" })).toHaveAttribute("href", "/admin/bids/R26BK1--000");
   });
 
   it("shows failed or unavailable related detail beside its link", () => {
