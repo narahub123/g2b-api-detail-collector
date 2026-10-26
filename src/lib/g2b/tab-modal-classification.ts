@@ -23,8 +23,10 @@ function openingKey(noticeKey: string, capture: ModalCapture, sections: Structur
     const rebidColumn = headers.find((cell) => cell.value === "재입찰번호")?.column;
     const statusColumn = headers.find((cell) => cell.value === "진행현황")?.column;
     const row = table.bodyRows[rowIndex];
-    if (rebidColumn === undefined || statusColumn !== columnIndex || !row ||
-      row.find((cell) => cell.column === statusColumn)?.value !== capture.trigger.value) return [];
+    const statusCell = row?.find((cell) => cell.column === statusColumn);
+    const statusMatches = statusCell?.value?.trim() === capture.trigger.value.trim() ||
+      statusCell?.contents?.some((content) => content.value.trim() === capture.trigger.value.trim());
+    if (rebidColumn === undefined || statusColumn !== columnIndex || !row || !statusMatches) return [];
     const rebid = row.find((cell) => cell.column === rebidColumn)?.value?.trim();
     return rebid && /^\d{3}$/.test(rebid) ? [rebid] : [];
   });
