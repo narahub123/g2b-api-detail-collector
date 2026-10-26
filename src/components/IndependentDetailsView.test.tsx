@@ -45,6 +45,17 @@ describe("IndependentDetailsView", () => {
     expect(screen.getByText("사업명: 테스트 사업")).toBeInTheDocument();
   });
 
+  it("새 독립 상세의 섹션을 그대로 표시합니다", () => {
+    render(<IndependentDetailsView references={[{ number: "R26DD12345678", detail: {
+      schemaVersion: 3, number: "R26DD12345678", title: "발주계획 상세", sections: [
+        { title: "계약정보", fields: [{ label: "계약방법", value: [{ text: "일반경쟁", visible: true }] }], tables: [] },
+        { title: "담당자정보", fields: [{ label: "담당자", value: [{ text: "홍길동", visible: true }] }], tables: [] }
+      ], capturedAt: "2026-10-25T00:00:00.000Z", sourceNoticeKey: "R26BK01774553--000"
+    } }]} />);
+    expect(screen.getByRole("heading", { name: "계약정보" })).toBeInTheDocument();
+    expect(screen.getByText("담당자: 홍길동")).toBeInTheDocument();
+  });
+
   it("저장되지 않은 참조는 번호와 안내 문구를 표시합니다", () => {
     render(<IndependentDetailsView references={[{ number: "R26BD12345678", detail: null }]} />);
     expect(screen.getByText("R26BD12345678: 저장된 상세 정보가 없습니다.")).toBeInTheDocument();

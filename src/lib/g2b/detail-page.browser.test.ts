@@ -107,7 +107,7 @@ it("captures a notice and its nested dialog once while avoiding unsafe controls"
       "추가 상세",
       "후속 안내",
     ]);
-    expect(result.captures[0].modal.fields).toContainEqual({
+    expect(result.captures[0].modal.sections?.flatMap((section) => section.fields)).toContainEqual({
       label: "내용",
       value: [{ text: "입찰참가자격 제한사항 재검토", visible: true }],
       visible: true,
@@ -149,7 +149,7 @@ it("waits for asynchronously populated modal fields to settle before capture", a
     expect(result.discovery.attempted).toBe(1);
     expect(result.discovery.failures).toEqual([]);
     expect(result.captures).toHaveLength(1);
-    expect(result.captures[0].modal.fields).toContainEqual({
+    expect(result.captures[0].modal.sections?.flatMap((section) => section.fields)).toContainEqual({
       label: "내용",
       value: [{ text: "최종 응답", visible: true }],
       visible: true,
@@ -185,7 +185,7 @@ it("does not report a modal-settling timeout as a collection failure", async () 
     expect(result.discovery.attempted).toBe(1);
     expect(result.discovery.failures).toEqual([]);
     expect(result.captures).toHaveLength(1);
-    expect(result.captures[0].modal.fields).toContainEqual({
+    expect(result.captures[0].modal.sections?.flatMap((section) => section.fields)).toContainEqual({
       label: "내용",
       value: [],
       visible: true,

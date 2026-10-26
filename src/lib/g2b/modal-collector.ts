@@ -1,12 +1,14 @@
 import * as cheerio from "cheerio";
-import { extractDetailTable, extractModalGrid, isInlineVisible, tableHasValue } from "./structured-table";
+import { extractCommonSections } from "./common-content-extractor";
+import { tableHasValue } from "./structured-table";
 import { createModalDeduplication } from "./modal-deduplication";
 import type { StructuredTable } from "./structured-table";
-import { extractFieldValue, fieldText } from "./field-value";
+import { fieldText } from "./field-value";
 import type {
   ModalCapture,
   ScrapedDetail,
   StructuredField,
+  StructuredSection,
 } from "./detail-page";
 
 // 화면 텍스트 비교와 필드 레이블 추출에 사용할 공백 정규화 함수입니다.
@@ -23,112 +25,17 @@ const nonempty = (value: string): string | null => clean(value) || null;
  */
 export function extractModalStructure(html: string): {
   title: string | null;
+  sections: StructuredSection[];
   fields: StructuredField[];
   tables: StructuredTable[];
 } {
-  // 다른 모달이 섞이지 않도록 대화상자 영역을 우선 추출 대상으로 사용합니다.
   const $ = cheerio.load(html);
-  $("script,style").remove();
-  const root = $("[role='dialog']").first().length
-    ? $("[role='dialog']").first()
-    : $("body");
-  const title = nonempty(
-    root
-      .find("[id$='_header_title'],.w2window_header_title,h1,h2,h3")
-      .first()
-      .text(),
-  );
-  const fields: StructuredField[] = [];
-  const tables: StructuredTable[] = [];
-  const fieldByCell = new Map<any, StructuredField>();
-  // HTML 속성뿐 아니라 입력 컨트롤의 현재 값과 일반 텍스트를 함께 읽습니다.
-  const readValue = (cell: cheerio.Cheerio<any>): string | null => {
-    const controls = cell
-      .find("input,textarea,select")
-      .filter(
-        (_, el) =>
-          !$(el).is("[type='checkbox'],[type='radio'],[type='hidden']"),
-      );
-    const values = controls
-      .toArray()
-      .map((el) => {
-        const input = $(el);
-        if (input.is("textarea"))
-          return nonempty(input.val()?.toString() || input.text());
-        if (input.is("select"))
-          return nonempty(
-            input.find("option:selected").text() ||
-              input.val()?.toString() ||
-              "",
-          );
-        return nonempty(input.attr("value") || input.val()?.toString() || "");
-      })
-      .filter((value): value is string => value !== null);
-    // 입력값은 위에서 별도로 수집했으므로 텍스트 추출 시 컨트롤을 제거해 중복을 피합니다.
-    const plain = cell.clone();
-    plain.find("input,textarea,select,button,script,style").remove();
-    // 줄바꿈 태그는 공백 정규화 후에도 구분되도록 임시 표식으로 보존합니다.
-    const breakMarker = "\uE000";
-    plain.find("br").replaceWith(breakMarker);
-    const plainText = clean(plain.text())
-      .split(breakMarker)
-      .map(clean)
-      .join("\n");
-    return [...values, plainText].filter(Boolean).join(" ") || null;
-  };
-  // data-title 셀 하나를 필드 하나로 취급하며, 짝이 되는 th는 중복 수집하지 않습니다.
-  const fieldIndex = new Map<string, number>();
-  root.find("td[data-title]").each((_, element) => {
-    const cell = $(element);
-    if (cell.closest("[role='dialog']").length && root.is("body")) return;
-    if (
-      cell
-        .closest("table")
-        .attr("id")
-        ?.match(/grd|grid/i) ||
-      cell.is("[col_id]")
-    )
-      return;
-    const label = clean(cell.attr("data-title") || "");
-    if (!label) return;
-    const value = extractFieldValue($, cell);
-    const visible = isInlineVisible($, element);
-    // 같은 레이블이 반복되면 먼저 확보한 값을 유지하되, 기존 값이 비어 있을 때만 보완합니다.
-    const previous = fieldIndex.get(label);
-    if (previous === undefined) {
-      fieldIndex.set(label, fields.length);
-      fields.push({ label, value, visible });
-    } else if (!fieldText(fields[previous].value) && fieldText(value)) {
-      fields[previous].value = value;
-      fields[previous].visible = visible;
-    }
-    fieldByCell.set(element, fields[fieldIndex.get(label)!]);
-  });
-  // data-title이 없는 실제 인접 th/td 쌍에만 대체 추출 방식을 적용합니다.
-  root.find("th.w2tb_th").each((_, element) => {
-    const th = $(element);
-    const next = th.next();
-    if (!next.is("td") || next.attr("data-title")) return;
-    const label = clean(th.text());
-    if (label) {
-      const field: StructuredField = { label, value: extractFieldValue($, next),
-        visible: isInlineVisible($, element) && isInlineVisible($, next[0]) };
-      fields.push(field);
-      fieldByCell.set(next[0], field);
-    }
-  });
-  // WebSquare 그리드에서는 행 상태나 체크박스 컨트롤이 아닌 실제 데이터 셀(col_id)만 추출합니다.
-  root.find("table").each((_, element) => {
-    const table = extractModalGrid($, $(element), readValue) || extractDetailTable($, $(element), readValue);
-    if (!table) return;
-    // 필드 안의 그리드는 데이터 행이 없어도 해당 필드의 소유 관계를 유지합니다.
-    const owner = $(element).parents("td").toArray().map((cell) => fieldByCell.get(cell)).find(Boolean);
-    if (owner) (owner.tables ??= []).push(table);
-    else tables.push(table);
-  });
-  return { title, fields, tables };
+  const root = $("[role='dialog']").first().length ? $("[role='dialog']").first() : $("body");
+  const title = nonempty(root.find("[id$='_header_title'],.w2window_header_title,h1,h2,h3").first().text());
+  const sections = extractCommonSections(html, "modal");
+  return { title, sections, fields: sections.flatMap((section) => section.fields),
+    tables: sections.flatMap((section) => section.tables) };
 }
-
 // 모달 원본 내용을 먼저 수집하고, 의미 해석 및 구조화는 별도 단계에서 수행합니다.
 // 제출, 데이터 변경·삭제, 다운로드 링크, 다른 페이지로 이동하는 동작은 탐색하지 않습니다.
 // 여러 UI 구현 방식에서 표시되는 모달을 공통으로 찾기 위한 선택자입니다.
@@ -559,7 +466,7 @@ export async function collectModalContents(
                 html: candidate.html,
                 parentModalTitle,
               },
-              modal: { text: fresh.text, ...structured },
+              modal: { text: fresh.text, title: structured.title, sections: structured.sections },
               settling: {
                 status: settling.status,
                 elapsedMs: settling.elapsedMs,

@@ -26,7 +26,7 @@ describe("saved notices", () => {
       key: "R26BK12345678--000", api: null, detail: { sourceUrl: "existing", attachments: [], links: [] }
     }));
     const record = await getNoticeRecord("R26BK01774553--000", dir);
-    expect(record?.otherDetails[0].detail?.fields[0].value).toEqual([{ text: "완료", visible: true }]);
+    expect(record?.otherDetails[0].detail?.fields?.[0].value).toEqual([{ text: "완료", visible: true }]);
     expect(record?.otherDetails[1].noticeKey).toBe("R26BK12345678--000");
     expect(record?.otherDetails[1].triggers?.[0].label).toBe("다른 공고");
   });

@@ -29,6 +29,20 @@ const dirs: string[] = [];
 afterEach(async () => { await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))); });
 
 describe("structureNoticeDetail", () => {
+  it("새 모달의 여러 섹션을 연결 상세와 독립 상세에 그대로 저장한다", () => {
+    const sections = [
+      { title: "계약정보", fields: [{ label: "계약방법", value: [{ text: "일반경쟁", visible: true }] }], tables: [] },
+      { title: "담당자정보", fields: [{ label: "담당자", value: [{ text: "홍길동", visible: true }] }], tables: [] }
+    ];
+    const linked = capture("상세조회", [], "공지사항");
+    linked.modal = { title: "상세조회", sections };
+    const independent = capture("발주계획상세조회", [], null, "R26DD20897516");
+    independent.modal = { title: "발주계획상세조회", sections };
+    const result = structureNoticeDetail("R26BK1--000", detail([linked, independent]));
+    expect(result.detail.sections?.find((section) => section.title === "공지사항")?.details?.[0].sections).toEqual(sections);
+    expect(result.orderPlans[0]).toMatchObject({ schemaVersion: 3, sections });
+    expect(result.orderPlans[0]).not.toHaveProperty("fields");
+  });
   it("keeps a hidden header-only table under its field after section filtering", () => {
     const grid: StructuredTable = { visible: false, headerRows: [[{ value: "그룹업종", column: 0,
       rowspan: 1, colspan: 1, visible: false }]], bodyRows: [] };
@@ -69,6 +83,20 @@ describe("structureNoticeDetail", () => {
     await expect(readFile(join(dir, "independent-details", "R26BK12345678-000.json"), "utf8"))
       .rejects.toMatchObject({ code: "ENOENT" });
   });
+  it("버전 2 독립 상세는 섹션 형식으로 갱신하고 버전 3은 유지한다", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "g2b-upgrade-")); dirs.push(dir);
+    await mkdir(join(dir, "order-plans"));
+    const path = join(dir, "order-plans", "R26DD20897516.json");
+    await writeFile(path, JSON.stringify({ schemaVersion: 2, fields: [], tables: [] }));
+    const source = capture("발주계획", [{ label: "사업명", value: [{ text: "신규 사업", visible: true }] }], null, "R26DD20897516");
+    const structured = structureNoticeDetail("R26BK1--000", detail([source]));
+    await saveIndependentDetails(dir, structured);
+    const upgraded = JSON.parse(await readFile(path, "utf8"));
+    expect(upgraded).toMatchObject({ schemaVersion: 3, sections: [{ fields: [{ label: "사업명" }] }] });
+    source.modal.fields![0].value = [{ text: "다른 사업", visible: true }];
+    await saveIndependentDetails(dir, structureNoticeDetail("R26BK1--000", detail([source])));
+    expect(JSON.parse(await readFile(path, "utf8"))).toEqual(upgraded);
+  });
   it("classifies numbered triggers without relying on modal titles", () => {
     const numbered = capture("임의 제목", [{ label: "내용", value: [{ text: "계획", visible: true }] }], "공고일반");
     numbered.trigger.value = " R26DD20897516 ";
@@ -77,7 +105,7 @@ describe("structureNoticeDetail", () => {
     const result = structureNoticeDetail("R26BK01774553--000", detail([numbered, sectionModal]));
     expect(result.orderPlanNumbers).toEqual(["R26DD20897516"]);
     expect(result.orderPlans[0].trigger).toMatchObject({ value: " R26DD20897516 ", label: "임의 제목" });
-    expect(result.orderPlans[0].schemaVersion).toBe(2);
+    expect(result.orderPlans[0].schemaVersion).toBe(3);
     expect(result.detail.sections?.find((item) => item.title === "공지사항")?.details?.[0].fields)
       .toEqual([{ label: "내용", value: [{ text: "안내", visible: true }] }]);
     expect(result.detail.sections?.find((item) => item.title === "공지사항")?.details?.[0].trigger)
@@ -125,7 +153,7 @@ describe("structureNoticeDetail", () => {
     expect(result.orderPlanNumbers).toEqual(["R26DD20897516"]);
     expect(result.preSpecificationNumbers).toEqual(["R26BD12345678"]);
     expect(result.orderPlans[0]).toMatchObject({ number: "R26DD20897516", sourceNoticeKey: "R26BK01774553--000",
-      fields: [{ label: "발주계획번호", value: [{ text: "R26DD20897516", visible: true }] }] });
+      sections: [{ fields: [{ label: "발주계획번호", value: [{ text: "R26DD20897516", visible: true }] }] }] });
     expect(result.orderPlans[0]).not.toHaveProperty("text");
     expect(result.preSpecifications[0]).not.toHaveProperty("text");
     expect(result.detail.sections?.[0]).toEqual({ title: "공고일반", fields: [{ label: "공고명", value: [{ text: "용역", visible: true }] }], tables: [], details: [] });

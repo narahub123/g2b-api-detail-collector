@@ -1,11 +1,11 @@
 import * as cheerio from "cheerio";
 import { chromium } from "playwright-core";
 import { noticeKeyFromParts } from "./identity";
-import { extractDetailTable, isInlineVisible } from "./structured-table";
+import { extractCommonSections } from "./common-content-extractor";
 import type { StructuredTable } from "./structured-table";
 import { attachmentDownloadUrl, safeAttachmentLink } from "./attachment-links";
 import { collectModalContents } from "./modal-collector";
-import { extractFieldValue, fieldText } from "./field-value";
+import { fieldText } from "./field-value";
 import type { FieldValuePart } from "./field-value";
 export { collectModalContents, extractModalStructure } from "./modal-collector";
 
@@ -16,11 +16,12 @@ export type AttachmentMetadata = { orgnlAtchFileNm: string; atchFileSqno: number
 export type ClickDownload = { cellId: string; name: string; fileNo: string; seq: number };
 export type StructuredField = { label: string; value: FieldValuePart[]; visible?: boolean; tables?: StructuredTable[] };
 export type StructuredSection = { title: string; fields: StructuredField[]; tables: StructuredTable[];
-  details?: { title: string; fields: StructuredField[]; tables: StructuredTable[];
+  details?: { title: string; sections?: StructuredSection[]; fields?: StructuredField[]; tables?: StructuredTable[];
     trigger?: ModalCapture["trigger"] }[]; visible?: boolean };
 export type ModalCapture = {
   trigger: { index: number; tag: string; label: string; value: string; sectionHint?: string | null; html: string; parentModalTitle?: string | null };
-  modal: { text?: string; html?: string; title: string | null; fields: StructuredField[]; tables: StructuredTable[] };
+  modal: { text?: string; html?: string; title: string | null; sections?: StructuredSection[];
+    fields?: StructuredField[]; tables?: StructuredTable[] };
   settling?: { status: "settled" | "timeout"; elapsedMs: number };
 };
 export type ScrapedDetail = {
@@ -53,7 +54,6 @@ function assertG2bUrl(value: string): URL {
   return url;
 }
 const clean = (value: string) => value.replace(/\s+/g, " ").trim();
-const nonempty = (value: string): string | null => clean(value) || null;
 
 export function extractRelatedNoticeKeys(html: string): string[] {
   const $ = cheerio.load(html);
@@ -69,101 +69,7 @@ export function extractDetailPage(html: string, pageUrl: string, fileMetadata: A
   const url = assertG2bUrl(pageUrl);
   const $ = cheerio.load(html);
   $("script, style").remove();
-  const sections: StructuredSection[] = [];
-  let active: StructuredSection | null = null;
-  const startSection = (title: string, visible?: boolean) => {
-    active = { title, fields: [], tables: [] };
-    if (visible !== undefined) active.visible = visible;
-    sections.push(active);
-    return active;
-  };
-  const target = () => active || startSection("미분류");
-  const isVisible = (node: any): boolean => isInlineVisible($, node);
-  const readCell = (cell: any): string | null => {
-    const input = cell.find("input:not([type='hidden']),textarea,select").first();
-    return nonempty(input.length ? String(input.val() ?? cell.text()) : cell.text());
-  };
-  const fieldByCell = new Map<any, StructuredField>();
-  /** 표가 있는 반복 필드는 소유 관계를 유지하도록 별도 항목으로 둡니다. */
-  const appendField = (label: string, value: FieldValuePart[], visible: boolean, ownsTable = false): StructuredField | null => {
-    if (!label) return null;
-    const bucket = target();
-    const sameLabel = bucket.fields.filter((field) => field.label === label && field.tables === undefined);
-    if (ownsTable) {
-      const field: StructuredField = { label, value, visible, tables: [] };
-      bucket.fields.push(field);
-      return field;
-    }
-    const text = fieldText(value);
-    if (text !== null) {
-      const empty = sameLabel.find((field) => fieldText(field.value) === null);
-      if (empty) {
-        empty.value = value;
-        empty.visible = visible;
-        return empty;
-      }
-      const existing = sameLabel.find((field) => fieldText(field.value) === text);
-      if (existing) return existing;
-      const field = { label, value, visible };
-      bucket.fields.push(field);
-      return field;
-    }
-    if (sameLabel.length) return sameLabel[0];
-    const field = { label, value, visible };
-    bucket.fields.push(field);
-    return field;
-  };
-  // 문서 순서대로 순회하여 바깥 필드를 등록한 다음 그 안의 표를 연결합니다.
-  const walk = (node: any): void => {
-    if (node.type !== "tag") return;
-    const element = $(node);
-    // WebSquare 섹션 제목은 필드와 표보다 앞에 있으므로 이 시점에 저장 대상을 전환합니다.
-    if (element.is(".dfbox > .fl > .df_tit")) {
-      const title = clean(element.text());
-      if (title) { startSection(title, isVisible(node)); return; }
-    }
-    if (element.is("table")) {
-      const table = extractDetailTable($, element, readCell);
-      if (table) {
-        const owner = element.parents("td").toArray().map((cell) => fieldByCell.get(cell)).find(Boolean);
-        if (owner) (owner.tables ||= []).push(table);
-        else target().tables.push(table);
-      }
-    }
-    const nearestTable = element.is("tr") ? element.closest("table") : null;
-    const ownRows = nearestTable?.find("tr").filter((_, row) => $(row).closest("table")[0] === nearestTable[0]);
-    const isGridRow = nearestTable && (/grd|grid/i.test(nearestTable.attr("id") || "") ||
-      Boolean(ownRows?.toArray().some((row) => $(row).children("th[col_id],td[col_id]").length)) ||
-      Boolean(nearestTable.children("thead").length));
-    if (element.is("tr") && nearestTable?.length && !isGridRow) {
-      const cells = element.children("th,td").toArray();
-      for (const cell of cells) {
-        const td = $(cell);
-        if (td.is("td[data-title]") && !td.is("[col_id]")) {
-          const field = appendField(clean(td.attr("data-title") || ""), extractFieldValue($, td), isVisible(cell), td.find("table").length > 0);
-          if (field) fieldByCell.set(cell, field);
-        }
-        if (td.is("th")) {
-          const next = td.next();
-          if (next.is("td") && !next.attr("data-title")) {
-            const field = appendField(clean(td.text()), extractFieldValue($, next), isVisible(cell) && isVisible(next[0]), next.find("table").length > 0);
-            if (field) fieldByCell.set(next[0], field);
-          }
-        }
-      }
-    }
-    for (const child of node.children || []) walk(child);
-  };
-  // The rendered notice lives in the sub-contents pane; body also contains navigation tables.
-  const detailRoot = $(".pop_contents > .sub_contents").filter((_, node) =>
-    $(node).find(".dfbox > .fl > .df_tit").length > 0).first();
-  if (detailRoot.length) {
-    for (const child of detailRoot.children().toArray()) {
-      if ($(child).find(".dfbox > .fl > .df_tit").length) walk(child);
-    }
-  } else {
-    walk($("body")[0]);
-  }
+  const sections = extractCommonSections(html, "page");
   const number = url.searchParams.get("bidPbancNo") || "";
   const order = url.searchParams.get("bidPbancOrd") || "";
   const attachments: Attachment[] = [];
@@ -206,6 +112,8 @@ export function extractDetailPage(html: string, pageUrl: string, fileMetadata: A
     addAttachment(name, attachmentUrl(file.atchFileSqno));
   }
   const links: ScrapedDetail["links"] = [];
+  const detailRoot = $(".pop_contents > .sub_contents").filter((_, node) =>
+    $(node).find(".dfbox > .fl > .df_tit").length > 0).first();
   // Match the section traversal scope: only heading-bearing children of the notice pane.
   // Do not fall back to the whole body, which would collect global navigation links.
   if (detailRoot.length) detailRoot.children().each((_, child) => {

@@ -565,6 +565,18 @@ describe("extractDetailPage", () => {
 });
 
 describe("extractModalStructure", () => {
+  it("상세페이지와 모달에서 같은 섹션 구조를 추출한다", () => {
+    const content = `${heading("계약정보")}<table><tr><th>계약방법</th><td data-title="계약방법">일반경쟁</td></tr></table>
+      ${heading("담당자정보")}<table><tr><td data-title="담당자">홍길동</td></tr></table>`;
+    const page = extractDetailPage(`<main>${heading("공고일반")}<table><tr><td data-title="공고명">용역</td></tr></table>${content}</main>`, url);
+    const modal = extractModalStructure(`<div role="dialog"><h2>상세조회</h2>${content}</div>`);
+    expect(modal.sections).toEqual(page.sections?.slice(1));
+  });
+
+  it("제목 없는 모달 내용을 미분류 섹션에 저장한다", () => {
+    const modal = extractModalStructure(`<div role="dialog"><h2>상세조회</h2><table><tr><td data-title="내용">안내</td></tr></table></div>`);
+    expect(modal.sections).toMatchObject([{ title: "미분류", fields: [{ label: "내용" }] }]);
+  });
   it("uses selected option labels and separates adjacent form values", () => {
     const html = `<div role="dialog"><table><tr><td data-title="계약방법"><select><option value="01" selected>일반경쟁</option></select></td></tr>
       <tr><td data-title="일시"><input value="2026-10-25"><input value="10:00"></td></tr></table></div>`;

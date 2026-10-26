@@ -2,6 +2,7 @@ import type { ScrapedDetail, StructuredField, StructuredTable } from "@/lib/g2b/
 import { safeAttachmentLink } from "@/lib/g2b/attachment-links";
 import { tableForUserDisplay } from "@/lib/g2b/structured-table";
 import { fieldText } from "@/lib/g2b/field-value";
+import { contentSections } from "@/lib/g2b/content-sections";
 
 /** 화면 문자열과 수집된 첨부파일명을 같은 기준으로 비교합니다. */
 function fileNameKey(value: string): string {
@@ -102,7 +103,8 @@ export function NoticeUserView({ detail }: { detail: ScrapedDetail | null }) {
   // 표시 가능한 값이 없는 섹션은 빈 카드로 남기지 않습니다.
   const sections = (detail.sections || []).filter((section) => section.visible !== false && (
     visibleFields(section.fields).length > 0 || section.tables.some(hasVisibleTableData) ||
-    section.details?.some((item) => visibleFields(item.fields).length > 0 || item.tables.some(hasVisibleTableData))));
+    section.details?.some((item) => contentSections(item, item.title).some((part) =>
+      visibleFields(part.fields).length > 0 || part.tables.some(hasVisibleTableData)))));
   if (!sections.length) return <p className="muted user-empty">표시할 상세 정보가 없습니다.</p>;
   return <div className="user-sections">{sections.map((section, index) => <details
     className="user-section" key={`${section.title}-${index}`} open>
@@ -111,12 +113,17 @@ export function NoticeUserView({ detail }: { detail: ScrapedDetail | null }) {
       <UserFields fields={section.fields} links={links} />
       {section.tables.map((table, tableIndex) => <UserTable table={table}
         label={`${section.title} 표 ${tableIndex + 1}`} links={links} key={tableIndex} />)}
-      {section.details?.filter((item) => visibleFields(item.fields).length > 0 ||
-        item.tables.some(hasVisibleTableData)).map((item, detailIndex) => <div className="user-linked-detail" key={detailIndex}>
+      {section.details?.filter((item) => contentSections(item, item.title).some((part) =>
+        visibleFields(part.fields).length > 0 || part.tables.some(hasVisibleTableData)))
+        .map((item, detailIndex) => <div className="user-linked-detail" key={detailIndex}>
         <h3>{item.title}</h3>
-        <UserFields fields={item.fields} links={links} />
-        {item.tables.map((table, tableIndex) => <UserTable table={table}
-          label={`${section.title} ${item.title} 표 ${tableIndex + 1}`} links={links} key={tableIndex} />)}
+        {contentSections(item, item.title).filter((part) => part.visible !== false).map((part, partIndex) =>
+          <div key={partIndex}>
+            {item.sections && <h4>{part.title}</h4>}
+            <UserFields fields={part.fields} links={links} />
+            {part.tables.map((table, tableIndex) => <UserTable table={table}
+              label={`${section.title} ${item.title} ${part.title} 표 ${tableIndex + 1}`} links={links} key={tableIndex} />)}
+          </div>)}
       </div>)}
     </div>
   </details>)}</div>;

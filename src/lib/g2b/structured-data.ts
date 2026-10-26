@@ -1,14 +1,16 @@
 import type { ModalCapture, ScrapedDetail, StructuredField, StructuredTable } from "./detail-page";
 import { fieldText } from "./field-value";
+import { contentSections } from "./content-sections";
 import { join } from "node:path";
 import { readJson, writeJsonAtomic } from "./json-store";
 
 export type IndependentDetail = {
-  schemaVersion: 2;
+  schemaVersion: 2 | 3;
   number: string;
   title: string | null;
-  fields: StructuredField[];
-  tables: StructuredTable[];
+  sections?: ScrapedDetail["sections"];
+  fields?: StructuredField[];
+  tables?: StructuredTable[];
   capturedAt: string;
   settling?: ModalCapture["settling"];
   sourceNoticeKey: string;
@@ -85,8 +87,8 @@ export function structureNoticeDetail(key: string, detail: ScrapedDetail): Struc
     if (number) {
       if (isCurrentNotice(number, key)) continue;
       independentTriggers.push({ number, trigger: capture.trigger });
-      const entity: IndependentDetail = { schemaVersion: 2, number, title, fields: capture.modal.fields,
-        tables: capture.modal.tables, capturedAt: detail.capturedAt || new Date().toISOString(),
+      const entity: IndependentDetail = { schemaVersion: 3, number, title,
+        sections: contentSections(capture.modal, title || "미분류"), capturedAt: detail.capturedAt || new Date().toISOString(),
         settling: capture.settling, sourceNoticeKey: key, trigger: capture.trigger };
       const stage = number.slice(3, 5);
       const [numbers, entities] = stage === "DD" ? [orderPlanNumbers, orderPlans] :
@@ -106,14 +108,15 @@ export function structureNoticeDetail(key: string, detail: ScrapedDetail): Struc
       continue;
     }
     const owner = owners[0];
-    sections[owner].details.push({ title: title || capture.trigger.label, fields: capture.modal.fields,
-      tables: capture.modal.tables, trigger: capture.trigger });
+    sections[owner].details.push({ title: title || capture.trigger.label,
+      ...(capture.modal.sections ? { sections: capture.modal.sections } :
+        { fields: capture.modal.fields || [], tables: capture.modal.tables || [] }), trigger: capture.trigger });
     if (title) {
       const titleOwners = sectionByModalTitle.get(title) || new Set<number>();
       titleOwners.add(owner);
       sectionByModalTitle.set(title, titleOwners);
     }
-    if (!hasContent(capture.modal.fields, capture.modal.tables))
+    if (!contentSections(capture.modal).some((section) => hasContent(section.fields, section.tables)))
       warnings.push(`${key}: ${title || capture.trigger.label}에 저장할 구조화된 값이 없습니다.`);
   }
   const nonemptySections = sections?.filter((section) =>
@@ -164,8 +167,8 @@ export async function saveIndependentDetails(dataDir: string, structured: Struct
         }
       }
       const path = join(dataDir, folder, `${entity.number}.json`);
-      // 다른 공고가 먼저 기록한 번호는 수집 시각과 무관하게 기존 값을 사용합니다.
-      try { await readJson<IndependentDetail>(path); continue; }
+      // 현재 형식으로 수집한 값은 유지하고 이전 형식만 갱신합니다.
+      try { if ((await readJson<IndependentDetail>(path)).schemaVersion === 3) continue; }
       catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       }

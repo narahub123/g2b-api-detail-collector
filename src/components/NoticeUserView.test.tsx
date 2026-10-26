@@ -30,6 +30,20 @@ const detail: ScrapedDetail = {
 describe("NoticeUserView", () => {
   afterEach(cleanup);
 
+  it("연결된 모달의 두 섹션 제목과 값을 표시한다", () => {
+    const source: ScrapedDetail = { ...detail, sections: [{ title: "공지사항", fields: [], tables: [], details: [{
+      title: "상세조회", sections: [
+        { title: "계약정보", fields: [{ label: "계약방법", value: [{ text: "일반경쟁", visible: true }] }], tables: [] },
+        { title: "담당자정보", fields: [{ label: "담당자", value: [{ text: "홍길동", visible: true }] }], tables: [] }
+      ]
+    }] }] };
+    render(<NoticeUserView detail={source} />);
+    expect(screen.getByRole("heading", { name: "계약정보" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "담당자정보" })).toBeInTheDocument();
+    expect(screen.getByText("일반경쟁")).toBeInTheDocument();
+    expect(screen.getByText("홍길동")).toBeInTheDocument();
+  });
+
 
   it("shows only visible pieces of a field and omits its hidden empty table", () => {
     const source: ScrapedDetail = { ...detail, sections: [{ title: "투찰제한-일반", visible: true, tables: [],

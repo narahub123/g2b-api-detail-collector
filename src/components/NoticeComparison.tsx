@@ -4,6 +4,7 @@ import { apiFieldDisplayName } from "@/lib/g2b/api-field-labels";
 import type { IndependentReference } from "@/lib/g2b/notices";
 import { tableForDisplay } from "@/lib/g2b/structured-table";
 import { safeAttachmentLink } from "@/lib/g2b/attachment-links";
+import { contentSections } from "@/lib/g2b/content-sections";
 import { fieldText } from "@/lib/g2b/field-value";
 
 function safeLink(value: string): string | null {
@@ -103,8 +104,13 @@ export function NoticeComparison({ api, detail, orderPlans = [], preSpecificatio
             {section.details?.map((item, detailIndex) => <div className="comparison-detail-block" key={detailIndex}>
               <h4>{item.title}</h4>
               {item.trigger && <ClickSources triggers={[item.trigger]} />}
-              <FieldList fields={item.fields} group={`${section.title} ${item.title}`} />
-              <TableList tables={item.tables} group={`${section.title} ${item.title} ${detailIndex + 1}`} />
+              {contentSections(item, item.title).map((part, partIndex) => <div key={partIndex}>
+                {item.sections && <h5>{part.title}</h5>}
+                <FieldList fields={part.fields} group={`${section.title} ${item.title} ${part.title}`} />
+                <TableList tables={part.tables} group={item.sections
+                  ? `${section.title} ${item.title} ${part.title} ${detailIndex + 1}`
+                  : `${section.title} ${item.title} ${detailIndex + 1}`} />
+              </div>)}
             </div>)}
           </details>) : <p className="muted comparison-empty">섹션별 수집 자료가 없습니다.</p>}
         </div>
@@ -123,11 +129,16 @@ export function NoticeComparison({ api, detail, orderPlans = [], preSpecificatio
         <section className="comparison-group" id="comparison-clicked" aria-label="클릭 상세 정보"><h3>클릭 상세 정보 · {captures.length}개</h3>
           {captures.length ? captures.map((capture, index) => <details className="comparison-card" key={`${capture.trigger.index}-${index}`} open>
             <summary>{capture.trigger.label} · {capture.modal.title || "제목 없음"}
-              <span>필드 {capture.modal.fields.length} · 표 {capture.modal.tables.length}</span></summary>
+              <span>필드 {contentSections(capture.modal).reduce((count, part) => count + part.fields.length, 0)} · 표 {contentSections(capture.modal).reduce((count, part) => count + part.tables.length, 0)}</span></summary>
             {capture.trigger.parentModalTitle && <p className="muted">{capture.trigger.parentModalTitle}에서 열림</p>}
             {capture.settling?.status === "timeout" && <p className="comparison-failures">값 로딩 확인 시간 초과 · 일부 값이 누락되었을 수 있습니다.</p>}
-            <FieldList fields={capture.modal.fields} />
-            <TableList tables={capture.modal.tables} group={capture.trigger.label} />
+            {contentSections(capture.modal, capture.modal.title || capture.trigger.label).map((part, partIndex) =>
+              <div key={partIndex}>
+                {capture.modal.sections && <h4>{part.title}</h4>}
+                <FieldList fields={part.fields} />
+                <TableList tables={part.tables} group={capture.modal.sections
+                  ? `${capture.trigger.label} ${part.title}` : capture.trigger.label} />
+              </div>)}
             {capture.modal.text && <div className="comparison-text-block"><h4>팝업 본문</h4><p>{capture.modal.text}</p></div>}
           </details>) : <p className="muted comparison-empty">수집된 클릭 상세 정보가 없습니다.</p>}
           {detail.modalDiscovery?.failures.length ? <p className="comparison-failures">수집 실패 {detail.modalDiscovery.failures.length}건: {detail.modalDiscovery.failures.join(" · ")}</p> : null}
@@ -138,8 +149,12 @@ export function NoticeComparison({ api, detail, orderPlans = [], preSpecificatio
             <summary>{item.kind} · {item.number}</summary>
             <ClickSources triggers={item.triggers?.length ? item.triggers : item.detail?.trigger ? [item.detail.trigger] : []} />
             {item.detail?.sourceNoticeKey && <p className="muted">최초 저장 공고: {item.detail.sourceNoticeKey}</p>}
-            {item.detail ? <><FieldList fields={item.detail.fields} />
-              <TableList tables={item.detail.tables} group={`${item.kind} ${item.number}`} /></>
+            {item.detail ? contentSections(item.detail, item.detail.title || item.number).map((part, partIndex) =>
+              <div key={partIndex}>
+                {item.detail?.sections && <h4>{part.title}</h4>}
+                <FieldList fields={part.fields} />
+                <TableList tables={part.tables} group={`${item.kind} ${item.number} ${part.title}`} />
+              </div>)
               : item.noticeKey ? <a href={`/bids/${encodeURIComponent(item.noticeKey)}`}>{item.number} 공고 보기</a>
               : <p className="muted comparison-empty">참조한 상세 정보가 없습니다.</p>}
           </details>)}
