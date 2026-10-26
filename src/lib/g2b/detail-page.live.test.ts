@@ -23,6 +23,15 @@ it.skipIf(!process.env.LIVE_G2B)("aligns the live attachment grid using colgroup
     .toBe(shown.headerRows[0].reduce((width, cell) => width + cell.colspan, 0));
 }, 120_000);
 
+it.skipIf(!process.env.LIVE_G2B)("실제 R26BK01784794 사전규격 모달의 링크 없는 파일 셀을 수집한다", async () => {
+  const key = "R26BK01784794--000";
+  const { detail } = await scrapeDetailPage(serviceDetailUrl("R26BK01784794", "000"));
+  const capture = detail.modalCaptures?.find((item) => item.modal.title === "사전규격상세조회");
+  const attachment = capture?.modal.attachments?.find((item) => item.name.includes("제안요청서.hwpx"));
+  expect(attachment?.url).toMatch(/^\/api\/attachments\/R26BK01784794--000\?fileNo=[0-9a-f-]+&seq=1&modal=\d+$/);
+  expect(detail.modalAttachmentSources).toContainEqual({ url: attachment?.url, path: capture?.trigger.path });
+}, 180_000);
+
 it.skipIf(!process.env.LIVE_G2B)("resolves the R26BK01765444 proposal document and downloads it through the app", async () => {
   const key = "R26BK01765444--000";
   const fileNo = "de557b90-5d96-430d-9dd4-06b2d7b3627c";

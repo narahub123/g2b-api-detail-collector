@@ -7,8 +7,7 @@ export async function collectClickDownloads(page: import("playwright-core").Page
     for (const cell of cells) {
       if (!(cell instanceof HTMLElement) || !cell.id) continue;
       const action = cell.querySelector("a,button");
-      if (!action) continue;
-      const href = action.getAttribute("href");
+      const href = action?.getAttribute("href");
       if (href && !href.startsWith("#") && !/^javascript:/i.test(href)) continue;
       const table = cell.closest("table[id$='_body_table']");
       const rowMatch = /_cell_(\d+)_\d+$/.exec(cell.id);

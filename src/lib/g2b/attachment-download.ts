@@ -55,10 +55,12 @@ export async function openG2bDownload(
     if (rows.length !== 1) throw new MissingAttachmentError("첨부파일을 고유하게 식별할 수 없습니다.");
     const cellId = rows[0].cellId;
     if (!/^[A-Za-z0-9_-]+$/.test(cellId)) throw new MissingAttachmentError("첨부파일 셀을 식별할 수 없습니다.");
+    // WebSquare 파일 셀은 링크 없이 셀 자체의 클릭 이벤트로 다운로드를 시작하기도 합니다.
+    const cellSelector = `[id=${JSON.stringify(cellId)}]`;
+    const target = page.locator(`${cellSelector} a, ${cellSelector} button, ${cellSelector}:not(:has(a,button))`).first();
     const [download] = await Promise.all([
       page.waitForEvent("download", { timeout: 45_000 }),
-      page.locator(`[id=${JSON.stringify(cellId)}] a, [id=${JSON.stringify(cellId)}] button`).first()
-        .dispatchEvent("click", undefined, { timeout: 10_000 })
+      target.dispatchEvent("click", undefined, { timeout: 10_000 })
     ]);
     await awaitCompletedDownload(download, signal);
     const stream = await download.createReadStream();

@@ -34,7 +34,7 @@ it("href 없는 모달 파일 셀도 공통 첨부 식별자로 저장한다", a
     await page.setContent(`<a id="open" href="javascript:void(null)">상세 규격</a>
       <div id="specDialog" role="dialog" style="display:none"><h2>상세 규격</h2><button data-close>닫기</button>
         <table id="specGrid_body_table"><tr><th col_id="orgnlAtchFileNm">파일명</th></tr>
-          <tr><td id="specGrid_cell_0_0" col_id="orgnlAtchFileNm"><a>규격서.hwp</a></td></tr></table></div>
+          <tr><td id="specGrid_cell_0_0" col_id="orgnlAtchFileNm"><nobr>규격서.hwp</nobr></td></tr></table></div>
       <script>
         window.$w = { getComponentById: () => ({ getRowCount: () => 1, getRowJSON: () => ({
           fileUntyAtchFileNo: 'de557b90-5d96-430d-9dd4-06b2d7b3627c', fileAtchFileSqno: 2 }) }) };
