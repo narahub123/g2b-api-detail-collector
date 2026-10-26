@@ -43,10 +43,10 @@ CREATE INDEX IF NOT EXISTS notices_amount_idx ON public.notices (amount);
 
 -- 여러 공고가 공유할 수 있는 번호별 독립 상세이며, 먼저 저장한 내용을 유지합니다.
 CREATE TABLE IF NOT EXISTS public.independent_details (
-  -- 발주계획·사전규격 등 독립 상세의 나라장터 번호입니다.
+  -- 번호별 상세에는 나라장터 번호, 번호 없는 개찰 상세에는 공고·재입찰 조합 키를 사용합니다.
   detail_key text PRIMARY KEY,
-  -- order-plan=발주계획, pre-specification=사전규격, other=그 밖의 상세입니다.
-  category text NOT NULL CHECK (category IN ('order-plan', 'pre-specification', 'other')),
+  -- order-plan=발주계획, pre-specification=사전규격, other=그 밖의 상세, opening=개찰입니다.
+  category text NOT NULL CHECK (category IN ('order-plan', 'pre-specification', 'other', 'opening')),
   -- 제목·필드·표·수집시각·출처 공고를 포함하는 구조화 자료입니다.
   payload jsonb NOT NULL
 );
@@ -57,7 +57,7 @@ CREATE TABLE IF NOT EXISTS public.notice_independent_refs (
   -- 참조할 독립 상세 번호이며, 내용이 아직 없으면 독립 상세 행이 없을 수 있습니다.
   detail_key text NOT NULL,
   -- 참조한 독립 상세의 종류입니다.
-  category text NOT NULL CHECK (category IN ('order-plan', 'pre-specification', 'other')),
+  category text NOT NULL CHECK (category IN ('order-plan', 'pre-specification', 'other', 'opening')),
   -- 같은 공고·종류에서 발견된 순서이며 0부터 시작합니다.
   position integer NOT NULL,
   -- 번호를 발견한 클릭 요소의 위치·라벨·값을 담은 JSON 배열입니다.
@@ -97,8 +97,8 @@ COMMENT ON COLUMN public.notices.qualifications IS '상세 페이지의 입찰�
 COMMENT ON COLUMN public.notices.updated_at IS '이 공고 행을 처음 만들거나 마지막으로 갱신한 DB 시각.';
 
 COMMENT ON TABLE public.independent_details IS '여러 공고가 참조할 수 있는 번호별 독립 상세. 번호별 첫 수집 내용을 유지한다.';
-COMMENT ON COLUMN public.independent_details.detail_key IS '독립 상세의 나라장터 원본 번호를 문자열 식별자로 사용한다. 이 테이블에서 고유하다.';
-COMMENT ON COLUMN public.independent_details.category IS '독립 상세 종류: order-plan은 발주계획, pre-specification은 사전규격, other는 그 밖의 번호별 상세.';
+COMMENT ON COLUMN public.independent_details.detail_key IS '번호별 상세는 나라장터 번호, 번호 없는 개찰 상세는 공고·재입찰 조합 키를 사용한다. 이 테이블에서 고유하다.';
+COMMENT ON COLUMN public.independent_details.category IS '독립 상세 종류: order-plan은 발주계획, pre-specification은 사전규격, other는 그 밖의 번호별 상세, opening은 개찰 상세.';
 COMMENT ON COLUMN public.independent_details.payload IS '제목·필드·표·수집시각·출처 공고 등을 포함한 구조화된 독립 상세 JSON.';
 
 COMMENT ON TABLE public.notice_independent_refs IS '공고가 참조하는 번호별 독립 상세와 그 클릭 출처를 기록한다. 상세 재수집 시 해당 공고의 참조를 교체한다.';

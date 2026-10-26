@@ -16,7 +16,8 @@ export default async function BidComparisonPage({ params }: { params: Promise<{ 
       <p>{record.normalized.title.value || "제목 정보 없음"} · {record.normalized.number} · {record.normalized.order}차</p>
     </div>
     <NoticeComparison api={record.api} detail={record.detail} orderPlans={record.orderPlans}
-      preSpecifications={record.preSpecifications} otherDetails={record.otherDetails} />
+      preSpecifications={record.preSpecifications} otherDetails={record.otherDetails}
+      openingDetails={record.openingDetails} />
     <footer>데이터 출처: 조달청 나라장터 입찰공고정보서비스 · 상세 정보는 원문을 함께 확인하세요.</footer>
   </main>;
 }

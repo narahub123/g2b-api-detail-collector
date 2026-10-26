@@ -26,6 +26,19 @@ const detail: ScrapedDetail = {
 };
 
 describe("NoticeComparison", () => {
+  it("개찰 독립 상세와 그 안의 하위 모달을 함께 표시합니다", () => {
+    render(<NoticeComparison api={null} detail={detail} openingDetails={[{
+      number: "opening--R26BK1--000--002",
+      detail: { schemaVersion: 5, number: "opening--R26BK1--000--002", title: "개찰결과상세조회",
+        sections: [{ title: "개찰결과상세조회", fields: [{ label: "개찰상태", value: [{ text: "완료", visible: true }] }],
+          tables: [], details: [{ title: "예비가격산정결과", fields: [{ label: "예정가격", value: [{ text: "100원", visible: true }] }], tables: [] }] }],
+        capturedAt: "2026-10-25T00:00:00Z", sourceNoticeKey: "R26BK1--000" }
+    }]} />);
+    const independent = screen.getByRole("region", { name: "독립 상세 정보" });
+    expect(within(independent).getByText("개찰 · opening--R26BK1--000--002")).toBeInTheDocument();
+    expect(within(independent).getByText("예비가격산정결과")).toBeInTheDocument();
+    expect(within(independent).getByText("100원")).toBeInTheDocument();
+  });
   it("공고와 모달 표의 파일명을 확인된 다운로드 URL로 표시한다", () => {
     const source: ScrapedDetail = { ...detail,
       attachments: [{ name: "공고문.pdf", url: "https://www.g2b.go.kr/notice.pdf" }],

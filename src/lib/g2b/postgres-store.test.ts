@@ -25,6 +25,19 @@ function fakePool(failOn?: string) {
 }
 
 describe("noticeSummary", () => {
+  it("개찰 독립 상세를 opening 분류와 참조로 저장합니다", async () => {
+    const statements = fakePool();
+    const key = "R26BK01774553--000";
+    const opening = { schemaVersion: 5 as const, number: `opening--${key}--002`, title: "개찰결과상세조회",
+      sections: [], capturedAt: "2026-10-25T00:00:00Z", sourceNoticeKey: key };
+    await saveStoredNotice(key, { api: null, detail: null }, {
+      detail: { sourceUrl: "https://www.g2b.go.kr/", attachments: [], links: [] },
+      orderPlanNumbers: [], preSpecificationNumbers: [], otherDetailNumbers: [], openingDetailKeys: [opening.number],
+      orderPlans: [], preSpecifications: [], otherDetails: [], openingDetails: [opening], independentTriggers: [], warnings: []
+    });
+    expect(statements.find((item) => item.sql.includes("INSERT INTO public.independent_details"))?.values?.[1]).toBe("opening");
+    expect(statements.find((item) => item.sql.includes("INSERT INTO public.notice_independent_refs"))?.values?.[1]).toBe(opening.number);
+  });
   it("keeps searchable values while retaining the original notice sources", () => {
     const summary = noticeSummary("R26BK1--000", {
       api: { bidNtceNo: "R26BK1", bidNtceOrd: "000", bidNtceNm: "연구 용역", bidNtceDt: "202610250930", presmptPrce: "1,200" },
@@ -68,13 +81,13 @@ describe("noticeSummary", () => {
       capturedAt: "2026-10-25T00:00:00Z", sourceNoticeKey: key };
     await saveStoredNotice(key, { api: null, detail: null }, {
       detail: { sourceUrl: "https://www.g2b.go.kr/", attachments: [], links: [] },
-      orderPlanNumbers: [detail.number], preSpecificationNumbers: [], otherDetailNumbers: [],
-      orderPlans: [detail], preSpecifications: [], otherDetails: [], independentTriggers: [], warnings: []
+      orderPlanNumbers: [detail.number], preSpecificationNumbers: [], otherDetailNumbers: [], openingDetailKeys: [],
+      orderPlans: [detail], preSpecifications: [], otherDetails: [], openingDetails: [], independentTriggers: [], warnings: []
     });
     const insert = statements.find((item) => item.sql.includes("INSERT INTO public.independent_details"));
     expect(insert?.sql).toContain("DO UPDATE SET payload=EXCLUDED.payload");
     expect(insert?.sql).toContain("payload->>'schemaVersion'");
-    expect(insert?.sql).toContain("IS DISTINCT FROM '4'");
+    expect(insert?.sql).toContain("IS DISTINCT FROM '5'");
   });
 
   it("rolls back a failed detail and reference update", async () => {
@@ -84,8 +97,8 @@ describe("noticeSummary", () => {
       capturedAt: "2026-10-25T00:00:00Z", sourceNoticeKey: key };
     await expect(saveStoredNotice(key, { api: { bidNtceNo: "R26BK1", bidNtceOrd: "000" }, detail: null }, {
       detail: { sourceUrl: "https://www.g2b.go.kr/", attachments: [], links: [] },
-      orderPlanNumbers: [detail.number], preSpecificationNumbers: [], otherDetailNumbers: [],
-      orderPlans: [detail], preSpecifications: [], otherDetails: [], independentTriggers: [], warnings: []
+      orderPlanNumbers: [detail.number], preSpecificationNumbers: [], otherDetailNumbers: [], openingDetailKeys: [],
+      orderPlans: [detail], preSpecifications: [], otherDetails: [], openingDetails: [], independentTriggers: [], warnings: []
     })).rejects.toThrow("DB 쓰기 실패");
     expect(statements.at(-1)?.sql).toBe("ROLLBACK");
     expect(statements.some((item) => item.sql === "COMMIT")).toBe(false);

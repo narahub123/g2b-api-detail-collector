@@ -129,6 +129,7 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies): 
     record.orderPlanNumbers = structured.orderPlanNumbers;
     record.preSpecificationNumbers = structured.preSpecificationNumbers;
     record.otherDetailNumbers = structured.otherDetailNumbers;
+    record.openingDetailKeys = structured.openingDetailKeys;
     record.independentTriggers = structured.independentTriggers;
     record.detailError = null;
     await saveRecord(key, record, structured);
@@ -262,6 +263,7 @@ async function runRefresh(job: CollectionJob, deps: CollectionDependencies): Pro
       const updated: StoredNotice = { ...record, key: result.key, detail: structured.detail,
         orderPlanNumbers: structured.orderPlanNumbers, preSpecificationNumbers: structured.preSpecificationNumbers,
         otherDetailNumbers: structured.otherDetailNumbers,
+        openingDetailKeys: structured.openingDetailKeys,
         independentTriggers: structured.independentTriggers,
         detailError: null };
       updated.normalized = normalizeNotice(updated.api, updated.detail, { number, order });

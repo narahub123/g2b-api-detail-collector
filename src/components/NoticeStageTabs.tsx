@@ -14,7 +14,8 @@ const stages: { id: Stage; label: string }[] = [
 ];
 
 /** 기존 공고 본문은 유지하고, 상단 정보 탐색용 탭만 전환합니다. */
-export function NoticeStageTabs({ children, plan, spec }: { children: ReactNode; plan?: ReactNode; spec?: ReactNode }) {
+export function NoticeStageTabs({ children, plan, spec, opening }: { children: ReactNode; plan?: ReactNode;
+  spec?: ReactNode; opening?: ReactNode }) {
   const [active, setActive] = useState<Stage>("notice");
   return <section className="notice-stage-layout" aria-label="입찰 단계별 정보">
     <div className="notice-stage-tabs" role="tablist" aria-label="입찰 정보 단계">
@@ -28,6 +29,7 @@ export function NoticeStageTabs({ children, plan, spec }: { children: ReactNode;
       aria-labelledby={`notice-tab-${id}`} hidden={active !== id} tabIndex={0}
       className="notice-stage-panel">
       {id === "notice" ? children : id === "plan" && plan ? plan : id === "spec" && spec ? spec :
+        id === "opening" && opening ? opening :
         <p className="notice-stage-pending">해당 단계의 상세 정보는 다음 데이터 연결 작업에서 표시됩니다.</p>}
     </div>)}
   </section>;

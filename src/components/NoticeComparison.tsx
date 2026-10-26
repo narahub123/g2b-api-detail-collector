@@ -83,8 +83,9 @@ function ClickSources({ triggers }: { triggers: ModalCapture["trigger"][] }) {
  * @param props 읽은 공고 자료와 번호로 연결한 독립 상세 참조
  * @returns 원문 필드 및 참조 상세를 표시하는 비교 화면
  */
-export function NoticeComparison({ api, detail, orderPlans = [], preSpecifications = [], otherDetails = [] }: { api: ApiNotice | null; detail: ScrapedDetail | null;
-  orderPlans?: IndependentReference[]; preSpecifications?: IndependentReference[]; otherDetails?: IndependentReference[] }) {
+export function NoticeComparison({ api, detail, orderPlans = [], preSpecifications = [], otherDetails = [], openingDetails = [] }: { api: ApiNotice | null; detail: ScrapedDetail | null;
+  orderPlans?: IndependentReference[]; preSpecifications?: IndependentReference[]; otherDetails?: IndependentReference[];
+  openingDetails?: IndependentReference[] }) {
   const apiFields = Object.entries(api || {}).map(([label, value]) => ({ label,
     value: [{ text: displayValue(value), visible: true }] }));
   const detailFieldCount = detail?.sections?.reduce((count, section) => count + section.fields.length, 0) || 0;
@@ -92,7 +93,8 @@ export function NoticeComparison({ api, detail, orderPlans = [], preSpecificatio
   const captures = [...(detail?.modalCaptures || []), ...(detail?.baseAmountCaptures || []), ...(detail?.changeNoticeCaptures || [])];
   const independent = [...orderPlans.map((item) => ({ ...item, kind: "발주계획" })),
     ...preSpecifications.map((item) => ({ ...item, kind: "사전규격" })),
-    ...otherDetails.map((item) => ({ ...item, kind: item.number.slice(3, 5) === "TA" ? "계약" : "입찰공고" }))];
+    ...otherDetails.map((item) => ({ ...item, kind: item.number.slice(3, 5) === "TA" ? "계약" : "입찰공고" })),
+    ...openingDetails.map((item) => ({ ...item, kind: "개찰" }))];
 
   return <>
     <nav className="comparison-jumps" aria-label="비교 항목 바로가기">
@@ -173,6 +175,16 @@ export function NoticeComparison({ api, detail, orderPlans = [], preSpecificatio
                 <FieldList fields={part.fields} links={attachmentLinkMap(item.detail?.attachments || [])} />
                 <TableList tables={part.tables} group={`${item.kind} ${item.number} ${part.title}`}
                   links={attachmentLinkMap(item.detail?.attachments || [])} />
+                {part.details?.map((child, childIndex) => <div className="comparison-detail-block" key={childIndex}>
+                  <h5>{child.title}</h5>
+                  {child.trigger && <ClickSources triggers={[child.trigger]} />}
+                  {contentSections(child, child.title).map((childPart, childPartIndex) => <div key={childPartIndex}>
+                    {child.sections && <h6>{childPart.title}</h6>}
+                    <FieldList fields={childPart.fields} links={attachmentLinkMap(child.attachments || [])} />
+                    <TableList tables={childPart.tables} group={`${item.kind} ${child.title} ${childPart.title}`}
+                      links={attachmentLinkMap(child.attachments || [])} />
+                  </div>)}
+                </div>)}
               </div>)
               : item.noticeKey ? <a href={`/bids/${encodeURIComponent(item.noticeKey)}`}>{item.number} 공고 보기</a>
               : <p className="muted comparison-empty">참조한 상세 정보가 없습니다.</p>}

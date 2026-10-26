@@ -23,7 +23,8 @@ export default async function BidUserViewPage({ params }: { params: Promise<{ ke
     </div>
     <NoticeStageTabs
       plan={<IndependentDetailsView references={record.orderPlans} />}
-      spec={<IndependentDetailsView references={record.preSpecifications} />}>
+      spec={<IndependentDetailsView references={record.preSpecifications} />}
+      opening={record.openingDetails.length ? <IndependentDetailsView references={record.openingDetails} /> : undefined}>
       <RelatedNoticeLine currentKey={key} relatedKeys={record.relatedNoticeKeys} />
       <NoticeUserView detail={record.detail} />
     </NoticeStageTabs>

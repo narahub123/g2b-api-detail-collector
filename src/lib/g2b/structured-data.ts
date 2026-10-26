@@ -1,6 +1,7 @@
 import type { ModalCapture, ScrapedDetail, StructuredField, StructuredTable } from "./detail-page";
 import { fieldText } from "./field-value";
 import { contentSections } from "./content-sections";
+import { classifyTabModal } from "./tab-modal-classification";
 import { join } from "node:path";
 import { readJson, writeJsonAtomic } from "./json-store";
 
@@ -23,9 +24,11 @@ export type StructuredNoticeDetail = {
   orderPlanNumbers: string[];
   preSpecificationNumbers: string[];
   otherDetailNumbers: string[];
+  openingDetailKeys: string[];
   orderPlans: IndependentDetail[];
   preSpecifications: IndependentDetail[];
   otherDetails: IndependentDetail[];
+  openingDetails: IndependentDetail[];
   independentTriggers: { number: string; trigger: ModalCapture["trigger"] }[];
   warnings: string[];
 };
@@ -64,9 +67,11 @@ export function structureNoticeDetail(key: string, detail: ScrapedDetail): Struc
   const orderPlans: IndependentDetail[] = [];
   const preSpecifications: IndependentDetail[] = [];
   const otherDetails: IndependentDetail[] = [];
+  const openingDetails: IndependentDetail[] = [];
   const orderPlanNumbers: string[] = [];
   const preSpecificationNumbers: string[] = [];
   const otherDetailNumbers: string[] = [];
+  const openingDetailKeys: string[] = [];
   const independentTriggers: StructuredNoticeDetail["independentTriggers"] = [];
   const sections = detail.sections?.map((section) => ({ ...section, details: [...(section.details || [])] }));
   const modalCaptures: ModalCapture[] = [];
@@ -75,6 +80,7 @@ export function structureNoticeDetail(key: string, detail: ScrapedDetail): Struc
   // Such a section is not confirmed empty, even if its visible fields have no values.
   const unresolvedSectionTitles = new Set<string>();
   const sectionByModalTitle = new Map<string, Set<number>>();
+  const independentParents = new Map<string, { detail: IndependentDetail; path?: ModalCapture["trigger"]["path"] }[]>();
   for (const original of [...(detail.modalCaptures || []), ...(detail.baseAmountCaptures || []),
     ...(detail.changeNoticeCaptures || [])]) {
     const sectionHint = original.trigger.sectionHint;
@@ -84,18 +90,61 @@ export function structureNoticeDetail(key: string, detail: ScrapedDetail): Struc
     const title = capture.modal.title;
     const number = numberedTrigger(capture.trigger.value);
 
+    /** 기존 독립 상세 형식에 모달의 구조화된 내용을 담습니다. */
+    const independentDetail = (detailKey: string): IndependentDetail => ({ schemaVersion: 5, number: detailKey, title,
+      sections: contentSections(capture.modal, title || "미분류").map((section) => ({ ...section,
+        details: [...(section.details || [])] })),
+      attachments: capture.modal.attachments || [], capturedAt: detail.capturedAt || new Date().toISOString(),
+      settling: capture.settling, sourceNoticeKey: key, trigger: capture.trigger });
+
     // 번호가 있는 클릭은 현재 공고의 중복을 건너뛰고 나머지를 독립 상세 후보로 분류합니다.
     if (number) {
       if (isCurrentNotice(number, key)) continue;
       independentTriggers.push({ number, trigger: capture.trigger });
-      const entity: IndependentDetail = { schemaVersion: 5, number, title,
-        sections: contentSections(capture.modal, title || "미분류"),
-        attachments: capture.modal.attachments || [], capturedAt: detail.capturedAt || new Date().toISOString(),
-        settling: capture.settling, sourceNoticeKey: key, trigger: capture.trigger };
+      const entity = independentDetail(number);
       const stage = number.slice(3, 5);
       const [numbers, entities] = stage === "DD" ? [orderPlanNumbers, orderPlans] :
         stage === "BD" ? [preSpecificationNumbers, preSpecifications] : [otherDetailNumbers, otherDetails];
       if (!numbers.includes(number)) { numbers.push(number); entities.push(entity); }
+      continue;
+    }
+
+    // 유형별 탭 모달은 재입찰번호가 확인될 때만 공고 본문에서 분리합니다.
+    const tab = classifyTabModal(key, capture, sections || []);
+    if (tab.match?.category === "opening") {
+      const entity = independentDetail(tab.match.key);
+      let stored = openingDetails.find((item) => item.number === entity.number);
+      if (!stored) {
+        openingDetailKeys.push(entity.number);
+        openingDetails.push(entity);
+        stored = entity;
+      }
+      if (title) {
+        const parents = independentParents.get(title) || [];
+        parents.push({ detail: stored, path: capture.trigger.path });
+        independentParents.set(title, parents);
+      }
+      independentTriggers.push({ number: entity.number, trigger: capture.trigger });
+      continue;
+    }
+    if (tab.configured) warnings.push(`${key}: ${title || capture.trigger.label}의 재입찰번호를 확인할 수 없어 종속 상세로 유지합니다.`);
+
+    // 하위 모달은 부모의 저장 키를 따라가며 독립 상세 안에 연결합니다.
+    const parentCandidates = independentParents.get(capture.trigger.parentModalTitle || "") || [];
+    const matchingParents = parentCandidates.filter((parent) => {
+      if (!parent.path?.length || !capture.trigger.path?.length) return parentCandidates.length === 1;
+      return parent.path.every((step, index) => JSON.stringify(step) === JSON.stringify(capture.trigger.path?.[index]));
+    });
+    if (matchingParents.length === 1) {
+      const parent = matchingParents[0].detail;
+      const child = { title: title || capture.trigger.label,
+        ...(capture.modal.sections ? { sections: capture.modal.sections } :
+          { fields: capture.modal.fields || [], tables: capture.modal.tables || [] }),
+        attachments: capture.modal.attachments || [], trigger: capture.trigger };
+      const target = parent.sections?.find((section) => section.title === capture.trigger.sectionHint) ||
+        (parent.sections?.length === 1 ? parent.sections[0] : undefined);
+      if (target) (target.details ||= []).push(child);
+      else (parent.sections ||= []).push({ title: "하위 상세", fields: [], tables: [], details: [child] });
       continue;
     }
 
@@ -143,8 +192,8 @@ export function structureNoticeDetail(key: string, detail: ScrapedDetail): Struc
   delete structured.baseAmountCaptures;
   delete structured.changeNoticeCaptures;
   delete structured.text;
-  return { detail: structured, orderPlanNumbers, preSpecificationNumbers, otherDetailNumbers,
-    orderPlans, preSpecifications, otherDetails, independentTriggers, warnings };
+  return { detail: structured, orderPlanNumbers, preSpecificationNumbers, otherDetailNumbers, openingDetailKeys,
+    orderPlans, preSpecifications, otherDetails, openingDetails, independentTriggers, warnings };
 }
 
 /**
@@ -155,7 +204,8 @@ export function structureNoticeDetail(key: string, detail: ScrapedDetail): Struc
  */
 export async function saveIndependentDetails(dataDir: string, structured: StructuredNoticeDetail): Promise<void> {
   for (const [folder, entities] of [["order-plans", structured.orderPlans],
-    ["pre-specifications", structured.preSpecifications], ["independent-details", structured.otherDetails]] as const) {
+    ["pre-specifications", structured.preSpecifications], ["independent-details", structured.otherDetails],
+    ["independent-details", structured.openingDetails]] as const) {
     for (const entity of entities) {
       if (folder === "independent-details") {
         const match = /^(R\d{2}BK\d{8})-(\d{3})$/.exec(entity.number);

@@ -29,6 +29,67 @@ const dirs: string[] = [];
 afterEach(async () => { await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))); });
 
 describe("structureNoticeDetail", () => {
+  it("개찰결과와 하위 모달을 재입찰번호별 독립 상세로 묶습니다", () => {
+    const source = detail([]);
+    source.sections?.push({ title: "입찰진행현황", fields: [], tables: [{
+      headerRows: [[
+        { value: "재입찰번호", column: 0, rowspan: 1, colspan: 1 },
+        { value: "진행현황", column: 1, rowspan: 1, colspan: 1 }
+      ]],
+      bodyRows: [[
+        { value: "002", column: 0, rowspan: 1, colspan: 1 },
+        { value: "개찰완료", column: 1, rowspan: 1, colspan: 1 }
+      ]]
+    }] });
+    const parent = capture("개찰결과상세조회", [{ label: "입찰공고번호", value: [{ text: "R26BK01774553-000", visible: true }] }], "입찰진행현황", "개찰완료");
+    parent.trigger.html = '<button id="gridViewPgst_button_0_1">개찰완료</button>';
+    parent.trigger.path = [{ id: "gridViewPgst_button_0_1", index: 0, label: "개찰완료", value: "개찰완료" }];
+    const child = capture("예비가격산정결과", [{ label: "예정가격", value: [{ text: "100원", visible: true }] }], "공고정보", "보기");
+    child.trigger.parentModalTitle = "개찰결과상세조회";
+    child.trigger.path = [...parent.trigger.path, { id: "reserve", index: 1, label: "예비가격", value: "보기" }];
+    source.modalCaptures = [parent, child];
+
+    const result = structureNoticeDetail("R26BK01774553--000", source);
+
+    expect(result.openingDetailKeys).toEqual(["opening--R26BK01774553--000--002"]);
+    expect(result.openingDetails[0]).toMatchObject({ number: "opening--R26BK01774553--000--002",
+      sections: [{ title: "개찰결과상세조회", fields: parent.modal.fields,
+        details: [{ title: "예비가격산정결과", trigger: child.trigger }] }] });
+    expect(result.detail.sections?.find((section) => section.title === "입찰진행현황")?.details).toEqual([]);
+    expect(result.detail.modalCaptures).toEqual([]);
+  });
+
+  it("재입찰번호를 확인할 수 없으면 기존 종속 상세에 남깁니다", () => {
+    const parent = capture("개찰결과상세조회", [{ label: "내용", value: [{ text: "결과", visible: true }] }], "입찰진행현황", "개찰완료");
+    const source = detail([parent]);
+    source.sections?.push({ title: "입찰진행현황", fields: [], tables: [] });
+    const result = structureNoticeDetail("R26BK01774553--000", source);
+    expect(result.openingDetails).toEqual([]);
+    expect(result.detail.sections?.find((section) => section.title === "입찰진행현황")?.details).toHaveLength(1);
+    expect(result.warnings).toContainEqual(expect.stringContaining("재입찰번호"));
+  });
+
+  it("같은 공고의 여러 개찰 행을 각 재입찰번호로 구분합니다", () => {
+    const source = detail([]);
+    source.sections?.push({ title: "입찰진행현황", fields: [], tables: [{
+      headerRows: [[{ value: "재입찰번호", column: 0, rowspan: 1, colspan: 1 },
+        { value: "진행현황", column: 1, rowspan: 1, colspan: 1 }]],
+      bodyRows: [[{ value: "000", column: 0, rowspan: 1, colspan: 1 },
+        { value: "개찰완료", column: 1, rowspan: 1, colspan: 1 }],
+      [{ value: "001", column: 0, rowspan: 1, colspan: 1 },
+        { value: "개찰완료", column: 1, rowspan: 1, colspan: 1 }]]
+    }] });
+    source.modalCaptures = [0, 1].map((row) => {
+      const item = capture("개찰결과상세조회", [{ label: "결과", value: [{ text: `${row}회차`, visible: true }] }], "입찰진행현황", "개찰완료");
+      item.trigger.html = `<button id="gridViewPgst_button_${row}_1">개찰완료</button>`;
+      return item;
+    });
+    const result = structureNoticeDetail("R26BK01774553--000", source);
+    expect(result.openingDetailKeys).toEqual([
+      "opening--R26BK01774553--000--000", "opening--R26BK01774553--000--001"
+    ]);
+    expect(result.openingDetails.map((item) => item.sections?.[0].fields[0].value[0].text)).toEqual(["0회차", "1회차"]);
+  });
   it("새 모달의 여러 섹션을 연결 상세와 독립 상세에 그대로 저장한다", () => {
     const sections = [
       { title: "계약정보", fields: [{ label: "계약방법", value: [{ text: "일반경쟁", visible: true }] }], tables: [] },

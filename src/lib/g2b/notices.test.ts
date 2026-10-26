@@ -8,6 +8,22 @@ const dirs: string[] = [];
 afterEach(async () => { await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))); });
 
 describe("saved notices", () => {
+  it("개찰 독립 상세를 공고의 개찰 참조로 읽습니다", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "g2b-opening-")); dirs.push(dir);
+    await mkdir(join(dir, "notices"));
+    await mkdir(join(dir, "independent-details"));
+    const key = "R26BK01774553--000";
+    const openingKey = `opening--${key}--002`;
+    await writeFile(join(dir, "notices", `${key}.json`), JSON.stringify({
+      key, api: null, detail: { sourceUrl: "test", attachments: [], links: [] }, openingDetailKeys: [openingKey]
+    }));
+    await writeFile(join(dir, "independent-details", `${openingKey}.json`), JSON.stringify({
+      schemaVersion: 5, number: openingKey, title: "개찰결과상세조회", sections: [],
+      capturedAt: "2026-10-25T00:00:00Z", sourceNoticeKey: key
+    }));
+    const record = await getNoticeRecord(key, dir);
+    expect(record?.openingDetails[0].detail?.number).toBe(openingKey);
+  });
   it("resolves a generic numbered detail and an already stored notice reference", async () => {
     const dir = await mkdtemp(join(tmpdir(), "g2b-notices-")); dirs.push(dir);
     await mkdir(join(dir, "notices"));

@@ -9,12 +9,13 @@ import type { IndependentDetail } from "./structured-data";
 import { getStoredIndependentDetail, getStoredNotice, listStoredNoticeKeys } from "./postgres-store";
 
 export type StoredNotice = { key?: string; api: ApiNotice | null; detail: ScrapedDetail | null; relatedNoticeKeys?: string[]; detailError?: string | null; normalized?: NormalizedNotice;
-  orderPlanNumbers?: string[]; preSpecificationNumbers?: string[]; otherDetailNumbers?: string[];
+  orderPlanNumbers?: string[]; preSpecificationNumbers?: string[]; otherDetailNumbers?: string[]; openingDetailKeys?: string[];
   independentTriggers?: { number: string; trigger: ModalCapture["trigger"] }[] };
 export type IndependentReference = { number: string; detail: IndependentDetail | null; noticeKey?: string;
   triggers?: ModalCapture["trigger"][] };
 export type NoticeRecord = { api: ApiNotice | null; detail: ScrapedDetail | null; relatedNoticeKeys: string[]; detailError: string | null; normalized: NormalizedNotice;
-  orderPlans: IndependentReference[]; preSpecifications: IndependentReference[]; otherDetails: IndependentReference[] };
+  orderPlans: IndependentReference[]; preSpecifications: IndependentReference[]; otherDetails: IndependentReference[];
+  openingDetails: IndependentReference[] };
 const defaultDataDir = () => join(process.cwd(), "data");
 
 /** 저장된 공고를 목록 화면의 게시일 역순으로 반환합니다. */
@@ -67,7 +68,8 @@ export async function getNoticeRecord(key: string, dataDir?: string): Promise<No
       normalized: normalizeNotice(record.api, record.detail, { number, order }),
       orderPlans: await resolve(record.orderPlanNumbers || []),
       preSpecifications: await resolve(record.preSpecificationNumbers || []),
-      otherDetails: await resolve(record.otherDetailNumbers || []) };
+      otherDetails: await resolve(record.otherDetailNumbers || []),
+      openingDetails: await resolve(record.openingDetailKeys || []) };
   }
   try {
     const record = await readJson<StoredNotice>(join(dataDir, "notices", `${key}.json`));
@@ -99,6 +101,7 @@ export async function getNoticeRecord(key: string, dataDir?: string): Promise<No
     return { api: record.api, detail: record.detail, relatedNoticeKeys, detailError: record.detailError || null,
       normalized: normalizeNotice(record.api, record.detail, { number, order }),
       orderPlans: await resolve("order-plans", record.orderPlanNumbers || []),
-      preSpecifications: await resolve("pre-specifications", record.preSpecificationNumbers || []), otherDetails };
+      preSpecifications: await resolve("pre-specifications", record.preSpecificationNumbers || []), otherDetails,
+      openingDetails: await resolve("independent-details", record.openingDetailKeys || []) };
   } catch { return null; }
 }

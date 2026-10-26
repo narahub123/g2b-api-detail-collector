@@ -28,6 +28,12 @@ describe("NoticeStageTabs", () => {
     expect(screen.getByRole("tabpanel", { name: "공고" })).toHaveTextContent("기존 공고 상세 본문");
   });
 
+  it("개찰 자료가 제공되면 개찰 탭에 표시합니다", () => {
+    render(<NoticeStageTabs opening={<div>개찰 결과 자료</div>}><div>공고 본문</div></NoticeStageTabs>);
+    fireEvent.click(screen.getByRole("tab", { name: "개찰" }));
+    expect(screen.getByRole("tabpanel", { name: "개찰" })).toHaveTextContent("개찰 결과 자료");
+  });
+
   it("연결하지 않은 개찰·낙찰자·계약 탭은 기존 안내를 유지합니다", () => {
     render(<NoticeStageTabs plan={<div>발주계획 자료</div>} spec={<div>사전규격 자료</div>}>
       <div>공고 본문</div>

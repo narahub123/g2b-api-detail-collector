@@ -5,7 +5,7 @@ import type { StoredNotice } from "./notices";
 import type { IndependentDetail, StructuredNoticeDetail } from "./structured-data";
 import type { ModalCapture } from "./detail-page";
 
-type Category = "order-plan" | "pre-specification" | "other";
+type Category = "order-plan" | "pre-specification" | "other" | "opening";
 type Queryable = Pick<pg.PoolClient, "query">;
 type StoredRow = { key: string; api: StoredNotice["api"]; detail: StoredNotice["detail"];
   detail_error: string | null };
@@ -89,7 +89,7 @@ export async function saveStoredNotice(key: string, record: StoredNotice,
     if (!structured) return;
     const groups: [Category, IndependentDetail[]][] = [
       ["order-plan", structured.orderPlans], ["pre-specification", structured.preSpecifications],
-      ["other", structured.otherDetails]
+      ["other", structured.otherDetails], ["opening", structured.openingDetails]
     ];
     // 상세와 참조를 함께 교체해야 재수집 중 실패가 기존 연결을 훼손하지 않습니다.
     await db.query(`DELETE FROM ${table("notice_independent_refs")} WHERE notice_key=$1`, [key]);
@@ -140,6 +140,7 @@ export async function getStoredNotice(key: string): Promise<StoredNotice | null>
     orderPlanNumbers: refs.rows.filter((item) => item.category === "order-plan").map((item) => item.detail_key),
     preSpecificationNumbers: refs.rows.filter((item) => item.category === "pre-specification").map((item) => item.detail_key),
     otherDetailNumbers: refs.rows.filter((item) => item.category === "other").map((item) => item.detail_key),
+    openingDetailKeys: refs.rows.filter((item) => item.category === "opening").map((item) => item.detail_key),
     independentTriggers: refs.rows.flatMap((item) => item.triggers.map((trigger) => ({ number: item.detail_key, trigger }))) };
 }
 

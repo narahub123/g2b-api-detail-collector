@@ -24,7 +24,7 @@ Chrome이 기본 설치 위치에 없으면 `.env.local`에 `G2B_CHROME_PATH=Chr
 
 - `data/api/<작업 ID>/`: API 호출별 전체 JSON 응답
 - Neon `notices`: 공고번호·차수별 API 항목, 상세 원문(JSONB), 분석용 요약 컬럼
-- Neon `independent_details`, `notice_independent_refs`: 발주계획·사전규격·기타 독립 상세와 공고 참조
+- Neon `independent_details`, `notice_independent_refs`: 발주계획·사전규격·개찰·기타 독립 상세와 공고 참조
 - Neon `notice_relations`: 직접 발견한 공고의 양방향 관계
 - 공고 상세의 `baseAmountCaptures`, `changeNoticeCaptures`는 해당 공고 차수에 종속된 정보입니다. 분류되지 않은 모달은 `modalCaptures`에 남습니다.
 - `data/jobs/`: 수집 진행 상태와 오류
@@ -32,6 +32,8 @@ Chrome이 기본 설치 위치에 없으면 `.env.local`에 `G2B_CHROME_PATH=Chr
 테이블과 각 컬럼의 한국어 설명은 [`db/schema.sql`](db/schema.sql)의 PostgreSQL `COMMENT`로 관리합니다. `npm run db:migrate`를 다시 실행하면 기존 테이블의 설명도 갱신됩니다. `api`, `detail`, `payload`, `triggers`는 수집 원본의 구조가 달라질 수 있어 JSONB로 보존합니다.
 
 공고 원본 번호는 `notices.notice_number`, 발주계획·사전규격 등 독립 상세의 문자열 식별자는 `independent_details.detail_key`와 `notice_independent_refs.detail_key`에 저장합니다. 기존 `number` 컬럼은 `npm run db:migrate` 실행 시 데이터 유지 방식으로 이름을 바꿉니다.
+
+개찰결과상세 모달은 `입찰진행현황` 표에서 클릭한 행의 재입찰번호를 확인하면 `opening--공고키--재입찰번호`로 독립 저장하고 개찰 탭에 표시합니다. 모달 안에서 열린 하위 상세도 같은 독립 상세에 포함합니다. 재입찰번호를 확인하지 못하면 기존 공고 상세에 두고 경고를 기록합니다. 기존 DB에서는 `npm run db:migrate`로 `opening` 분류를 허용해야 합니다.
 
 `data/`는 Git에서 제외됩니다. 한 번에 한 수집 작업을 실행합니다. 개별 상세 페이지 수집에 실패해도 해당 공고의 API 응답은 저장하고 화면에 실패 상태를 표시합니다.
 
