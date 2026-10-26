@@ -35,12 +35,17 @@ describe("structureNoticeDetail", () => {
       { title: "담당자정보", fields: [{ label: "담당자", value: [{ text: "홍길동", visible: true }] }], tables: [] }
     ];
     const linked = capture("상세조회", [], "공지사항");
-    linked.modal = { title: "상세조회", sections };
+    linked.modal = { title: "상세조회", sections,
+      attachments: [{ name: "계획서.hwp", url: "https://www.g2b.go.kr/plan.hwp" }] };
     const independent = capture("발주계획상세조회", [], null, "R26DD20897516");
-    independent.modal = { title: "발주계획상세조회", sections };
+    independent.modal = { title: "발주계획상세조회", sections,
+      attachments: [{ name: "계획서.hwp", url: "https://www.g2b.go.kr/plan.hwp" }] };
     const result = structureNoticeDetail("R26BK1--000", detail([linked, independent]));
     expect(result.detail.sections?.find((section) => section.title === "공지사항")?.details?.[0].sections).toEqual(sections);
-    expect(result.orderPlans[0]).toMatchObject({ schemaVersion: 3, sections });
+    expect(result.detail.sections?.find((section) => section.title === "공지사항")?.details?.[0].attachments)
+      .toEqual(linked.modal.attachments);
+    expect(result.orderPlans[0]).toMatchObject({ schemaVersion: 4, sections });
+    expect(result.orderPlans[0].attachments).toEqual(independent.modal.attachments);
     expect(result.orderPlans[0]).not.toHaveProperty("fields");
   });
   it("keeps a hidden header-only table under its field after section filtering", () => {
@@ -83,16 +88,16 @@ describe("structureNoticeDetail", () => {
     await expect(readFile(join(dir, "independent-details", "R26BK12345678-000.json"), "utf8"))
       .rejects.toMatchObject({ code: "ENOENT" });
   });
-  it("버전 2 독립 상세는 섹션 형식으로 갱신하고 버전 3은 유지한다", async () => {
+  it("이전 독립 상세는 첨부 URL 형식으로 갱신하고 버전 4는 유지한다", async () => {
     const dir = await mkdtemp(join(tmpdir(), "g2b-upgrade-")); dirs.push(dir);
     await mkdir(join(dir, "order-plans"));
     const path = join(dir, "order-plans", "R26DD20897516.json");
-    await writeFile(path, JSON.stringify({ schemaVersion: 2, fields: [], tables: [] }));
+    await writeFile(path, JSON.stringify({ schemaVersion: 3, sections: [] }));
     const source = capture("발주계획", [{ label: "사업명", value: [{ text: "신규 사업", visible: true }] }], null, "R26DD20897516");
     const structured = structureNoticeDetail("R26BK1--000", detail([source]));
     await saveIndependentDetails(dir, structured);
     const upgraded = JSON.parse(await readFile(path, "utf8"));
-    expect(upgraded).toMatchObject({ schemaVersion: 3, sections: [{ fields: [{ label: "사업명" }] }] });
+    expect(upgraded).toMatchObject({ schemaVersion: 4, sections: [{ fields: [{ label: "사업명" }] }], attachments: [] });
     source.modal.fields![0].value = [{ text: "다른 사업", visible: true }];
     await saveIndependentDetails(dir, structureNoticeDetail("R26BK1--000", detail([source])));
     expect(JSON.parse(await readFile(path, "utf8"))).toEqual(upgraded);

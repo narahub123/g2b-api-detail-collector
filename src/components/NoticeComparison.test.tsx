@@ -37,8 +37,10 @@ describe("NoticeComparison", () => {
       } }]
     };
     render(<NoticeComparison api={null} detail={source} />);
-    expect(screen.getByRole("link", { name: "공고문.pdf" })).toHaveAttribute("href", "https://www.g2b.go.kr/notice.pdf");
-    expect(screen.getByRole("link", { name: "계획서.hwp" })).toHaveAttribute("href", "https://www.g2b.go.kr/plan.hwp");
+    expect(within(screen.getByRole("table", { name: "파일첨부 표 1" })).getByRole("link", { name: "공고문.pdf" }))
+      .toHaveAttribute("href", "https://www.g2b.go.kr/notice.pdf");
+    expect(within(screen.getByRole("table", { name: "기초금액조회 첨부 표 1" })).getByRole("link", { name: "계획서.hwp" }))
+      .toHaveAttribute("href", "https://www.g2b.go.kr/plan.hwp");
   });
   it("shows an owned grid below its field and keeps independent section grids separate", () => {
     const owned = simpleTable(["업종"], [["건설업"]]);

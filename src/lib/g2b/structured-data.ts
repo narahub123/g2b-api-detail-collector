@@ -5,12 +5,13 @@ import { join } from "node:path";
 import { readJson, writeJsonAtomic } from "./json-store";
 
 export type IndependentDetail = {
-  schemaVersion: 2 | 3;
+  schemaVersion: 2 | 3 | 4;
   number: string;
   title: string | null;
   sections?: ScrapedDetail["sections"];
   fields?: StructuredField[];
   tables?: StructuredTable[];
+  attachments?: ScrapedDetail["attachments"];
   capturedAt: string;
   settling?: ModalCapture["settling"];
   sourceNoticeKey: string;
@@ -87,8 +88,9 @@ export function structureNoticeDetail(key: string, detail: ScrapedDetail): Struc
     if (number) {
       if (isCurrentNotice(number, key)) continue;
       independentTriggers.push({ number, trigger: capture.trigger });
-      const entity: IndependentDetail = { schemaVersion: 3, number, title,
-        sections: contentSections(capture.modal, title || "미분류"), capturedAt: detail.capturedAt || new Date().toISOString(),
+      const entity: IndependentDetail = { schemaVersion: 4, number, title,
+        sections: contentSections(capture.modal, title || "미분류"),
+        attachments: capture.modal.attachments || [], capturedAt: detail.capturedAt || new Date().toISOString(),
         settling: capture.settling, sourceNoticeKey: key, trigger: capture.trigger };
       const stage = number.slice(3, 5);
       const [numbers, entities] = stage === "DD" ? [orderPlanNumbers, orderPlans] :
@@ -110,7 +112,8 @@ export function structureNoticeDetail(key: string, detail: ScrapedDetail): Struc
     const owner = owners[0];
     sections[owner].details.push({ title: title || capture.trigger.label,
       ...(capture.modal.sections ? { sections: capture.modal.sections } :
-        { fields: capture.modal.fields || [], tables: capture.modal.tables || [] }), trigger: capture.trigger });
+        { fields: capture.modal.fields || [], tables: capture.modal.tables || [] }),
+      attachments: capture.modal.attachments || [], trigger: capture.trigger });
     if (title) {
       const titleOwners = sectionByModalTitle.get(title) || new Set<number>();
       titleOwners.add(owner);
@@ -168,7 +171,7 @@ export async function saveIndependentDetails(dataDir: string, structured: Struct
       }
       const path = join(dataDir, folder, `${entity.number}.json`);
       // 현재 형식으로 수집한 값은 유지하고 이전 형식만 갱신합니다.
-      try { if ((await readJson<IndependentDetail>(path)).schemaVersion === 3) continue; }
+      try { if ((await readJson<IndependentDetail>(path)).schemaVersion === 4) continue; }
       catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       }

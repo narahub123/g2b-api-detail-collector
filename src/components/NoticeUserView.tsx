@@ -1,5 +1,5 @@
 import type { ScrapedDetail, StructuredField, StructuredTable } from "@/lib/g2b/detail-page";
-import { safeAttachmentLink } from "@/lib/g2b/attachment-links";
+import { attachmentLinkMap } from "@/lib/g2b/attachment-map";
 import { tableForUserDisplay } from "@/lib/g2b/structured-table";
 import { fieldText } from "@/lib/g2b/field-value";
 import { contentSections } from "@/lib/g2b/content-sections";
@@ -7,20 +7,6 @@ import { contentSections } from "@/lib/g2b/content-sections";
 /** 화면 문자열과 수집된 첨부파일명을 같은 기준으로 비교합니다. */
 function fileNameKey(value: string): string {
   return value.replace(/\s+/g, " ").trim();
-}
-
-/** 이름과 안전한 URL이 일대일로 대응하는 첨부파일만 링크 후보로 만듭니다. */
-function attachmentLinks(detail: ScrapedDetail): Map<string, string> {
-  const candidates = new Map<string, Set<string>>();
-  for (const attachment of detail.attachments) {
-    const href = attachment.url && safeAttachmentLink(attachment.url);
-    if (!href) continue;
-    const name = fileNameKey(attachment.name);
-    const urls = candidates.get(name) || new Set<string>();
-    urls.add(href);
-    candidates.set(name, urls);
-  }
-  return new Map([...candidates].flatMap(([name, urls]) => urls.size === 1 ? [[name, [...urls][0]]] : []));
 }
 
 /** 추출된 표시 문자열이 첨부파일명과 일치하면 다운로드 링크로 표시합니다. */
@@ -99,7 +85,7 @@ function UserFields({ fields, links }: { fields: StructuredField[]; links: Map<s
 /** 섹션의 필드·표·연결된 상세를 표시 상태에 맞춰 제공합니다. */
 export function NoticeUserView({ detail }: { detail: ScrapedDetail | null }) {
   if (!detail) return <p className="muted user-empty">상세 페이지 수집 자료가 없습니다.</p>;
-  const links = attachmentLinks(detail);
+  const links = attachmentLinkMap(detail.attachments);
   // 표시 가능한 값이 없는 섹션은 빈 카드로 남기지 않습니다.
   const sections = (detail.sections || []).filter((section) => section.visible !== false && (
     visibleFields(section.fields).length > 0 || section.tables.some(hasVisibleTableData) ||
@@ -120,9 +106,10 @@ export function NoticeUserView({ detail }: { detail: ScrapedDetail | null }) {
         {contentSections(item, item.title).filter((part) => part.visible !== false).map((part, partIndex) =>
           <div key={partIndex}>
             {item.sections && <h4>{part.title}</h4>}
-            <UserFields fields={part.fields} links={links} />
+            <UserFields fields={part.fields} links={attachmentLinkMap(item.attachments || [])} />
             {part.tables.map((table, tableIndex) => <UserTable table={table}
-              label={`${section.title} ${item.title} ${part.title} 표 ${tableIndex + 1}`} links={links} key={tableIndex} />)}
+              label={`${section.title} ${item.title} ${part.title} 표 ${tableIndex + 1}`}
+              links={attachmentLinkMap(item.attachments || [])} key={tableIndex} />)}
           </div>)}
       </div>)}
     </div>

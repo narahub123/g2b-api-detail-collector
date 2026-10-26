@@ -28,3 +28,10 @@ export function safeAttachmentLink(value: string): string | null {
     return url.toString();
   } catch { return null; }
 }
+
+/** 상세페이지와 모달의 실제 href를 같은 기준 URL·호스트 규칙으로 확인합니다. */
+export function resolveAttachmentHref(href: string | undefined, baseUrl?: string): string | null {
+  if (!href || /^(?:#|javascript:)/i.test(href.trim())) return null;
+  try { return safeAttachmentLink(new URL(href, baseUrl).toString()); }
+  catch { return null; }
+}

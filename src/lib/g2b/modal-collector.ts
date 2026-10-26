@@ -1,5 +1,6 @@
 import * as cheerio from "cheerio";
 import { extractCommonSections } from "./common-content-extractor";
+import { resolveAttachmentHref } from "./attachment-links";
 import { tableHasValue } from "./structured-table";
 import { createModalDeduplication } from "./modal-deduplication";
 import type { StructuredTable } from "./structured-table";
@@ -21,20 +22,32 @@ const nonempty = (value: string): string | null => clean(value) || null;
  * G2B WebSquare는 필드에 td[data-title], 그리드 데이터에 col_id를 사용하며,
  * 그리드 헤더는 필드 레이블로 취급하지 않습니다.
  * @param html 열린 모달의 HTML 스냅샷
- * @returns 모달 제목, 필드 및 구조화된 테이블
+ * @param baseUrl 상대 파일 링크를 해석할 현재 페이지 URL
+ * @returns 모달 제목, 섹션, 필드, 표 및 확인된 첨부 URL
  */
-export function extractModalStructure(html: string): {
+export function extractModalStructure(html: string, baseUrl?: string): {
   title: string | null;
   sections: StructuredSection[];
   fields: StructuredField[];
   tables: StructuredTable[];
+  attachments: { name: string; url: string }[];
 } {
   const $ = cheerio.load(html);
   const root = $("[role='dialog']").first().length ? $("[role='dialog']").first() : $("body");
   const title = nonempty(root.find("[id$='_header_title'],.w2window_header_title,h1,h2,h3").first().text());
   const sections = extractCommonSections(html, "modal");
+  const attachments: { name: string; url: string }[] = [];
+  // 모달의 모든 파일 링크를 확인하되 실제 href가 없는 클릭 요소에서는 URL을 추측하지 않습니다.
+  root.find("a[href]").each((_, anchor) => {
+    const element = $(anchor);
+    const name = clean(element.text());
+    const fileCell = /file|atch|첨부/i.test(element.closest("td").attr("col_id") || "");
+    if (!name || !(fileCell || element.is("[download]") || /\.[a-z0-9]{2,8}$/i.test(name))) return;
+    const url = resolveAttachmentHref(element.attr("href"), baseUrl);
+    if (url && !attachments.some((item) => item.name === name && item.url === url)) attachments.push({ name, url });
+  });
   return { title, sections, fields: sections.flatMap((section) => section.fields),
-    tables: sections.flatMap((section) => section.tables) };
+    tables: sections.flatMap((section) => section.tables), attachments };
 }
 // 모달 원본 내용을 먼저 수집하고, 의미 해석 및 구조화는 별도 단계에서 수행합니다.
 // 제출, 데이터 변경·삭제, 다운로드 링크, 다른 페이지로 이동하는 동작은 탐색하지 않습니다.
@@ -437,7 +450,7 @@ export async function collectModalContents(
         );
         if (fresh) {
           // 모달 HTML을 구조화하고, 실제 저장할 만한 데이터가 있는지 기존 기준으로 판단합니다.
-          const structured = extractModalStructure(fresh.html);
+          const structured = extractModalStructure(fresh.html, page.url());
           // 필드 값, 테이블 값 또는 제목 외의 충분한 본문 텍스트 중 하나가 있으면 저장 대상입니다.
           // 필드 값·테이블 값이 하나라도 있거나 제목을 뺀 본문이 20자를 넘으면 저장할 데이터가 있다고 봅니다.
           // 이 기준은 저장 여부 판단용이며 하위 탐색을 막는 조건으로 사용하지 않습니다.
@@ -466,7 +479,8 @@ export async function collectModalContents(
                 html: candidate.html,
                 parentModalTitle,
               },
-              modal: { text: fresh.text, title: structured.title, sections: structured.sections },
+              modal: { text: fresh.text, title: structured.title, sections: structured.sections,
+                attachments: structured.attachments },
               settling: {
                 status: settling.status,
                 elapsedMs: settling.elapsedMs,

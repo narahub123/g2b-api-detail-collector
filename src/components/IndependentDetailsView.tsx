@@ -21,14 +21,14 @@ export function IndependentDetailsView({ references }: { references: Independent
       </p>;
     }
     // 이전 형식은 현재 필드 구조로 읽을 수 없으므로 내용을 해석하지 않고 재수집을 안내합니다.
-    if (reference.detail.schemaVersion !== 2 && reference.detail.schemaVersion !== 3) {
+    if (![2, 3, 4].includes(reference.detail.schemaVersion)) {
       return <p className="notice-stage-pending" key={reference.number}>
         {reference.number}: 이전 형식의 상세 정보입니다. 다시 수집해 주세요.
       </p>;
     }
     const detail: ScrapedDetail = {
       sourceUrl: "",
-      attachments: [],
+      attachments: reference.detail.attachments || [],
       links: [],
       sections: contentSections(reference.detail, reference.detail.title || reference.number)
     };

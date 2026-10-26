@@ -30,6 +30,17 @@ const detail: ScrapedDetail = {
 describe("NoticeUserView", () => {
   afterEach(cleanup);
 
+  it("연결된 모든 모달 섹션의 파일명에 해당 모달의 URL을 적용한다", () => {
+    const source: ScrapedDetail = { ...detail, attachments: [], sections: [{ title: "규격", fields: [], tables: [],
+      details: [{ title: "상세 규격", attachments: [{ name: "규격서.hwp", url: "https://www.g2b.go.kr/spec.hwp" }],
+        sections: [{ title: "첨부", fields: [], tables: [{ headerRows: [[{ value: "파일명", column: 0, rowspan: 1, colspan: 1 }]],
+          bodyRows: [[{ value: "규격서.hwp", column: 0, rowspan: 1, colspan: 1 }]] }] }] }]
+    }] };
+    render(<NoticeUserView detail={source} />);
+    expect(screen.getByRole("link", { name: "규격서.hwp" }))
+      .toHaveAttribute("href", "https://www.g2b.go.kr/spec.hwp");
+  });
+
   it("연결된 모달의 두 섹션 제목과 값을 표시한다", () => {
     const source: ScrapedDetail = { ...detail, sections: [{ title: "공지사항", fields: [], tables: [], details: [{
       title: "상세조회", sections: [

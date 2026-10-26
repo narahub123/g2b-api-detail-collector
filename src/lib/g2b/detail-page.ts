@@ -3,7 +3,7 @@ import { chromium } from "playwright-core";
 import { noticeKeyFromParts } from "./identity";
 import { extractCommonSections } from "./common-content-extractor";
 import type { StructuredTable } from "./structured-table";
-import { attachmentDownloadUrl, safeAttachmentLink } from "./attachment-links";
+import { attachmentDownloadUrl, resolveAttachmentHref } from "./attachment-links";
 import { collectModalContents } from "./modal-collector";
 import { fieldText } from "./field-value";
 import type { FieldValuePart } from "./field-value";
@@ -17,11 +17,11 @@ export type ClickDownload = { cellId: string; name: string; fileNo: string; seq:
 export type StructuredField = { label: string; value: FieldValuePart[]; visible?: boolean; tables?: StructuredTable[] };
 export type StructuredSection = { title: string; fields: StructuredField[]; tables: StructuredTable[];
   details?: { title: string; sections?: StructuredSection[]; fields?: StructuredField[]; tables?: StructuredTable[];
-    trigger?: ModalCapture["trigger"] }[]; visible?: boolean };
+    attachments?: Attachment[]; trigger?: ModalCapture["trigger"] }[]; visible?: boolean };
 export type ModalCapture = {
   trigger: { index: number; tag: string; label: string; value: string; sectionHint?: string | null; html: string; parentModalTitle?: string | null };
   modal: { text?: string; html?: string; title: string | null; sections?: StructuredSection[];
-    fields?: StructuredField[]; tables?: StructuredTable[] };
+    fields?: StructuredField[]; tables?: StructuredTable[]; attachments?: Attachment[] };
   settling?: { status: "settled" | "timeout"; elapsedMs: number };
 };
 export type ScrapedDetail = {
@@ -95,11 +95,7 @@ export function extractDetailPage(html: string, pageUrl: string, fileMetadata: A
     const name = clean($(cell).text());
     if (!name) return;
     const click = clickByCellId.get($(cell).attr("id") || "");
-    const href = $(cell).find("a[href]").first().attr("href");
-    let direct: string | null = null;
-    if (href && !href.startsWith("#")) {
-      try { direct = safeAttachmentLink(new URL(href, pageUrl).toString()); } catch { /* invalid link */ }
-    }
+    const direct = resolveAttachmentHref($(cell).find("a[href]").first().attr("href"), pageUrl);
     const clickUrl = click && click.name === name ? attachmentDownloadUrl(`${number}--${order}`, click.fileNo, click.seq) : null;
     const metadataUrl = $(cell).find("a").length && !direct ? null : attachmentUrl(sequenceByName.get(name));
     addAttachment(name, direct || clickUrl || metadataUrl);

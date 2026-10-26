@@ -47,7 +47,7 @@ describe("IndependentDetailsView", () => {
 
   it("새 독립 상세의 섹션을 그대로 표시합니다", () => {
     render(<IndependentDetailsView references={[{ number: "R26DD12345678", detail: {
-      schemaVersion: 3, number: "R26DD12345678", title: "발주계획 상세", sections: [
+      schemaVersion: 4, number: "R26DD12345678", title: "발주계획 상세", sections: [
         { title: "계약정보", fields: [{ label: "계약방법", value: [{ text: "일반경쟁", visible: true }] }], tables: [] },
         { title: "담당자정보", fields: [{ label: "담당자", value: [{ text: "홍길동", visible: true }] }], tables: [] }
       ], capturedAt: "2026-10-25T00:00:00.000Z", sourceNoticeKey: "R26BK01774553--000"
