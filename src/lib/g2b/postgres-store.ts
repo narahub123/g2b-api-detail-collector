@@ -3,6 +3,7 @@ import { noticeKeyFromParts } from "./identity";
 import { normalizeNotice } from "./normalize";
 import type { StoredNotice } from "./notices";
 import type { IndependentDetail, StructuredNoticeDetail } from "./structured-data";
+import { traceRisk } from "./risk-trace";
 import type { ModalCapture } from "./detail-page";
 import type { NoticeFilters } from "./notice-filters";
 import regions from "@/data/regions.json";
@@ -93,6 +94,8 @@ async function transaction<T>(work: (db: pg.PoolClient) => Promise<T>): Promise<
 export async function saveStoredNotice(key: string, record: StoredNotice,
   structured?: StructuredNoticeDetail, options: { replaceOpening?: boolean } = {}): Promise<void> {
   await transaction(async (db) => {
+    // 실제 저장 직전의 재수집 정책을 기록합니다. 민감한 payload는 기록하지 않습니다.
+    traceRisk("storage", "save-start", { noticeKey: key, replaceOpening: !!options.replaceOpening, hasStructured: !!structured });
     await upsertNotice(db, key, record);
     if (!structured) return;
     const groups: [Category, IndependentDetail[]][] = [
@@ -101,12 +104,14 @@ export async function saveStoredNotice(key: string, record: StoredNotice,
     ];
     // 상세와 참조를 함께 교체해야 재수집 중 실패가 기존 연결을 훼손하지 않습니다.
     await db.query(`DELETE FROM ${table("notice_independent_refs")} WHERE notice_key=$1`, [key]);
+    traceRisk("storage", "reference-replace", { noticeKey: key, groups: groups.map(([category, details]) => ({ category, count: details.length })) });
     for (const [category, details] of groups) {
       for (const [position, detail] of details.entries()) {
         const match = category === "other" ? /^(R\d{2}BK\d{8})-(\d{3})$/.exec(detail.number) : null;
         const existingNotice = match ? await db.query(`SELECT detail FROM ${table("notices")} WHERE key=$1`, [`${match[1]}--${match[2]}`]) : null;
         if (!existingNotice?.rows[0]?.detail) {
           // 다른 독립 상세의 현재 형식은 유지하고 선택 재수집의 개찰 상세만 교체합니다.
+          traceRisk("storage", "detail-upsert", { noticeKey: key, detailKey: detail.number, category, replaceOpening: !!options.replaceOpening });
           const updateCondition = category === "opening" && options.replaceOpening ? "" :
             "WHERE (independent_details.payload->>'schemaVersion') IS DISTINCT FROM '5'";
           await db.query(`INSERT INTO ${table("independent_details")}(detail_key,category,payload) VALUES($1,$2,$3::jsonb)
