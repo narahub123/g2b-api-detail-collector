@@ -1,3 +1,7 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import regions from "@/data/regions.json";
 import type { NoticeFilterValues } from "@/lib/g2b/notice-filters";
 
 /** 공고 목록의 검색 및 범위 조건을 지정한 경로의 GET 양식으로 제공합니다. */
@@ -10,6 +14,16 @@ export function NoticeFilters({
   values: NoticeFilterValues;
   error: string | null;
 }) {
+  const [provinceCode, setProvinceCode] = useState(values.provinceCode);
+  const [districtCode, setDistrictCode] = useState(values.districtCode);
+  const province = regions.find((item) => item.code === provinceCode);
+
+  /** URL 이동 후 양식의 지역 선택을 현재 검색 조건에 맞춥니다. */
+  useEffect(() => {
+    setProvinceCode(values.provinceCode);
+    setDistrictCode(values.districtCode);
+  }, [values.provinceCode, values.districtCode]);
+
   return (
     <form
       action={basePath}
@@ -36,6 +50,28 @@ export function NoticeFilters({
         </label>
       </div>
       <div className="filter-ranges">
+        <fieldset className="filter-region">
+          <legend>지역</legend>
+          <label>
+            광역자치단체
+            <select name="provinceCode" value={provinceCode} onChange={(event) => {
+              // 상위 지역이 바뀌면 이전 기초 지역 조건을 유지하지 않습니다.
+              setProvinceCode(event.target.value);
+              setDistrictCode("");
+            }}>
+              <option value="">전체</option>
+              {regions.map((item) => <option key={item.code} value={item.code}>{item.name}</option>)}
+            </select>
+          </label>
+          <label>
+            기초자치단체
+            <select name="districtCode" value={districtCode} disabled={!province?.districts.length}
+              onChange={(event) => setDistrictCode(event.target.value)}>
+              <option value="">전체</option>
+              {province?.districts.map((item) => <option key={item.code} value={item.code}>{item.name}</option>)}
+            </select>
+          </label>
+        </fieldset>
         <fieldset>
           <legend>공고 게시일</legend>
           <label>

@@ -4,7 +4,7 @@ import { parseNoticeFilters, parseNoticePage } from "./notice-filters";
 describe("parseNoticeFilters", () => {
   it("빈 조건에는 공고명 검색을 기본값으로 사용합니다", () => {
     expect(parseNoticeFilters({})).toEqual({
-      values: { searchField: "title", query: "", postedFrom: "", postedTo: "", deadlineFrom: "", deadlineTo: "", minAmount: "", maxAmount: "" },
+      values: { searchField: "title", query: "", postedFrom: "", postedTo: "", deadlineFrom: "", deadlineTo: "", minAmount: "", maxAmount: "", provinceCode: "", districtCode: "" },
       filters: {}, error: null
     });
   });
@@ -21,9 +21,18 @@ describe("parseNoticeFilters", () => {
     [{ deadlineFrom: "2026-10-20", deadlineTo: "2026-10-19" }, "마감일"],
     [{ minAmount: "2000", maxAmount: "1000" }, "금액"],
     [{ postedFrom: "2026-02-30" }, "게시일"],
-    [{ maxAmount: "1.5" }, "금액"]
+    [{ maxAmount: "1.5" }, "금액"],
+    [{ provinceCode: "9999999999" }, "지역"],
+    [{ districtCode: "1111000000" }, "지역"],
+    [{ provinceCode: "2600000000", districtCode: "1111000000" }, "지역"]
   ])("잘못된 조건 %j에 오류를 반환합니다", (params, label) => {
     expect(parseNoticeFilters(params).error).toContain(label);
+  });
+
+  it("유효한 광역·기초 코드를 기존 검색 조건과 함께 전달합니다", () => {
+    expect(parseNoticeFilters({ query: "용역", provinceCode: "1100000000", districtCode: "1111000000" })).toMatchObject({
+      filters: { searchField: "title", query: "용역", provinceCode: "1100000000", districtCode: "1111000000" }, error: null
+    });
   });
 });
 

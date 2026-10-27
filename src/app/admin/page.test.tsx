@@ -24,4 +24,13 @@ describe("관리자 공고 목록 페이지", () => {
     expect(listNoticePage).not.toHaveBeenCalled();
     expect(html).toContain("최소금액이 최대금액보다 큽니다.");
   });
+
+  it("관리자 목록에도 같은 지역 조건을 적용하고 수집 양식을 유지합니다", async () => {
+    const html = renderToStaticMarkup(await AdminPage({ searchParams: Promise.resolve({ query: "용역",
+      provinceCode: "1100000000", districtCode: "1111000000" }) }));
+    expect(listNoticePage).toHaveBeenCalledWith({ searchField: "title", query: "용역",
+      provinceCode: "1100000000", districtCode: "1111000000" }, 1);
+    expect(html).toContain("광역자치단체");
+    expect(html).toContain("수집 양식");
+  });
 });

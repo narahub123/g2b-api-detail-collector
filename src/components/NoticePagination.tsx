@@ -8,7 +8,7 @@ export function NoticePagination({ basePath = "/", page, totalPages, filters }: 
 
   const href = (target: number) => {
     const params = new URLSearchParams();
-    for (const key of ["searchField", "query", "postedFrom", "postedTo", "deadlineFrom", "deadlineTo", "minAmount", "maxAmount"] as const) {
+    for (const key of ["searchField", "query", "postedFrom", "postedTo", "deadlineFrom", "deadlineTo", "minAmount", "maxAmount", "provinceCode", "districtCode"] as const) {
       const value = filters[key];
       if (value) params.set(key, value);
     }

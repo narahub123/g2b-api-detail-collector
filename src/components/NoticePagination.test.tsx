@@ -36,4 +36,11 @@ describe("NoticePagination", () => {
     render(<NoticePagination basePath="/admin" page={2} totalPages={3} filters={{ searchField: "title", query: "용역" }} />);
     expect(screen.getByRole("link", { name: "다음" })).toHaveAttribute("href", "/admin?searchField=title&query=%EC%9A%A9%EC%97%AD&page=3");
   });
+
+  it("검색과 지역 조건을 유지하며 페이지를 이동합니다", () => {
+    render(<NoticePagination page={1} totalPages={3} filters={{ query: "용역", searchField: "title",
+      provinceCode: "1100000000", districtCode: "1111000000" }} />);
+    expect(screen.getByRole("link", { name: "다음" })).toHaveAttribute("href",
+      "/?searchField=title&query=%EC%9A%A9%EC%97%AD&provinceCode=1100000000&districtCode=1111000000&page=2");
+  });
 });

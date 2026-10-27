@@ -5,6 +5,7 @@ import type { StoredNotice } from "./notices";
 import type { IndependentDetail, StructuredNoticeDetail } from "./structured-data";
 import type { ModalCapture } from "./detail-page";
 import type { NoticeFilters } from "./notice-filters";
+import regions from "@/data/regions.json";
 
 type Category = "order-plan" | "pre-specification" | "other" | "opening";
 type Queryable = Pick<pg.PoolClient, "query">;
@@ -151,6 +152,28 @@ export async function getStoredNotice(key: string): Promise<StoredNotice | null>
     independentTriggers: refs.rows.flatMap((item) => item.triggers.map((trigger) => ({ number: item.detail_key, trigger }))) };
 }
 
+/** 선택한 지역의 고유 명칭을 쉼표 경계에서만 찾는 SQL 정규식으로 만듭니다. */
+function regionPattern(filters: NoticeFilters): string | undefined {
+  if (!filters.provinceCode) return undefined;
+  const province = regions.find((item) => item.code === filters.provinceCode);
+  if (!province) throw new Error("잘못된 광역자치단체 코드입니다.");
+  const districts = filters.districtCode
+    ? province.districts.filter((item) => item.code === filters.districtCode)
+    : province.districts;
+  if (filters.districtCode && !districts.length) throw new Error("잘못된 기초자치단체 코드입니다.");
+
+  // 같은 이름의 기초자치단체는 광역명이 함께 적힌 경우에만 구분할 수 있습니다.
+  const names = new Set([province.name]);
+  for (const district of districts) {
+    names.add(`${province.name} ${district.name}`);
+    if (regions.filter((item) => item.districts.some((entry) => entry.name === district.name)).length === 1) {
+      names.add(district.name);
+    }
+  }
+  const escape = (name: string) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return `(^|,)[[:space:]]*(${[...names].map(escape).join("|")})[[:space:]]*(,|$)`;
+}
+
 /** 건수와 목록 조회에 공통으로 적용할 검색·필터 SQL을 구성합니다. */
 function noticeWhere(filters: NoticeFilters): { where: string; values: string[] } {
   const clauses: string[] = [];
@@ -172,6 +195,7 @@ function noticeWhere(filters: NoticeFilters): { where: string; values: string[] 
   add((index) => `deadline_at < ($${index}::date + interval '1 day')`, filters.deadlineTo);
   add((index) => `amount >= $${index}::numeric`, filters.minAmount);
   add((index) => `amount <= $${index}::numeric`, filters.maxAmount);
+  add((index) => `region ~ $${index}`, regionPattern(filters));
   return { where: clauses.length ? ` WHERE ${clauses.join(" AND ")}` : "", values };
 }
 
