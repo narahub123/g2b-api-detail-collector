@@ -1,4 +1,5 @@
-import { appendFile, mkdir, writeFile } from "node:fs/promises";
+import { traceRisk } from "./risk-trace";
+import { writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { extractCommonSections } from "./common-content-extractor";
@@ -149,12 +150,9 @@ type PaginationDiagnostic = {
   firstRowNumber?: string;
 };
 
-/** 진행 로그는 서버 터미널에 남기며, 페이지 번호·누적 행 수·단계·소요 시간을 함께 표시합니다. */
+// 기존 진행 출력 대신 페이지 상태 전환을 구조화해 기록합니다.
 function logPagination(d: PaginationDiagnostic, message: string): void {
-  console.info(
-    `[g2b-pagination] table=${d.tableId} page=${d.pageNumber}/${d.totalPages} ` +
-      `rows=${d.collectedRows}/${d.totalRows} stage=${d.stage} elapsedMs=${Date.now() - d.startedAt} ${message}`,
-  );
+  traceRisk("pagination", "progress", { ...d, elapsedMs: Date.now() - d.startedAt, message });
 }
 
 /** 실패 시 해당 표와 페이지 버튼의 실제 DOM 상태를 별도 파일로 남깁니다. */
@@ -222,7 +220,7 @@ async function capturePaginationFailure(
       "utf8",
     );
   } catch (captureError) {
-    console.error("[g2b-pagination] 진단 스냅샷 저장 실패", captureError);
+    traceRisk("pagination", "legacy-diagnostic", { message: "console.error(\"[g2b-pagination] 진단 스냅샷 저장 실패\", captureError);" });
   }
   const details =
     `table=${diagnostic.tableId}, page=${diagnostic.pageNumber}/${diagnostic.totalPages}, ` +
@@ -231,7 +229,7 @@ async function capturePaginationFailure(
     `visible=${diagnostic.visibleRows ?? "unknown"}, selected=${diagnostic.selectedPage ?? "unknown"}, ` +
     `firstRowNo=${diagnostic.firstRowNumber ?? "unknown"}, ` +
     `elapsedMs=${Date.now() - diagnostic.startedAt}, snapshot=${snapshotPath}`;
-  console.error(`[g2b-pagination] 실패: ${details}`, reason);
+  traceRisk("pagination", "legacy-diagnostic", { message: "console.error(`[g2b-pagination] 실패: ${details}`, reason);" });
   return details;
 }
 
@@ -244,9 +242,7 @@ export async function advanceModalPage(
 ): Promise<void> {
   const pager = await gridPager(page, dialogId, tableId);
   // 클릭 전에 선택된 페이지를 남겨 페이지 이동 자체가 실패했는지 구분합니다.
-  console.info(
-    `[g2b-pagination] advance table=${tableId} selectedBefore=${pager?.selectedPage ?? "unknown"} nextIndex=${pager?.nextIndex ?? -1}`,
-  );
+  traceRisk("pagination", "legacy-diagnostic", { message: "console.info(\n    `[g2b-pagination] advance table=${tableId} selectedBefore=${pager?.selectedPage ?? \"unknown\"} nextIndex=${pager?.nextIndex ?? -1}`,\n  );" });
   if (!pager?.enabled)
     throw new ModalPaginationError("표의 다음 페이지 버튼을 찾지 못했습니다.");
   const table = page.locator(`[id=${JSON.stringify(tableId)}]`);
@@ -283,19 +279,13 @@ export async function advanceModalPage(
     // DOM 변경을 기다리는 동안에도 2초마다 진행 상태를 출력해 멈춘 것처럼 보이지 않게 합니다.
     if (Date.now() - lastProgressLog >= 2000) {
       const state = await gridPager(page, dialogId, tableId);
-      console.info(
-        `[g2b-pagination] 대기 중 stage=페이지 이동 후 DOM 변경 table=${tableId} ` +
-          `selectedBefore=${pager.selectedPage ?? "unknown"} selectedNow=${state?.selectedPage ?? "unknown"} ` +
-          `elapsedMs=${Date.now() - started} timeoutMs=${timeoutMs}`,
-      );
+      traceRisk("pagination", "legacy-diagnostic", { message: "console.info(\n        `[g2b-pagination] 대기 중 stage=페이지 이동 후 DOM 변경 table=${tableId} ` +\n          `selectedBefore=${pager.selectedPage ?? \"unknown\"} selectedNow" });
       lastProgressLog = Date.now();
     }
     // 기존 완료 조건은 변경하지 않습니다. 여기서는 행 텍스트 변경이 감지된 사실만 기록합니다.
     if (JSON.stringify(current) !== JSON.stringify(before)) {
       const after = await gridPager(page, dialogId, tableId);
-      console.info(
-        `[g2b-pagination] advance table=${tableId} selectedAfter=${after?.selectedPage ?? "unknown"} changed=true elapsedMs=${Date.now() - started}`,
-      );
+      traceRisk("pagination", "legacy-diagnostic", { message: "console.info(\n        `[g2b-pagination] advance table=${tableId} selectedAfter=${after?.selectedPage ?? \"unknown\"} changed=true elapsedMs=${Date.now() - started" });
       return;
     }
     await page.waitForTimeout(100);
@@ -311,26 +301,12 @@ const tablesIn = (sections: StructuredSection[]): StructuredTable[] =>
     ...section.fields.flatMap((field) => field.tables || []),
   ]);
 
-/** 호출 원인을 추적하기 위한 실행별 ID입니다. 서버 프로세스 내에서 증가합니다. */
+// 호출 간 상위/하위 관계를 확인하기 위한 실행별 식별자입니다.
 let paginationInvocationSequence = 0;
-
-/**
- * 재수집 호출과 페이지 상태 변화를 터미널 및 JSONL 파일에 함께 기록합니다.
- * 파일 기록 실패는 실제 수집 흐름을 중단하지 않습니다.
- */
 async function tracePagination(event: Record<string, unknown>): Promise<void> {
-  const record = { timestamp: new Date().toISOString(), ...event };
-  console.info(`[g2b-pagination-trace] ${JSON.stringify(record)}`);
-  try {
-    const directory = join(process.cwd(), ".g2b-pagination-debug");
-    await mkdir(directory, { recursive: true });
-    await appendFile(join(directory, "invocations.jsonl"), JSON.stringify(record) + "\n", "utf8");
-  } catch (error) {
-    console.error("[g2b-pagination-trace] 로그 파일 저장 실패", error);
-  }
+  traceRisk("pagination", String(event.event || "state"), event);
 }
 
-/** 현재 선택된 페이지 번호를 관측합니다. DOM 상태만 읽고 변경하지 않습니다. */
 async function selectedPaginationPage(page: Page, dialogId: string | null, tableId: string | null): Promise<number | null> {
   if (!tableId) return null;
   return (await gridPager(page, dialogId, tableId))?.selectedPage ?? null;
@@ -398,7 +374,9 @@ export async function collectPaginatedModal(
         const selectedBefore = await selectedPaginationPage(page, dialogId, table.sourceId);
         await tracePagination({ event: "advance-before", invocationId, dialogId, tableId: table.sourceId, expectedPage: currentPage + 1, selectedBefore });
         // 하위 탐색이 페이지를 초기화한 경우 현재 페이지까지 복구합니다.
+        // 복구가 발생하면 복구 시작 페이지와 목표 페이지를 함께 기록합니다.
         if (selectedBefore !== null && selectedBefore !== currentPage) {
+          traceRisk("pagination", "restore-start", { invocationId, dialogId, tableId: table.sourceId, selectedBefore, currentPage });
           if (selectedBefore < 1 || selectedBefore > currentPage)
             throw new ModalPaginationError(`페이지 상태 불일치: expected=${currentPage}, actual=${selectedBefore}`);
           for (let number = selectedBefore; number < currentPage; number++) {
@@ -410,6 +388,7 @@ export async function collectPaginatedModal(
         }
         await advanceModalPage(page, dialogId, table.sourceId, options.timeoutMs);
         const actualNextPage = await selectedPaginationPage(page, dialogId, table.sourceId);
+        traceRisk("pagination", "advance-check", { invocationId, dialogId, tableId: table.sourceId, expected: currentPage + 1, actual: actualNextPage });
         if (actualNextPage !== currentPage + 1)
           throw new ModalPaginationError(`페이지 이동 불일치: expected=${currentPage + 1}, actual=${actualNextPage}`);
         currentPage++;
