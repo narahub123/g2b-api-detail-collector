@@ -7,7 +7,7 @@ export type StructuredTable = { headerRows: StructuredTableCell[][]; bodyRows: S
   visible?: boolean; headerRowVisibility?: boolean[]; bodyRowVisibility?: boolean[]; columnVisibility?: boolean[];
   sourceId?: string; pagination?: { status: "complete" | "partial" | "unknown"; expectedTotal?: number;
     collectedRows: number; pageRanges: { page: number; start: number; count: number }[];
-    missingPages?: number[]; errors: string[] } };
+    missingPages?: number[]; errors: string[]; warnings?: string[] } };
 export type LegacyStructuredTable = { columns: string[]; rows: (string | null)[][] };
 
 /** 병합 셀이 경계에 걸리지 않도록 목표 행 수와 가장 가까운 안전한 구간으로 나눕니다. */

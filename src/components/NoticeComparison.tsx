@@ -1,3 +1,6 @@
+"use client";
+
+import { useState } from "react";
 import type { ApiNotice } from "@/lib/g2b/types";
 import type { ModalCapture, ScrapedDetail, StructuredField, StructuredTable } from "@/lib/g2b/detail-page";
 import { apiFieldDisplayName } from "@/lib/g2b/api-field-labels";
@@ -201,6 +204,3 @@ export function NoticeComparison({ api, detail, orderPlans = [], preSpecificatio
     </div>
   </>;
 }
-"use client";
-
-import { useState } from "react";

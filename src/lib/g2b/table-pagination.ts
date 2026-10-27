@@ -133,31 +133,46 @@ export async function collectPaginatedTables(page: Page, scope: Locator,
     if (pages.size >= 10000) errors.push("페이지 순회 한도에 도달했습니다.");
     const ordered = [...pages].sort(([a], [b]) => a - b);
     const anchor = ordered[0]?.[1] || first.table;
-    const bodyRows = ordered.flatMap(([, table]) => table.bodyRows);
-    const bodyRowVisibility = ordered.flatMap(([, table]) => table.bodyRowVisibility || table.bodyRows.map(() => true));
+    const bodyRows: StructuredTable["bodyRows"] = [];
+    const bodyRowVisibility: boolean[] = [];
     const ranges: { page: number; start: number; count: number }[] = [];
-    for (const [pageNumber, table] of ordered) ranges.push({ page: pageNumber,
-      start: ranges.length ? ranges.at(-1)!.start + ranges.at(-1)!.count : 0, count: table.bodyRows.length });
+    const warnings: string[] = [];
+    const numberHeader = anchor.headerRows.flat().find((cell) => /^(No|번호)$/i.test(cell.value?.trim() || ""));
+    const seen = new Set<number>();
+    const rowNumber = (row: StructuredTable["bodyRows"][number]) =>
+      Number(row.find((cell) => cell.column === numberHeader?.column)?.value);
+    for (const [pageNumber, table] of ordered) {
+      const start = bodyRows.length;
+      const priorPages = new Set(seen);
+      const visibility = table.bodyRowVisibility || table.bodyRows.map(() => true);
+      let removed = 0;
+      table.bodyRows.forEach((row, index) => {
+        const number = rowNumber(row);
+        const repeated = numberHeader && Number.isSafeInteger(number) && priorPages.has(number);
+        // 원본의 행 순번으로 중복을 확인하고, rowspan 경계를 침범하지 않는 행만 제외합니다.
+        const safeToRemove = repeated && row.every((cell) => cell.rowspan === 1) &&
+          table.bodyRows.slice(0, index).every((earlier, earlierIndex) =>
+            earlier.every((cell) => earlierIndex + cell.rowspan <= index));
+        if (safeToRemove) { removed++; return; }
+        if (repeated || (numberHeader && Number.isSafeInteger(number) && seen.has(number)))
+          errors.push(`행 번호 ${number}가 여러 페이지에 나타났습니다.`);
+        bodyRows.push(row);
+        bodyRowVisibility.push(visibility[index]);
+        if (numberHeader && Number.isSafeInteger(number) && number > 0) seen.add(number);
+      });
+      if (removed) warnings.push(`${pageNumber}페이지의 중복 순번 ${removed}행을 제외했습니다.`);
+      ranges.push({ page: pageNumber, start, count: bodyRows.length - start });
+    }
     const expectedTotal = match.total;
     if (expectedTotal !== undefined && bodyRows.length !== expectedTotal)
       errors.push(`전체 ${expectedTotal}건 중 ${bodyRows.length}건을 수집했습니다.`);
-    const numberHeader = anchor.headerRows.flat().find((cell) => /^(No|번호)$/i.test(cell.value?.trim() || ""));
-    if (numberHeader) {
-      const seen = new Set<number>();
-      for (const row of bodyRows) {
-        const number = Number(row.find((cell) => cell.column === numberHeader.column)?.value);
-        if (!Number.isSafeInteger(number) || number < 1) continue;
-        if (seen.has(number)) { errors.push(`행 번호 ${number}가 여러 페이지에 나타났습니다.`); break; }
-        seen.add(number);
-      }
-    }
     const capturedPages = new Set(ranges.map((range) => range.page));
     const missingPages = pageCount && pageCount <= 10000
       ? Array.from({ length: pageCount }, (_, index) => index + 1).filter((value) => !capturedPages.has(value)) : [];
     if (missingPages.length && !errors.length) errors.push(`${missingPages.length}개 페이지를 수집하지 못했습니다.`);
     results.set(match.gridId, { ...anchor, bodyRows, bodyRowVisibility,
       pagination: { status: match.ambiguous ? "unknown" : errors.length ? "partial" : "complete", expectedTotal,
-        collectedRows: bodyRows.length, pageRanges: ranges, missingPages, errors } });
+        collectedRows: bodyRows.length, pageRanges: ranges, missingPages, errors, warnings } });
     if (ordered.length > 1) {
       const firstPage = ordered[0][0];
       const returnLink = pager.locator(`.w2pageList_control_pagePrev a, a[role="button"][index="${firstPage}"], [data-page="${firstPage}"]`).first();

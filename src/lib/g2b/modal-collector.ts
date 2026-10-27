@@ -415,6 +415,7 @@ export async function collectModalContents(
     parentModalTitle: string | null,
     depth: number,
     path: ModalTriggerStep[],
+    ancestors: ReadonlySet<string>,
   ): Promise<void> => {
     // 순환 경로에서 탐색이 무한히 이어지지 않도록 깊이와 클릭 시도 횟수를 제한합니다.
     // 중첩 깊이는 4단계, 전체 클릭 시도는 60회로 제한하여 탐색이 무한히 확장되지 않게 합니다.
@@ -455,6 +456,13 @@ export async function collectModalContents(
           // 모달 HTML을 구조화하고, 실제 저장할 만한 데이터가 있는지 기존 기준으로 판단합니다.
           const currentPath = [...path, { id: candidate.id, index: candidate.index,
             label: candidate.label, value: candidate.value }];
+          const preview = extractModalStructure(fresh.html, page.url());
+          const noticeNumber = preview.fields.find((field) => field.label === "입찰공고번호");
+          const identityNumber = noticeNumber && fieldText(noticeNumber.value);
+          const modalIdentity = identityNumber && preview.title
+            ? `${preview.title}\u0000${identityNumber}` : null;
+          // 같은 공고 팝업을 그 내부의 공고번호 링크로 다시 연 경우 순환 탐색을 멈춥니다.
+          if (modalIdentity && ancestors.has(modalIdentity)) continue;
           const modalIndex = captures.length;
           const clickDownloads = fresh.id
             ? await collectClickDownloads(page, page.locator(`[id=${JSON.stringify(fresh.id)}]`)) : [];
@@ -506,7 +514,9 @@ export async function collectModalContents(
           // 데이터 저장 여부와 독립적으로 새로운 모달의 하위 컨트롤을 탐색합니다.
           // 이미 확인한 동일 내용의 모달은 다시 탐색하지 않습니다.
           if (fresh.id && !isDuplicate) {
-            await explore(fresh.id, fresh.title, depth + 1, currentPath);
+            const nextAncestors = new Set(ancestors);
+            if (modalIdentity) nextAncestors.add(modalIdentity);
+            await explore(fresh.id, fresh.title, depth + 1, currentPath, nextAncestors);
           }
         }
       } catch (error) {
@@ -547,7 +557,7 @@ export async function collectModalContents(
   };
   // 최상위 페이지부터 시작하고, 저장 결과와 탐색 통계를 함께 반환합니다.
   // 페이지 본문에서 시작하여 새 모달을 발견할 때마다 재귀적으로 하위 후보를 탐색합니다.
-  await explore(null, null, 0, []);
+  await explore(null, null, 0, [], new Set());
   return {
     captures,
     discovery: {

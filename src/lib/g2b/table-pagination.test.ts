@@ -53,7 +53,8 @@ it("walks a WebSquare page group to its final page and records source ranges", a
       <a role="button" index="2">2</a><span class="w2pageList_control_next"><a>다음</a></span></div></div></div>
       <script>window.$w={getComponentById:()=>({pageCount:3})};
       const pager=document.querySelector('#pager');
-      function show(n){document.querySelector('tbody').innerHTML='<tr><td col_id="no">'+n+'</td></tr>';
+      function show(n){document.querySelector('tbody').innerHTML='<tr><td col_id="no">'+n+'</td></tr>'+
+        (n===3?'<tr><td col_id="no">2</td></tr>':'');
         pager.querySelectorAll('[index]').forEach(a=>a.className=Number(a.getAttribute('index'))===n?'w2pageList_label_selected':'');
         if(n===3) pager.classList.add('w2pageList_next_last');}
       pager.querySelector('[index="2"]').onclick=()=>show(2);
@@ -67,6 +68,7 @@ it("walks a WebSquare page group to its final page and records source ranges", a
     expect(table.pagination).toMatchObject({ status: "complete", expectedTotal: 3,
       missingPages: [], pageRanges: [{ page: 1, start: 0, count: 1 },
         { page: 2, start: 1, count: 1 }, { page: 3, start: 2, count: 1 }] });
+    expect(table.pagination?.warnings).toContain("3페이지의 중복 순번 1행을 제외했습니다.");
   } finally { await browser.close(); }
 }, 20000);
 
