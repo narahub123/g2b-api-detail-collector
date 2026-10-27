@@ -1,18 +1,20 @@
 import type { NoticeFilterValues } from "@/lib/g2b/notice-filters";
 
-/** 사용자 목록의 검색 및 범위 조건을 GET 양식으로 제공합니다. */
-export function UserNoticeFilters({
+/** 공고 목록의 검색 및 범위 조건을 지정한 경로의 GET 양식으로 제공합니다. */
+export function NoticeFilters({
+  basePath = "/",
   values,
   error,
 }: {
+  basePath?: "/" | "/admin";
   values: NoticeFilterValues;
   error: string | null;
 }) {
   return (
     <form
-      action="/"
+      action={basePath}
       method="get"
-      className="user-notice-filters"
+      className="notice-filters"
       aria-label="공고 검색 및 필터"
     >
       <div className="filter-search">
@@ -98,7 +100,7 @@ export function UserNoticeFilters({
         </p>
       )}
       <div className="filter-actions">
-        <a href="/">조건 초기화</a>
+        <a href={basePath}>조건 초기화</a>
         <button type="submit">검색 및 필터 적용</button>
       </div>
     </form>

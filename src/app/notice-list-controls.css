@@ -1,4 +1,4 @@
-.user-notice-filters {
+.notice-filters {
   background: #fff;
   border: 1px solid #dfe6e8;
   border-radius: 14px;
@@ -17,7 +17,7 @@
 .filter-ranges {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
-.user-notice-filters label {
+.notice-filters label {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -26,8 +26,8 @@
   font-weight: 700;
   min-width: 0;
 }
-.user-notice-filters input,
-.user-notice-filters select {
+.notice-filters input,
+.notice-filters select {
   width: 100%;
   height: 42px;
   border: 1px solid #ced9df;
@@ -37,7 +37,7 @@
   color: #172335;
   font: inherit;
 }
-.user-notice-filters fieldset {
+.notice-filters fieldset {
   border: 1px solid #e0e6e9;
   border-radius: 9px;
   padding: 12px;
@@ -46,7 +46,7 @@
   gap: 10px;
   min-width: 0;
 }
-.user-notice-filters legend {
+.notice-filters legend {
   padding: 0 4px;
   color: #52616c;
   font-size: 13px;
@@ -85,7 +85,7 @@
   .filter-search {
     grid-template-columns: 1fr;
   }
-  .user-notice-filters fieldset {
+  .notice-filters fieldset {
     grid-template-columns: 1fr;
   }
 }

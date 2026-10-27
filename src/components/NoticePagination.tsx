@@ -1,7 +1,9 @@
 import type { NoticeFilters } from "@/lib/g2b/notice-filters";
 
-/** 검색 조건을 유지하면서 사용자 목록의 페이지 이동 링크를 표시합니다. */
-export function UserNoticePagination({ page, totalPages, filters }: { page: number; totalPages: number; filters: NoticeFilters }) {
+/** 검색 조건과 목록 경로를 유지하면서 페이지 이동 링크를 표시합니다. */
+export function NoticePagination({ basePath = "/", page, totalPages, filters }: {
+  basePath?: "/" | "/admin"; page: number; totalPages: number; filters: NoticeFilters;
+}) {
   if (totalPages <= 1) return null;
 
   const href = (target: number) => {
@@ -11,7 +13,7 @@ export function UserNoticePagination({ page, totalPages, filters }: { page: numb
       if (value) params.set(key, value);
     }
     params.set("page", String(target));
-    return `/?${params}`;
+    return `${basePath}?${params}`;
   };
   const item = (label: string, target: number, disabled: boolean) => disabled
     ? <span className="page-disabled" aria-disabled="true">{label}</span>

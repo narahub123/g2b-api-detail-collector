@@ -18,19 +18,19 @@ export type NoticeRecord = { api: ApiNotice | null; detail: ScrapedDetail | null
   orderPlans: IndependentReference[]; preSpecifications: IndependentReference[]; otherDetails: IndependentReference[];
   openingDetails: IndependentReference[] };
 const defaultDataDir = () => join(process.cwd(), "data");
-const userPageSize = 10;
+const pageSize = 10;
 
-/** 사용자 목록의 전체 건수와 현재 페이지 공고만 DB에서 조회합니다. */
-export async function listUserNoticePage(filters: NoticeFilters, requestedPage: number): Promise<{
+/** 검색 조건에 맞는 전체 건수와 현재 페이지 공고만 DB에서 조회합니다. */
+export async function listNoticePage(filters: NoticeFilters, requestedPage: number): Promise<{
   notices: NormalizedNotice[]; totalCount: number; page: number; totalPages: number;
 }> {
   const totalCount = await countStoredNotices(filters);
-  const totalPages = Math.ceil(totalCount / userPageSize);
+  const totalPages = Math.ceil(totalCount / pageSize);
   const page = totalPages ? Math.min(requestedPage, totalPages) : 1;
   if (!totalCount) return { notices: [], totalCount, page, totalPages };
 
   // 현재 페이지의 키만 가져와 기존 상세 정규화 흐름에 전달합니다.
-  const keys = await listStoredNoticeKeys(filters, { limit: userPageSize, offset: (page - 1) * userPageSize });
+  const keys = await listStoredNoticeKeys(filters, { limit: pageSize, offset: (page - 1) * pageSize });
   const notices = await Promise.all(keys.map((key) => getNotice(key)));
   return { notices: notices.filter((notice): notice is NormalizedNotice => notice !== null), totalCount, page, totalPages };
 }
