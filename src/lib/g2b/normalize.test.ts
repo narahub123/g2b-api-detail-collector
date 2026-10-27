@@ -15,7 +15,8 @@ describe("normalizeNotice", () => {
         { label: "공고기관", visible: false, value: [{ text: "숨긴 기관", visible: true }] }
       ] }] });
     expect(notice.title).toEqual({ value: "표시 제목", source: "detail" });
-    expect(notice.agency).toEqual({ value: "발주기관", source: "api" });
+    expect(notice.demandAgency).toEqual({ value: "발주기관", source: "api" });
+    expect(notice.noticeAgency).toEqual({ value: null, source: null });
   });
 
   it("uses the first nonempty occurrence of a label in section order", () => {
@@ -31,8 +32,27 @@ describe("normalizeNotice", () => {
     ] };
     const notice = normalizeNotice(api, detail);
     expect(notice.title).toEqual({ value: "첫 유효 공고명", source: "detail" });
-    expect(notice.agency).toEqual({ value: "첫 기관", source: "detail" });
+    expect(notice.noticeAgency).toEqual({ value: "첫 기관", source: "detail" });
+    expect(notice.demandAgency).toEqual({ value: "발주기관", source: "api" });
     expect(notice.region).toEqual({ value: "서울", source: "detail" });
+  });
+
+  it("수요기관과 공고기관을 각각 해당 상세 필드와 API 필드에서 선택합니다", () => {
+    const notice = normalizeNotice({ ...api, ntceInsttNm: "조달청" }, {
+      sourceUrl: "https://www.g2b.go.kr/", attachments: [], links: [],
+      sections: [{ title: "공고일반", tables: [], fields: [
+        { label: "수요기관", value: [{ text: "국무조정실", visible: true }] },
+        { label: "공고기관", visible: false, value: [{ text: "숨긴 공고기관", visible: true }] }
+      ] }]
+    });
+    expect(notice.demandAgency).toEqual({ value: "국무조정실", source: "detail" });
+    expect(notice.noticeAgency).toEqual({ value: "조달청", source: "api" });
+  });
+
+  it("한 기관만 있으면 다른 기관을 채우지 않습니다", () => {
+    const notice = normalizeNotice({ bidNtceNo: "R26BK1", bidNtceOrd: "000", ntceInsttNm: "조달청" }, null);
+    expect(notice.demandAgency).toEqual({ value: null, source: null });
+    expect(notice.noticeAgency).toEqual({ value: "조달청", source: "api" });
   });
 
   it("keeps source labels when rendered detail values take priority", () => {
