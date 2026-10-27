@@ -1,8 +1,12 @@
+"use client";
+
+import { useState } from "react";
 import type { ApiNotice } from "@/lib/g2b/types";
 import type { ModalCapture, ScrapedDetail, StructuredField, StructuredTable } from "@/lib/g2b/detail-page";
 import { apiFieldDisplayName } from "@/lib/g2b/api-field-labels";
 import type { IndependentReference } from "@/lib/g2b/notices";
-import { tableForDisplay } from "@/lib/g2b/structured-table";
+import { paginateTableRows, tableForDisplay } from "@/lib/g2b/structured-table";
+import { TablePageControls } from "./TablePageControls";
 import { safeAttachmentLink } from "@/lib/g2b/attachment-links";
 import { contentSections } from "@/lib/g2b/content-sections";
 import { attachmentLinkMap } from "@/lib/g2b/attachment-map";
@@ -46,19 +50,23 @@ function FieldList({ fields, apiLabels = false, group = "필드", links }: { fie
 
 /** 추출된 표 셀의 파일명을 해당 자료에서 확인한 다운로드 URL과 연결합니다. */
 function DataTable({ table, name, links }: { table: StructuredTable; name: string; links?: ReadonlyMap<string, string> }) {
+  const [pageIndex, setPageIndex] = useState(0);
   const structured = tableForDisplay(table);
   if (!structured.bodyRows.some((row) => row.some((cell) => Boolean(cell.value?.trim()))))
     return <p className="muted comparison-empty">표에 값이 없습니다.</p>;
+  const pages = paginateTableRows(structured.bodyRows);
+  const current = Math.min(pageIndex, pages.length - 1);
   return <div className="comparison-table-wrap"><table className="comparison-table" aria-label={name}>
     <thead>{structured.headerRows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) =>
       <th key={cellIndex} scope={cell.colspan > 1 ? "colgroup" : "col"} rowSpan={cell.rowspan} colSpan={cell.colspan}>
         <LinkedValue value={cell.value || ""} links={links} /></th>
     )}</tr>)}</thead>
-    <tbody>{structured.bodyRows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) =>
+    <tbody>{pages[current].map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) =>
       <td key={cellIndex} rowSpan={cell.rowspan} colSpan={cell.colspan}>
         <LinkedValue value={cell.value ?? ""} links={links} /></td>
     )}</tr>)}</tbody>
-  </table></div>;
+  </table><TablePageControls pagination={table.pagination} page={current} count={pages.length}
+    onPage={setPageIndex} /></div>;
 }
 
 /** 한 자료에 속한 표와 다운로드 링크를 함께 표시합니다. */

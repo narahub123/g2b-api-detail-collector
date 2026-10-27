@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { NoticeComparison } from "./NoticeComparison";
 import type { ScrapedDetail, StructuredTable } from "@/lib/g2b/detail-page";
@@ -279,5 +279,17 @@ describe("NoticeComparison", () => {
       settling: { status: "timeout" as const, elapsedMs: 8000 } }] };
     render(<NoticeComparison api={null} detail={uncertain} />);
     expect(screen.getByRole("region", { name: "클릭 상세 정보" })).toHaveTextContent("값 로딩 확인 시간 초과");
+  });
+
+  it("paginates the raw comparison table independently", () => {
+    const rows = Array.from({ length: 12 }, (_, index) => [String(index + 1)]);
+    const long = { ...detail, modalCaptures: [], sections: [{ title: "목록", fields: [],
+      tables: [simpleTable(["No"], rows)] }] };
+    render(<NoticeComparison api={null} detail={long} />);
+    expect(screen.getByText("1 / 2")).toBeInTheDocument();
+    const pager = screen.getByRole("navigation", { name: "표 페이지 이동" });
+    fireEvent.click(within(pager).getByRole("button", { name: "다음" }));
+    expect(screen.getByText("2 / 2")).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: "11" })).toBeInTheDocument();
   });
 });

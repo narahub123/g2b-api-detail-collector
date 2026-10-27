@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { NoticeUserView } from "./NoticeUserView";
 import type { ScrapedDetail } from "@/lib/g2b/detail-page";
@@ -222,5 +222,22 @@ describe("NoticeUserView", () => {
     const table = screen.getByRole("table");
     expect(within(table).getAllByRole("cell").map((cell) => cell.textContent)).toEqual(["공고문.pdf", "123 KB"]);
     expect(within(table).getByRole("columnheader", { name: "파일크기" })).toHaveAttribute("colspan", "1");
+  });
+
+  it("shows stored table rows ten at a time and reports partial collection", () => {
+    const rows = Array.from({ length: 12 }, (_, index) => [{ value: `행 ${index + 1}`,
+      column: 0, rowspan: 1, colspan: 1 }]);
+    render(<NoticeUserView detail={{ ...detail, sections: [{ title: "긴 목록", fields: [], tables: [{
+      headerRows: [[{ value: "값", column: 0, rowspan: 1, colspan: 1 }]], bodyRows: rows,
+      pagination: { status: "partial", expectedTotal: 15, collectedRows: 12,
+        pageRanges: [{ page: 1, start: 0, count: 10 }, { page: 2, start: 10, count: 2 }],
+        missingPages: [3], errors: ["페이지 전환 실패"] }
+    }] }] }} />);
+    expect(screen.getByText(/수집 12건 \/ 전체 15건/)).toBeInTheDocument();
+    expect(screen.getByText("행 1")).toBeInTheDocument();
+    expect(screen.queryByText("행 11")).not.toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole("navigation", { name: "표 페이지 이동" })).getByRole("button", { name: "다음" }));
+    expect(screen.getByText("행 11")).toBeInTheDocument();
+    expect(screen.queryByText("행 1")).not.toBeInTheDocument();
   });
 });

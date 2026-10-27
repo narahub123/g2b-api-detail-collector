@@ -6,6 +6,7 @@ import { tableHasValue } from "./structured-table";
 import { createModalDeduplication } from "./modal-deduplication";
 import type { StructuredTable } from "./structured-table";
 import { fieldText } from "./field-value";
+import { applyPaginatedTables, collectPaginatedTables } from "./table-pagination";
 import type {
   ModalCapture,
   ScrapedDetail,
@@ -333,6 +334,8 @@ async function clickCandidates(
             element.hasAttribute("disabled") ||
             element.getAttribute("aria-disabled") === "true" ||
             !!element.closest("nav,header,footer,[id*='navigation']") ||
+            // 표 페이지 이동은 별도 수집기가 처리하므로 모달 열기 후보에서 제외합니다.
+            !!element.closest('.w2pageList,.pagination,[class*="pager"]') ||
             // 관련공고 셀 내부 컨트롤은 이 탐색의 대상에서 제외합니다.
             !!element.closest("td[data-title='관련공고']") ||
             // 폼 제출·초기화·파일 입력 및 다운로드 속성이 있는 요소를 제외합니다.
@@ -412,6 +415,7 @@ export async function collectModalContents(
     parentModalTitle: string | null,
     depth: number,
     path: ModalTriggerStep[],
+    ancestors: ReadonlySet<string>,
   ): Promise<void> => {
     // 순환 경로에서 탐색이 무한히 이어지지 않도록 깊이와 클릭 시도 횟수를 제한합니다.
     // 중첩 깊이는 4단계, 전체 클릭 시도는 60회로 제한하여 탐색이 무한히 확장되지 않게 합니다.
@@ -452,11 +456,23 @@ export async function collectModalContents(
           // 모달 HTML을 구조화하고, 실제 저장할 만한 데이터가 있는지 기존 기준으로 판단합니다.
           const currentPath = [...path, { id: candidate.id, index: candidate.index,
             label: candidate.label, value: candidate.value }];
+          const preview = extractModalStructure(fresh.html, page.url());
+          const noticeNumber = preview.fields.find((field) => field.label === "입찰공고번호");
+          const identityNumber = noticeNumber && fieldText(noticeNumber.value);
+          const modalIdentity = identityNumber && preview.title
+            ? `${preview.title}\u0000${identityNumber}` : null;
+          // 같은 공고 팝업을 그 내부의 공고번호 링크로 다시 연 경우 순환 탐색을 멈춥니다.
+          if (modalIdentity && ancestors.has(modalIdentity)) continue;
           const modalIndex = captures.length;
           const clickDownloads = fresh.id
             ? await collectClickDownloads(page, page.locator(`[id=${JSON.stringify(fresh.id)}]`)) : [];
+          const pagedTables = await collectPaginatedTables(page,
+            fresh.id ? page.locator(`[id=${JSON.stringify(fresh.id)}]`) : page.locator(MODAL_SELECTOR).last());
           const structured = extractModalStructure(fresh.html, page.url(),
             { noticeKey, clickDownloads, modalIndex });
+          structured.sections = applyPaginatedTables(structured.sections, pagedTables);
+          structured.tables = structured.sections.flatMap((section) => section.tables);
+          structured.fields = structured.sections.flatMap((section) => section.fields);
           // 필드 값, 테이블 값 또는 제목 외의 충분한 본문 텍스트 중 하나가 있으면 저장 대상입니다.
           // 필드 값·테이블 값이 하나라도 있거나 제목을 뺀 본문이 20자를 넘으면 저장할 데이터가 있다고 봅니다.
           // 이 기준은 저장 여부 판단용이며 하위 탐색을 막는 조건으로 사용하지 않습니다.
@@ -498,7 +514,9 @@ export async function collectModalContents(
           // 데이터 저장 여부와 독립적으로 새로운 모달의 하위 컨트롤을 탐색합니다.
           // 이미 확인한 동일 내용의 모달은 다시 탐색하지 않습니다.
           if (fresh.id && !isDuplicate) {
-            await explore(fresh.id, fresh.title, depth + 1, currentPath);
+            const nextAncestors = new Set(ancestors);
+            if (modalIdentity) nextAncestors.add(modalIdentity);
+            await explore(fresh.id, fresh.title, depth + 1, currentPath, nextAncestors);
           }
         }
       } catch (error) {
@@ -539,7 +557,7 @@ export async function collectModalContents(
   };
   // 최상위 페이지부터 시작하고, 저장 결과와 탐색 통계를 함께 반환합니다.
   // 페이지 본문에서 시작하여 새 모달을 발견할 때마다 재귀적으로 하위 후보를 탐색합니다.
-  await explore(null, null, 0, []);
+  await explore(null, null, 0, [], new Set());
   return {
     captures,
     discovery: {

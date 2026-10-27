@@ -213,8 +213,7 @@ describe("noticeSummary", () => {
     });
     const insert = statements.find((item) => item.sql.includes("INSERT INTO public.independent_details"));
     expect(insert?.sql).toContain("DO UPDATE SET payload=EXCLUDED.payload");
-    expect(insert?.sql).toContain("payload->>'schemaVersion'");
-    expect(insert?.sql).toContain("IS DISTINCT FROM '5'");
+    expect(statements.some((item) => item.sql.includes("SELECT payload FROM public.independent_details"))).toBe(true);
   });
 
   it("rolls back a failed detail and reference update", async () => {

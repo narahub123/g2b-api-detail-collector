@@ -7,6 +7,7 @@ import { collectAttachments } from "./attachment-collector";
 import { collectModalContents } from "./modal-collector";
 import { collectClickDownloads } from "./attachment-identity";
 import { fieldText } from "./field-value";
+import { applyPaginatedTables, collectPaginatedTables } from "./table-pagination";
 import type { FieldValuePart } from "./field-value";
 export { collectModalContents, extractModalStructure } from "./modal-collector";
 export { collectClickDownloads } from "./attachment-identity";
@@ -30,6 +31,7 @@ export type ModalCapture = {
 };
 export type ScrapedDetail = {
   schemaVersion?: "pilot-5";
+  paginationAudit?: boolean;
   noticeKey?: string;
   sourceUrl: string;
   capturedAt?: string;
@@ -142,6 +144,12 @@ export async function scrapeDetailPage(url: string): Promise<ScrapeResult> {
       return document.documentElement.outerHTML;
     });
     const detail = extractDetailPage(html, url, metadata, clickDownloads);
+    const pagedTables = await collectPaginatedTables(page, page.locator("body"));
+    detail.paginationAudit = true;
+    if (detail.sections) detail.sections = applyPaginatedTables(detail.sections, pagedTables);
+    if (detail.summary) detail.summary.tableRowCount = detail.sections?.reduce((count, section) =>
+      count + [...section.tables, ...section.fields.flatMap((field) => field.tables || [])]
+        .reduce((rows, table) => rows + table.bodyRows.length, 0), 0) || 0;
     const relatedNoticeKeys = extractRelatedNoticeKeys(html);
     // Preserve the original extraction independently of modal exploration failures.
     try {
