@@ -1,3 +1,4 @@
+import { traceRisk } from "./risk-trace";
 import type { ModalCapture, ScrapedDetail, StructuredField, StructuredSection, StructuredTable } from "./detail-page";
 import { fieldText } from "./field-value";
 import { contentSections } from "./content-sections";
@@ -145,10 +146,12 @@ export function structureNoticeDetail(key: string, detail: ScrapedDetail): Struc
 
     // 하위 모달은 부모의 저장 키를 따라가며 독립 상세 안에 연결합니다.
     const parentCandidates = independentParents.get(capture.trigger.parentModalTitle || "") || [];
+    // 부모 경로 후보와 연결 결과를 기록해 다른 행으로 연결되는 오류를 구별합니다.
     const matchingParents = parentCandidates.filter((parent) => {
       if (!parent.path?.length || !capture.trigger.path?.length) return parentCandidates.length === 1;
       return parent.path.every((step, index) => JSON.stringify(step) === JSON.stringify(capture.trigger.path?.[index]));
     });
+    traceRisk("data-link", "parent-match", { noticeKey: key, title, parentTitle: capture.trigger.parentModalTitle, candidateCount: parentCandidates.length, matchCount: matchingParents.length, triggerPath: capture.trigger.path });
     if (matchingParents.length === 1) {
       const parent = matchingParents[0].detail;
       const child = { title: title || capture.trigger.label,
@@ -189,6 +192,7 @@ export function structureNoticeDetail(key: string, detail: ScrapedDetail): Struc
   for (const entity of [...orderPlans, ...preSpecifications, ...otherDetails, ...openingDetails])
     entity.sections = filterNonemptySections(entity.sections);
   const nonemptySections = filterNonemptySections(sections, unresolvedSectionTitles);
+  traceRisk("data-link", "structure-summary", { noticeKey: key, captures: (detail.modalCaptures || []).length, openingDetails: openingDetails.length, independentTriggers: independentTriggers.length, warnings: warnings.length });
   const structured: ScrapedDetail = { ...detail, sections: nonemptySections, modalCaptures };
   if (structured.summary && nonemptySections) {
     structured.summary = {
