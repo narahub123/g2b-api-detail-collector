@@ -2,6 +2,8 @@
 
 import type { StructuredTableCell } from "@/lib/g2b/structured-table";
 
+import { traceTablePagerBoundary } from "./table-pager-trace";
+
 type Row = { cells: StructuredTableCell[]; index: number };
 
 /** 병합 셀이 페이지 경계를 넘지 않도록 표의 표시 행을 묶습니다. */
@@ -17,6 +19,8 @@ export function tablePageRanges(rows: Row[], pageSize = 10): { start: number; en
         if (spanEnd > end) { end = Math.min(rows.length, spanEnd); changed = true; }
       }
     }
+    // 병합 셀로 페이지 크기가 늘어난 경우를 구분할 수 있도록 경계를 추적합니다.
+    if (end - start > pageSize) traceTablePagerBoundary(start, end, pageSize);
     pages.push({ start, end });
     start = end;
   }
