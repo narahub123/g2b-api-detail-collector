@@ -150,7 +150,7 @@ type PaginationDiagnostic = {
   firstRowNumber?: string;
 };
 
-// 기존 진행 출력 대신 페이지 상태 전환을 구조화해 기록합니다.
+// 페이지별 진행 상태를 기존 출력 대신 통합 추적 파일에 기록합니다.
 function logPagination(d: PaginationDiagnostic, message: string): void {
   traceRisk("pagination", "progress", { ...d, elapsedMs: Date.now() - d.startedAt, message });
 }
@@ -220,7 +220,7 @@ async function capturePaginationFailure(
       "utf8",
     );
   } catch (captureError) {
-    traceRisk("pagination", "legacy-diagnostic", { message: "console.error(\"[g2b-pagination] 진단 스냅샷 저장 실패\", captureError);" });
+    traceRisk("pagination", "snapshot-write-error", { error: String(captureError) });
   }
   const details =
     `table=${diagnostic.tableId}, page=${diagnostic.pageNumber}/${diagnostic.totalPages}, ` +
@@ -229,7 +229,7 @@ async function capturePaginationFailure(
     `visible=${diagnostic.visibleRows ?? "unknown"}, selected=${diagnostic.selectedPage ?? "unknown"}, ` +
     `firstRowNo=${diagnostic.firstRowNumber ?? "unknown"}, ` +
     `elapsedMs=${Date.now() - diagnostic.startedAt}, snapshot=${snapshotPath}`;
-  traceRisk("pagination", "legacy-diagnostic", { message: "console.error(`[g2b-pagination] 실패: ${details}`, reason);" });
+  traceRisk("pagination", "failure", { details, error: String(reason) });
   return details;
 }
 
@@ -242,7 +242,7 @@ export async function advanceModalPage(
 ): Promise<void> {
   const pager = await gridPager(page, dialogId, tableId);
   // 클릭 전에 선택된 페이지를 남겨 페이지 이동 자체가 실패했는지 구분합니다.
-  traceRisk("pagination", "legacy-diagnostic", { message: "console.info(\n    `[g2b-pagination] advance table=${tableId} selectedBefore=${pager?.selectedPage ?? \"unknown\"} nextIndex=${pager?.nextIndex ?? -1}`,\n  );" });
+  traceRisk("pagination", "advance-start", { message: `[g2b-pagination] advance table=${tableId} selectedBefore=${pager?.selectedPage ?? "unknown"} nextIndex=${pager?.nextIndex ?? -1}` });
   if (!pager?.enabled)
     throw new ModalPaginationError("표의 다음 페이지 버튼을 찾지 못했습니다.");
   const table = page.locator(`[id=${JSON.stringify(tableId)}]`);
@@ -279,13 +279,15 @@ export async function advanceModalPage(
     // DOM 변경을 기다리는 동안에도 2초마다 진행 상태를 출력해 멈춘 것처럼 보이지 않게 합니다.
     if (Date.now() - lastProgressLog >= 2000) {
       const state = await gridPager(page, dialogId, tableId);
-      traceRisk("pagination", "legacy-diagnostic", { message: "console.info(\n        `[g2b-pagination] 대기 중 stage=페이지 이동 후 DOM 변경 table=${tableId} ` +\n          `selectedBefore=${pager.selectedPage ?? \"unknown\"} selectedNow" });
+      traceRisk("pagination", "advance-wait", { message: `[g2b-pagination] 대기 중 stage=페이지 이동 후 DOM 변경 table=${tableId} ` +
+          `selectedBefore=${pager.selectedPage ?? "unknown"} selectedNow=${state?.selectedPage ?? "unknown"} ` +
+          `elapsedMs=${Date.now() - started} timeoutMs=${timeoutMs}` });
       lastProgressLog = Date.now();
     }
     // 기존 완료 조건은 변경하지 않습니다. 여기서는 행 텍스트 변경이 감지된 사실만 기록합니다.
     if (JSON.stringify(current) !== JSON.stringify(before)) {
       const after = await gridPager(page, dialogId, tableId);
-      traceRisk("pagination", "legacy-diagnostic", { message: "console.info(\n        `[g2b-pagination] advance table=${tableId} selectedAfter=${after?.selectedPage ?? \"unknown\"} changed=true elapsedMs=${Date.now() - started" });
+      traceRisk("pagination", "advance-end", { message: `[g2b-pagination] advance table=${tableId} selectedAfter=${after?.selectedPage ?? "unknown"} changed=true elapsedMs=${Date.now() - started}` });
       return;
     }
     await page.waitForTimeout(100);
@@ -301,7 +303,7 @@ const tablesIn = (sections: StructuredSection[]): StructuredTable[] =>
     ...section.fields.flatMap((field) => field.tables || []),
   ]);
 
-// 호출 간 상위/하위 관계를 확인하기 위한 실행별 식별자입니다.
+// 상위 호출과 중첩된 수집 호출을 구별하는 실행별 번호입니다.
 let paginationInvocationSequence = 0;
 async function tracePagination(event: Record<string, unknown>): Promise<void> {
   traceRisk("pagination", String(event.event || "state"), event);
@@ -374,7 +376,7 @@ export async function collectPaginatedModal(
         const selectedBefore = await selectedPaginationPage(page, dialogId, table.sourceId);
         await tracePagination({ event: "advance-before", invocationId, dialogId, tableId: table.sourceId, expectedPage: currentPage + 1, selectedBefore });
         // 하위 탐색이 페이지를 초기화한 경우 현재 페이지까지 복구합니다.
-        // 복구가 발생하면 복구 시작 페이지와 목표 페이지를 함께 기록합니다.
+        // 페이지 복구 시작점과 목표를 기록해 추가 이동 비용을 추적합니다.
         if (selectedBefore !== null && selectedBefore !== currentPage) {
           traceRisk("pagination", "restore-start", { invocationId, dialogId, tableId: table.sourceId, selectedBefore, currentPage });
           if (selectedBefore < 1 || selectedBefore > currentPage)
