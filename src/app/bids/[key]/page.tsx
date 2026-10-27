@@ -19,7 +19,7 @@ export default async function BidUserViewPage({ params }: { params: Promise<{ ke
     <a href="/" className="back-link">← 공고 목록으로 돌아가기</a>
     <div className="user-view-heading"><span className="eyebrow">BID NOTICE</span>
       <h1>{record.normalized.title.value || "제목 정보 없음"}</h1>
-      <p>수요기관: {record.normalized.demandAgency.value || "정보 없음"} · 공고번호 {record.normalized.number} · {record.normalized.order}차</p>
+      <p>{record.normalized.agency.value || "기관 정보 없음"} · 공고번호 {record.normalized.number} · {record.normalized.order}차</p>
     </div>
     <NoticeStageTabs
       targets={{ currentKey: key, relatedKeys: [...new Set([...record.relatedNoticeKeys,

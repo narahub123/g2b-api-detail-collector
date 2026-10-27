@@ -19,8 +19,7 @@ export function NoticeDetail({ notice, relatedNoticeKeys = [], relatedNoticeStat
     <section className="detail-hero">
       <span className="eyebrow">SERVICE BID NOTICE</span>
       <h1>{notice.title.value || "제목 정보 없음"}</h1>
-      <p><span>수요기관: {notice.demandAgency.value || "정보 없음"}</span><br />
-        <span>공고기관: {notice.noticeAgency.value || "정보 없음"}</span></p>
+      <p>{notice.agency.value || "기관 정보 없음"}</p>
       <div className="detail-id">공고번호 {notice.number} <span>차수 {notice.order}</span></div>
     </section>
 

@@ -6,8 +6,7 @@ import type { NormalizedNotice } from "@/lib/g2b/normalize";
 
 const field = (value: string | null) => ({ value, source: value ? "api" as const : null });
 const notice: NormalizedNotice = {
-  key: "R26BK1--000", number: "R26BK1", order: "000", title: field("조사 용역"),
-  demandAgency: field("국무조정실"), noticeAgency: field("조달청"),
+  key: "R26BK1--000", number: "R26BK1", order: "000", title: field("조사 용역"), agency: field("기관"),
   postedAt: field("2026-10-01"), deadline: field("2026-10-10"), amount: field(null),
   description: field(null), servicePeriod: field(null), qualifications: field(null), region: field(null),
   attachments: [{ name: "공고문.pdf", url: "https://www.g2b.go.kr/file.pdf" }],
@@ -18,8 +17,6 @@ describe("NoticeDetail", () => {
   afterEach(cleanup);
   it("shows missing fields and provides download and new-tab source links", () => {
     render(<NoticeDetail notice={notice} />);
-    expect(screen.getByText("수요기관: 국무조정실")).toBeInTheDocument();
-    expect(screen.getByText("공고기관: 조달청")).toBeInTheDocument();
     expect(screen.getAllByText("정보 없음").length).toBeGreaterThan(0);
     expect(screen.getByRole("link", { name: "공고문.pdf" })).toHaveAttribute("download");
     expect(screen.getByRole("link", { name: "나라장터 원문 보기" })).toHaveAttribute("target", "_blank");

@@ -35,8 +35,6 @@ Chrome이 기본 설치 위치에 없으면 `.env.local`에 `G2B_CHROME_PATH=Chr
 
 공고 원본 번호는 `notices.notice_number`, 발주계획·사전규격 등 독립 상세의 문자열 식별자는 `independent_details.detail_key`와 `notice_independent_refs.detail_key`에 저장합니다. 기존 `number` 컬럼은 `npm run db:migrate` 실행 시 데이터 유지 방식으로 이름을 바꿉니다.
 
-기관명 요약은 `notices.demand_agency`(수요기관)와 `notices.notice_agency`(공고기관)에 각각 저장합니다. 기존 `agency` 컬럼은 마이그레이션에서 제거하며 기존 공고의 새 요약 컬럼은 채우지 않습니다. 화면은 보관된 API·상세 원본에서 두 기관을 각각 읽고, 해당 공고를 재수집하면 새 요약 컬럼도 채웁니다. 변경된 앱을 실행하기 전에 `npm run db:migrate`를 적용하세요.
-
 개찰결과상세 모달은 `입찰진행현황` 표에서 클릭한 행의 재입찰번호를 확인하면 `opening--공고키--재입찰번호`로 독립 저장하고 개찰 탭에 표시합니다. 모달 안에서 열린 하위 상세도 같은 독립 상세에 포함합니다. 재입찰번호를 확인하지 못하면 기존 공고 상세에 두고 경고를 기록합니다. 기존 DB에서는 `npm run db:migrate`로 `opening` 분류를 허용해야 합니다.
 
 `data/`는 Git에서 제외됩니다. 한 번에 한 수집 작업을 실행합니다. 개별 상세 페이지 수집에 실패해도 해당 공고의 API 응답은 저장하고 화면에 실패 상태를 표시합니다.

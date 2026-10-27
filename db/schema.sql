@@ -15,10 +15,8 @@ CREATE TABLE IF NOT EXISTS public.notices (
   detail_error text,
   -- 상세 값을 우선하고 없으면 API 값으로 채우는 표시용 공고명입니다.
   title text,
-  -- 상세 값을 우선하는 표시용 수요기관명입니다.
-  demand_agency text,
-  -- 상세 값을 우선하는 표시용 공고기관명입니다.
-  notice_agency text,
+  -- 상세 값을 우선하는 표시용 수요기관·공고기관명입니다.
+  agency text,
   -- 나라장터 현지 시각 그대로 저장한 공고 게시일시입니다.
   posted_at timestamp without time zone,
   -- 나라장터 현지 시각 그대로 저장한 입찰 마감일시입니다.
@@ -40,8 +38,7 @@ CREATE TABLE IF NOT EXISTS public.notices (
 );
 -- 목록 정렬과 기관·금액 분석에 쓰는 인덱스입니다.
 CREATE INDEX IF NOT EXISTS notices_posted_at_idx ON public.notices (posted_at DESC NULLS LAST);
-CREATE INDEX IF NOT EXISTS notices_demand_agency_idx ON public.notices (demand_agency);
-CREATE INDEX IF NOT EXISTS notices_notice_agency_idx ON public.notices (notice_agency);
+CREATE INDEX IF NOT EXISTS notices_agency_idx ON public.notices (agency);
 CREATE INDEX IF NOT EXISTS notices_amount_idx ON public.notices (amount);
 
 -- 여러 공고가 공유할 수 있는 번호별 독립 상세이며, 먼저 저장한 내용을 유지합니다.
@@ -89,8 +86,7 @@ COMMENT ON COLUMN public.notices.api IS '나라장터 API에서 받은 해당 �
 COMMENT ON COLUMN public.notices.detail IS '공개 상세 페이지에서 수집해 구조화한 섹션·필드·표·첨부·모달 자료 JSON. 상세 수집 전에는 NULL.';
 COMMENT ON COLUMN public.notices.detail_error IS '마지막 상세 수집 실패 메시지. 성공 시 NULL이며 실패해도 기존 detail은 보존할 수 있다.';
 COMMENT ON COLUMN public.notices.title IS '화면 표시용 공고명. 상세 필드 값을 우선하고 없으면 API 값을 사용한다.';
-COMMENT ON COLUMN public.notices.demand_agency IS '화면 표시용 수요기관명. 상세의 수요기관 필드를 우선하고 없으면 API의 dminsttNm을 사용한다.';
-COMMENT ON COLUMN public.notices.notice_agency IS '화면 표시용 공고기관명. 상세의 공고기관 필드를 우선하고 없으면 API의 ntceInsttNm을 사용한다.';
+COMMENT ON COLUMN public.notices.agency IS '화면 표시용 수요기관 또는 공고기관명. 상세 필드 값을 우선한다.';
 COMMENT ON COLUMN public.notices.posted_at IS '공고 게시일시. 나라장터 현지 시각을 시간대 변환 없이 저장한다.';
 COMMENT ON COLUMN public.notices.deadline_at IS '입찰 마감일시. 나라장터 현지 시각을 시간대 변환 없이 저장한다.';
 COMMENT ON COLUMN public.notices.amount IS '표시용 사업금액·배정예산·추정가격 중 확인된 금액을 숫자로 변환한 값. 단위는 원이며 유효하지 않으면 NULL.';

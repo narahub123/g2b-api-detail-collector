@@ -43,8 +43,7 @@ export function noticeSummary(key: string, record: Pick<StoredNotice, "api" | "d
   if (noticeKeyFromParts(number, order) !== key) throw new Error(`잘못된 공고 키: ${key}`);
   const normalized = normalizeNotice(record.api, record.detail, { number, order });
   if (normalized.key !== key) throw new Error(`공고 원본과 저장 키가 일치하지 않습니다: ${key}`);
-  return { number, order, title: normalized.title.value,
-    demandAgency: normalized.demandAgency.value, noticeAgency: normalized.noticeAgency.value,
+  return { number, order, title: normalized.title.value, agency: normalized.agency.value,
     postedAt: localTimestamp(normalized.postedAt.value), deadlineAt: localTimestamp(normalized.deadline.value),
     amount: normalized.amount.value?.replaceAll(",", "").replace(/\s*원$/, "") || null,
     region: normalized.region.value, description: normalized.description.value,
@@ -55,18 +54,17 @@ export function noticeSummary(key: string, record: Pick<StoredNotice, "api" | "d
 async function upsertNotice(db: Queryable, key: string, record: StoredNotice): Promise<void> {
   const summary = noticeSummary(key, record);
   await db.query(`INSERT INTO ${table("notices")}
-    (key, notice_number, notice_order, api, detail, detail_error, title, demand_agency, notice_agency, posted_at, deadline_at,
+    (key, notice_number, notice_order, api, detail, detail_error, title, agency, posted_at, deadline_at,
      amount, region, description, service_period, qualifications)
-    VALUES ($1,$2,$3,$4::jsonb,$5::jsonb,$6,$7,$8,$9,$10::timestamp,$11::timestamp,$12::numeric,$13,$14,$15,$16)
+    VALUES ($1,$2,$3,$4::jsonb,$5::jsonb,$6,$7,$8,$9::timestamp,$10::timestamp,$11::numeric,$12,$13,$14,$15)
     ON CONFLICT (key) DO UPDATE SET api=EXCLUDED.api, detail=EXCLUDED.detail,
-      detail_error=EXCLUDED.detail_error, title=EXCLUDED.title,
-      demand_agency=EXCLUDED.demand_agency, notice_agency=EXCLUDED.notice_agency,
+      detail_error=EXCLUDED.detail_error, title=EXCLUDED.title, agency=EXCLUDED.agency,
       posted_at=EXCLUDED.posted_at, deadline_at=EXCLUDED.deadline_at, amount=EXCLUDED.amount,
       region=EXCLUDED.region, description=EXCLUDED.description,
       service_period=EXCLUDED.service_period, qualifications=EXCLUDED.qualifications, updated_at=now()`,
     [key, summary.number, summary.order, record.api ? JSON.stringify(record.api) : null,
       record.detail ? JSON.stringify(record.detail) : null, record.detailError || null,
-      summary.title, summary.demandAgency, summary.noticeAgency, summary.postedAt, summary.deadlineAt, summary.amount,
+      summary.title, summary.agency, summary.postedAt, summary.deadlineAt, summary.amount,
       summary.region, summary.description, summary.servicePeriod, summary.qualifications]);
 }
 
