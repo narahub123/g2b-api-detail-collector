@@ -1,6 +1,5 @@
 import * as cheerio from "cheerio";
-import { appendFile, mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { traceRisk } from "./risk-trace";
 import { extractCommonSections } from "./common-content-extractor";
 import { collectAttachments } from "./attachment-collector";
 import { collectClickDownloads } from "./attachment-identity";
@@ -18,23 +17,11 @@ import type {
   ModalTriggerStep,
 } from "./detail-page";
 
-// 모달 탐색 중 어떤 클릭이 상위 테이블의 페이지 상태를 변경하는지 확인하기 위한 진단 로그입니다.
-// 수집 동작에는 관여하지 않으며, 페이지네이션 진단 파일과 같은 폴더에 JSONL로 기록합니다.
+// 기존 터미널·파일 로그 대신 통합 추적에 기록합니다.
+// 탐색의 상태를 읽기만 하며 클릭이나 수집 결과는 변경하지 않습니다.
 let modalTraceSequence = 0;
-let modalTraceWrite = Promise.resolve();
-const modalTraceFile = join(process.cwd(), ".g2b-pagination-debug", "modal-collector.jsonl");
-
 function recordModalTrace(event: string, details: Record<string, unknown>): void {
-  const record = { at: new Date().toISOString(), event, ...details };
-  const line = JSON.stringify(record);
-  console.info(`[g2b-modal-trace] ${line}`);
-  // 병렬 탐색에서도 기록 순서가 뒤섞이지 않도록 파일 쓰기를 직렬화합니다.
-  modalTraceWrite = modalTraceWrite.then(async () => {
-    await mkdir(join(process.cwd(), ".g2b-pagination-debug"), { recursive: true });
-    await appendFile(modalTraceFile, `${line}\n`, "utf8");
-  }).catch((error: unknown) => {
-    console.warn("[g2b-modal-trace] 로그 파일 기록 실패", error);
-  });
+  traceRisk("modal-exploration", event, details);
 }
 
 // 선택 페이지의 원본 DOM 상태를 보존합니다. 특정 페이저 구현을 추측해 숫자로 확정하지 않습니다.
@@ -599,6 +586,8 @@ export async function collectModalContents(
           // 상세 모달을 정상적으로 다시 열어 수집하는 동작은 유지됩니다.
           const screenKey = fresh.id ? modalScreenKey(fresh.id, fresh.title) : null;
           const isCircularScreen = screenKey !== null && ancestorScreens.includes(screenKey);
+          // 동일 화면의 재진입과 다른 경로를 통한 재수집을 구분해 기록합니다.
+          recordModalTrace("dedup-decision", { traceRunId, depth, screenKey, ancestorScreens, isCircularScreen, isDuplicate, freshDialogId: fresh.id, parentDialogId: dialogId, pageNumber, pageTableId });
           if (isCircularScreen) {
             recordModalTrace("circular-screen-skipped", {
               traceRunId, dialogId, depth, pageNumber, pageTableId,
