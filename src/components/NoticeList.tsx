@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { NormalizedNotice } from "@/lib/g2b/normalize";
+import type { NoticeListItem } from "@/lib/g2b/notices";
 import type { CollectionJob } from "@/lib/g2b/collection-job";
 
 function amount(value: string | null) {
@@ -12,7 +12,7 @@ function amount(value: string | null) {
 }
 
 /** 저장된 공고 목록과 재수집 작업, 사용자 화면 진입점을 제공합니다. */
-export function NoticeList({ notices, fetcher = fetch }: { notices: NormalizedNotice[]; fetcher?: typeof fetch }) {
+export function NoticeList({ notices, fetcher = fetch }: { notices: NoticeListItem[]; fetcher?: typeof fetch }) {
   const router = useRouter();
   const [selected, setSelected] = useState<string[]>([]);
   const [job, setJob] = useState<CollectionJob | null>(null);
@@ -79,15 +79,15 @@ export function NoticeList({ notices, fetcher = fetch }: { notices: NormalizedNo
         <span className={notice.scrapeStatus === "succeeded" ? "status-pill" : "status-pill warning"}>
           {notice.scrapeStatus === "succeeded" ? "상세 수집 완료" : "상세 수집 실패"}
         </span></div>
-      <h3><a href={`/admin/bids/${encodeURIComponent(notice.key)}`}>{notice.title.value || "제목 정보 없음"}</a></h3>
-      <p className="agency"><span>수요기관: {notice.demandAgency.value || "정보 없음"}</span><br />
-        <span>공고기관: {notice.noticeAgency.value || "정보 없음"}</span></p>
+      <h3><a href={`/admin/bids/${encodeURIComponent(notice.key)}`}>{notice.title || "제목 정보 없음"}</a></h3>
+      <p className="agency"><span>수요기관: {notice.demandAgency || "정보 없음"}</span><br />
+        <span>공고기관: {notice.noticeAgency || "정보 없음"}</span></p>
       <a className="notice-user-link" href={`/bids/${encodeURIComponent(notice.key)}`}>사용자 화면 보기</a>
       <div className="notice-facts">
-        <span><small>게시</small>{notice.postedAt.value || "정보 없음"}</span>
-        <span><small>마감</small>{notice.deadline.value || "정보 없음"}</span>
-        <span><small>금액</small>{amount(notice.amount.value)}</span>
-        <span><small>지역</small>{notice.region.value || "정보 없음"}</span>
+        <span><small>게시</small>{notice.postedAt || "정보 없음"}</span>
+        <span><small>마감</small>{notice.deadline || "정보 없음"}</span>
+        <span><small>금액</small>{amount(notice.amount)}</span>
+        <span><small>지역</small>{notice.region || "정보 없음"}</span>
       </div>
     </article>)}
     </div>

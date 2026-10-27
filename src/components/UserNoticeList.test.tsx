@@ -2,15 +2,13 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { UserNoticeList } from "./UserNoticeList";
-import type { NormalizedNotice } from "@/lib/g2b/normalize";
+import type { NoticeListItem } from "@/lib/g2b/notices";
 
-const field = (value: string | null) => ({ value, source: value ? "api" as const : null });
-const notice: NormalizedNotice = {
-  key: "R26BK1--000", number: "R26BK1", order: "000", title: field("조사 용역"),
-  demandAgency: field("국무조정실"), noticeAgency: field("조달청"),
-  postedAt: field("2026-10-01"), deadline: field("2026-10-10"), amount: field("1000000"),
-  description: field(null), servicePeriod: field(null), qualifications: field(null), region: field(null),
-  attachments: [], originalUrl: "https://www.g2b.go.kr/", scrapeStatus: "succeeded", validationIssues: []
+const notice: NoticeListItem = {
+  key: "R26BK1--000", number: "R26BK1", order: "000", title: "조사 용역",
+  demandAgency: "국무조정실", noticeAgency: "조달청",
+  postedAt: "2026-10-01 00:00:00", deadline: "2026-10-10 00:00:00", amount: "1000000",
+  region: null, scrapeStatus: "succeeded"
 };
 
 afterEach(cleanup);
@@ -31,5 +29,13 @@ describe("UserNoticeList", () => {
     render(<UserNoticeList notices={[]} />);
     expect(screen.getByText("저장된 공고가 없습니다")).toBeInTheDocument();
     expect(screen.queryByText(/첫 수집을 시작/)).not.toBeInTheDocument();
+  });
+
+  it("요약 컬럼이 비어 있으면 기존 빈 값 안내를 표시한다", () => {
+    render(<UserNoticeList notices={[{ ...notice, title: null, demandAgency: null, postedAt: null,
+      deadline: null, amount: null, region: null }]} />);
+    expect(screen.getByRole("link", { name: "제목 정보 없음" })).toBeInTheDocument();
+    expect(screen.getByText("수요기관: 정보 없음")).toBeInTheDocument();
+    expect(screen.getByText("금액 정보 없음")).toBeInTheDocument();
   });
 });
