@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { countStoredNotices, getStoredIndependentDetail, listStoredNoticeKeys, noticeSummary, saveNoticeRelation, saveStoredNotice } from "./postgres-store";
+import { countStoredNotices, getStoredIndependentDetail, listStoredNoticeKeys, listStoredNoticeRows, noticeSummary, saveNoticeRelation, saveStoredNotice } from "./postgres-store";
 
 const runtime = globalThis as typeof globalThis & { __g2bPgPool?: unknown };
 const originalUrl = process.env.DATABASE_URL;
@@ -118,6 +118,30 @@ describe("noticeSummary", () => {
     expect(count.sql.match(/WHERE (.*)/)?.[1]).toBe(page.sql.match(/WHERE (.*) ORDER BY/)?.[1]);
     expect(count.values).toEqual(["용역", "2026-10-31", "1000"]);
     expect(page.values).toEqual(["용역", "2026-10-31", "1000", 10, 10]);
+  });
+
+  it("현재 페이지의 기본 컬럼과 상세 존재 여부만 한 번에 조회합니다", async () => {
+    const statements: { sql: string; values?: unknown[] }[] = [];
+    process.env.DATABASE_URL = "postgres://test";
+    runtime.__g2bPgPool = { query: async (sql: string, values?: unknown[]) => {
+      statements.push({ sql, values });
+      return { rows: [{ key: "R26BK1--000", notice_number: "R26BK1", notice_order: "000",
+        title: "용역", demand_agency: null, notice_agency: "조달청", posted_at: "2026-10-25 09:30:00",
+        deadline_at: null, amount: "1200", region: null, has_detail: true }] };
+    } };
+
+    const rows = await listStoredNoticeRows({ searchField: "title", query: "용역", minAmount: "1000" },
+      { limit: 10, offset: 10 });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ key: "R26BK1--000", has_detail: true, demand_agency: null });
+    expect(statements).toHaveLength(1);
+    expect(statements[0].sql).toContain("strpos(lower(title), lower($1)) > 0");
+    expect(statements[0].sql).toContain("amount >= $2::numeric");
+    expect(statements[0].sql).toContain("ORDER BY posted_at DESC NULLS LAST, key LIMIT $3 OFFSET $4");
+    expect(statements[0].sql).toContain("detail IS NOT NULL AS has_detail");
+    expect(statements[0].sql).not.toMatch(/SELECT\s+(?:\*|api\b|detail\b)/i);
+    expect(statements[0].values).toEqual(["용역", "1000", 10, 10]);
   });
 
   it("queries independent details by a text key", async () => {

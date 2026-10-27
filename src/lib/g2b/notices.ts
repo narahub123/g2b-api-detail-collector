@@ -6,7 +6,7 @@ import { normalizeNotice, type NormalizedNotice } from "./normalize";
 import type { ModalCapture, ScrapedDetail } from "./detail-page";
 import type { ApiNotice } from "./types";
 import type { IndependentDetail } from "./structured-data";
-import { countStoredNotices, getStoredIndependentDetail, getStoredNotice, listStoredNoticeKeys } from "./postgres-store";
+import { countStoredNotices, getStoredIndependentDetail, getStoredNotice, listStoredNoticeKeys, listStoredNoticeRows } from "./postgres-store";
 import type { NoticeFilters } from "./notice-filters";
 
 export type StoredNotice = { key?: string; api: ApiNotice | null; detail: ScrapedDetail | null; relatedNoticeKeys?: string[]; detailError?: string | null; normalized?: NormalizedNotice;
@@ -19,20 +19,29 @@ export type NoticeRecord = { api: ApiNotice | null; detail: ScrapedDetail | null
   openingDetails: IndependentReference[] };
 const defaultDataDir = () => join(process.cwd(), "data");
 const pageSize = 10;
+export type NoticeListItem = { key: string; number: string; order: string; title: string | null;
+  demandAgency: string | null; noticeAgency: string | null; postedAt: string | null;
+  deadline: string | null; amount: string | null; region: string | null;
+  scrapeStatus: "succeeded" | "failed" };
 
 /** 검색 조건에 맞는 전체 건수와 현재 페이지 공고만 DB에서 조회합니다. */
 export async function listNoticePage(filters: NoticeFilters, requestedPage: number): Promise<{
-  notices: NormalizedNotice[]; totalCount: number; page: number; totalPages: number;
+  notices: NoticeListItem[]; totalCount: number; page: number; totalPages: number;
 }> {
   const totalCount = await countStoredNotices(filters);
   const totalPages = Math.ceil(totalCount / pageSize);
   const page = totalPages ? Math.min(requestedPage, totalPages) : 1;
   if (!totalCount) return { notices: [], totalCount, page, totalPages };
 
-  // 현재 페이지의 키만 가져와 기존 상세 정규화 흐름에 전달합니다.
-  const keys = await listStoredNoticeKeys(filters, { limit: pageSize, offset: (page - 1) * pageSize });
-  const notices = await Promise.all(keys.map((key) => getNotice(key)));
-  return { notices: notices.filter((notice): notice is NormalizedNotice => notice !== null), totalCount, page, totalPages };
+  // 목록에는 이미 저장된 요약 컬럼만 사용해 공고별 원본·참조 조회를 피합니다.
+  const rows = await listStoredNoticeRows(filters, { limit: pageSize, offset: (page - 1) * pageSize });
+  const notices: NoticeListItem[] = rows.map((row) => ({
+    key: row.key, number: row.notice_number, order: row.notice_order, title: row.title,
+    demandAgency: row.demand_agency, noticeAgency: row.notice_agency,
+    postedAt: row.posted_at, deadline: row.deadline_at, amount: row.amount, region: row.region,
+    scrapeStatus: row.has_detail ? "succeeded" : "failed"
+  }));
+  return { notices, totalCount, page, totalPages };
 }
 
 /** 저장된 공고를 목록 화면의 게시일 역순으로 반환합니다. */

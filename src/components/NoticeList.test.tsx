@@ -2,15 +2,13 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { NoticeList } from "./NoticeList";
-import type { NormalizedNotice } from "@/lib/g2b/normalize";
+import type { NoticeListItem } from "@/lib/g2b/notices";
 
-const field = (value: string | null) => ({ value, source: value ? "api" as const : null });
-const base: NormalizedNotice = {
-  key: "R26BK1--000", number: "R26BK1", order: "000", title: field("조사 용역"),
-  demandAgency: field("국무조정실"), noticeAgency: field("조달청"),
-  postedAt: field("2026-10-01"), deadline: field("2026-10-10"), amount: field("1000000"),
-  description: field(null), servicePeriod: field(null), qualifications: field(null), region: field(null),
-  attachments: [], originalUrl: "https://www.g2b.go.kr/", scrapeStatus: "succeeded", validationIssues: []
+const base: NoticeListItem = {
+  key: "R26BK1--000", number: "R26BK1", order: "000", title: "조사 용역",
+  demandAgency: "국무조정실", noticeAgency: "조달청",
+  postedAt: "2026-10-01 00:00:00", deadline: "2026-10-10 00:00:00", amount: "1000000",
+  region: null, scrapeStatus: "succeeded"
 };
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
@@ -21,6 +19,13 @@ describe("NoticeList", () => {
     render(<NoticeList notices={[base]} />);
     expect(screen.getByText("수요기관: 국무조정실")).toBeInTheDocument();
     expect(screen.getByText("공고기관: 조달청")).toBeInTheDocument();
+  });
+
+  it("상세 자료가 없는 공고를 수집 실패로 표시합니다", () => {
+    render(<NoticeList notices={[{ ...base, scrapeStatus: "failed", demandAgency: null, noticeAgency: null }]} />);
+    expect(screen.getByText("상세 수집 실패")).toBeInTheDocument();
+    expect(screen.getByText("수요기관: 정보 없음")).toBeInTheDocument();
+    expect(screen.getByText("공고기관: 정보 없음")).toBeInTheDocument();
   });
 
   it("links different orders of one announcement to different detail pages", () => {
