@@ -47,6 +47,20 @@ describe("noticeSummary", () => {
       postedAt: "2026-10-25 09:30:00", amount: "1200" });
   });
 
+  it("추출한 참가가능지역을 기존 region 저장 인자로 전달합니다", async () => {
+    const statements = fakePool();
+    await saveStoredNotice("R26BK1--000", {
+      api: { bidNtceNo: "R26BK1", bidNtceOrd: "000" },
+      detail: { sourceUrl: "https://www.g2b.go.kr/", attachments: [], links: [],
+        sections: [{ title: "입찰자격", tables: [], fields: [
+          { label: "지역제한", value: [{ text: "대구광역시", visible: true }] },
+          { label: "참가가능지역", value: [{ text: "[서울특별시], [경기도]", visible: true }] }
+        ] }] }
+    });
+    const insert = statements.find((item) => item.sql.includes("INSERT INTO public.notices"));
+    expect(insert?.values?.[12]).toBe("서울특별시, 경기도");
+  });
+
   it("수요기관과 공고기관을 각각의 요약 컬럼으로 저장합니다", async () => {
     const statements = fakePool();
     await saveStoredNotice("R26BK1--000", { api: { bidNtceNo: "R26BK1", bidNtceOrd: "000",

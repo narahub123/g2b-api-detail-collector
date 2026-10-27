@@ -49,6 +49,21 @@ function pick(api: ApiNotice | null, detail: ScrapedDetail | null, detailKeys: s
   return { value: null, source: null };
 }
 
+/** 참가가능지역에서 표시된 대괄호 지역명만 선택하고, 없으면 기존 후순위 값을 사용합니다. */
+function pickRegion(api: ApiNotice | null, detail: ScrapedDetail | null): FieldValue {
+  for (const section of detail?.sections || []) {
+    for (const field of section.fields) {
+      if (field.label !== "참가가능지역" || field.visible === false) continue;
+      const text = fieldText(field.value, true);
+      const regions = [...(text || "").matchAll(/\[([^\[\]]+)\]/g)]
+        .map((match) => match[1].trim()).filter(Boolean);
+      if (regions.length) return { value: regions.join(", "), source: "detail" };
+    }
+  }
+  // 추출한 지역명이 없을 때만 기존 지역제한과 API 순서로 값을 찾습니다.
+  return pick(api, detail, ["지역제한"], ["prtcptPsblRgnNm"]);
+}
+
 function safeG2bUrl(value: string): string | null {
   try {
     const url = new URL(value);
@@ -121,7 +136,7 @@ export function normalizeNotice(api: ApiNotice | null, detail: ScrapedDetail | n
     description: pick(api, detail, ["용역개요", "과업내용", "사업내용", "용역내용"], ["bidNtceDtl", "bidNtceCn"]),
     servicePeriod: pick(api, detail, ["용역기간", "사업기간", "계약기간"], ["cntrctPrd"]),
     qualifications: pick(api, detail, ["입찰자격", "입찰참가자격", "업종제한사항", "업종제한"], []),
-    region: pick(api, detail, ["지역제한", "참가가능지역"], ["prtcptPsblRgnNm"]),
+    region: pickRegion(api, detail),
     attachments,
     originalUrl: safeG2bUrl(detail?.sourceUrl || "") || serviceDetailUrl(number!, order!),
     scrapeStatus: detail ? "succeeded" : "failed",

@@ -37,6 +37,56 @@ describe("normalizeNotice", () => {
     expect(notice.region).toEqual({ value: "서울", source: "detail" });
   });
 
+  it("참가가능지역의 단일 대괄호 지역명을 지역제한보다 우선합니다", () => {
+    const notice = normalizeNotice({ ...api, prtcptPsblRgnNm: "API 지역" }, {
+      sourceUrl: "https://www.g2b.go.kr/", attachments: [], links: [],
+      sections: [{ title: "입찰자격", tables: [], fields: [
+        { label: "지역제한", value: [{ text: "서울특별시", visible: true }] },
+        { label: "참가가능지역", value: [{ text: "참여 가능 [부산광역시] 상세 안내", visible: true }] }
+      ] }]
+    });
+    expect(notice.region).toEqual({ value: "부산광역시", source: "detail" });
+  });
+
+  it("참가가능지역의 복수 대괄호 지역명을 쉼표로 연결합니다", () => {
+    const notice = normalizeNotice(api, {
+      sourceUrl: "https://www.g2b.go.kr/", attachments: [], links: [],
+      sections: [{ title: "입찰자격", tables: [], fields: [
+        { label: "참가가능지역", value: [
+          { text: "[서울특별시], ", visible: true }, { text: "[경기도]", visible: true },
+          { text: " (자세한 사항은 공고문 참조)", visible: true }
+        ] }
+      ] }]
+    });
+    expect(notice.region).toEqual({ value: "서울특별시, 경기도", source: "detail" });
+  });
+
+  it.each([
+    [{ text: "지역은 공고문을 참조하세요.", visible: true }],
+    [{ text: "", visible: true }],
+    [{ text: "[숨긴 지역]", visible: false }]
+  ])("참가가능지역에서 지역명을 추출하지 못하면 지역제한을 사용합니다", (...value) => {
+    const notice = normalizeNotice({ ...api, prtcptPsblRgnNm: "API 지역" }, {
+      sourceUrl: "https://www.g2b.go.kr/", attachments: [], links: [],
+      sections: [{ title: "입찰자격", tables: [], fields: [
+        { label: "참가가능지역", value },
+        { label: "지역제한", value: [{ text: "대구광역시", visible: true }] }
+      ] }]
+    });
+    expect(notice.region).toEqual({ value: "대구광역시", source: "detail" });
+  });
+
+  it("상세 필드에서 지역명을 얻지 못하면 API 지역명을 사용합니다", () => {
+    const notice = normalizeNotice({ ...api, prtcptPsblRgnNm: "인천광역시" }, {
+      sourceUrl: "https://www.g2b.go.kr/", attachments: [], links: [],
+      sections: [{ title: "입찰자격", tables: [], fields: [
+        { label: "참가가능지역", value: [{ text: "공고문 참조", visible: true }] },
+        { label: "지역제한", value: [] }
+      ] }]
+    });
+    expect(notice.region).toEqual({ value: "인천광역시", source: "api" });
+  });
+
   it("수요기관과 공고기관을 각각 해당 상세 필드와 API 필드에서 선택합니다", () => {
     const notice = normalizeNotice({ ...api, ntceInsttNm: "조달청" }, {
       sourceUrl: "https://www.g2b.go.kr/", attachments: [], links: [],
