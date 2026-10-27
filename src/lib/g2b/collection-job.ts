@@ -1,3 +1,4 @@
+import { traceRisk } from "./risk-trace";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { readdir, unlink } from "node:fs/promises";
@@ -283,8 +284,10 @@ async function runRefresh(job: CollectionJob, deps: CollectionDependencies): Pro
         continue;
       }
       const structured = structureNoticeDetail(result.key, scraped.detail);
+      // 저장 정책을 결정하는 선택 재수집 여부를 추적합니다.
       const replaceOpening = job.mode === "refresh" &&
         job.results?.some((selected) => selected.key === result.key) === true;
+      traceRisk("refresh", "replacement-policy", { noticeKey: result.key, mode: job.mode, replaceOpening, dbMode, openingCount: structured.openingDetails.length });
       if (!dbMode) await saveIndependentDetails(dir, structured, { replaceOpening });
       const updated: StoredNotice = { ...record, key: result.key, detail: structured.detail,
         orderPlanNumbers: structured.orderPlanNumbers, preSpecificationNumbers: structured.preSpecificationNumbers,
