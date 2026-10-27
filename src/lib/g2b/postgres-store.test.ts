@@ -134,6 +134,42 @@ describe("noticeSummary", () => {
     expect(page.values).toEqual(["용역", "2026-10-31", "1000", 10, 10]);
   });
 
+  it("광역·기초 지역을 하나의 정규식 조건으로 건수와 목록 조회에 함께 적용합니다", async () => {
+    const statements = fakePool();
+    runtime.__g2bPgPool = { query: async (sql: string, values?: unknown[]) => {
+      statements.push({ sql, values }); return { rows: sql.includes("COUNT(*)") ? [{ total: "2" }] : [] };
+    } };
+    const filters = { searchField: "title" as const, query: "용역", provinceCode: "1100000000", districtCode: "1111000000" };
+    expect(await countStoredNotices(filters)).toBe(2);
+    await listStoredNoticeRows(filters, { limit: 10, offset: 0 });
+    const [count, page] = statements;
+    expect(count.sql).toContain("region ~ $2");
+    expect(page.sql).toContain("region ~ $2");
+    expect(count.values).toEqual(["용역", expect.any(String)]);
+    expect(page.values).toEqual(["용역", count.values?.[1], 10, 0]);
+
+    const pattern = new RegExp(String(count.values?.[1]).replaceAll("[[:space:]]", "\\s"));
+    for (const region of ["서울특별시", "종로구", "서울특별시 종로구", "경기도, 서울특별시",
+      "경기도, 서울특별시, 서울특별시", "서울특별시, 경기도"]) expect(pattern.test(region)).toBe(true);
+    for (const region of ["경기도", "서울특별시교육청", "서울특별시 종로구청", "인천광역시, 경기도"]) {
+      expect(pattern.test(region)).toBe(false);
+    }
+    expect(String(count.values?.[1]).match(/서울특별시 종로구/g)).toHaveLength(1);
+  });
+
+  it("광역 검색은 그 기초 지역도 포함하되 다른 광역의 중복 명칭은 제외합니다", async () => {
+    const statements = fakePool();
+    runtime.__g2bPgPool = { query: async (sql: string, values?: unknown[]) => {
+      statements.push({ sql, values }); return { rows: [] };
+    } };
+    await listStoredNoticeRows({ provinceCode: "1100000000" }, { limit: 10, offset: 0 });
+    const pattern = new RegExp(String(statements[0].values?.[0]).replaceAll("[[:space:]]", "\\s"));
+    expect(pattern.test("서울특별시, 종로구")).toBe(true);
+    expect(pattern.test("서울특별시 강서구")).toBe(true);
+    expect(pattern.test("강서구")).toBe(false);
+    expect(pattern.test("중구")).toBe(false);
+  });
+
   it("현재 페이지의 기본 컬럼과 상세 존재 여부만 한 번에 조회합니다", async () => {
     const statements: { sql: string; values?: unknown[] }[] = [];
     process.env.DATABASE_URL = "postgres://test";

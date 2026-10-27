@@ -3,6 +3,8 @@ node_modules/
 .env.local
 .env
 data/
+!src/data/
+!src/data/regions.json
 .superpowers/
 # Playwright MCP generated files
 .playwright-mcp/

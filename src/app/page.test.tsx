@@ -18,6 +18,16 @@ describe("사용자 공고 목록 페이지", () => {
     expect(listNoticePage).toHaveBeenCalledWith({ searchField: "title", query: "용역" }, 2);
   });
 
+  it("지역과 검색 조건을 함께 조회하고 새 필터 제출에서는 첫 페이지를 사용합니다", async () => {
+    const html = renderToStaticMarkup(await Home({ searchParams: Promise.resolve({ query: "용역", provinceCode: "1100000000",
+      districtCode: "1111000000" }) }));
+    expect(listNoticePage).toHaveBeenCalledWith({ searchField: "title", query: "용역",
+      provinceCode: "1100000000", districtCode: "1111000000" }, 1);
+    expect(html).toContain("광역자치단체");
+    expect(html).toContain("기초자치단체");
+    expect(html).not.toContain('name="page"');
+  });
+
   it("범위가 잘못되면 DB를 조회하지 않고 오류를 표시합니다", async () => {
     listNoticePage.mockClear();
     const html = renderToStaticMarkup(await Home({ searchParams: Promise.resolve({ minAmount: "2000", maxAmount: "1000" }) }));

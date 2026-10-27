@@ -1,3 +1,5 @@
+import regions from "@/data/regions.json";
+
 export type NoticeFilters = {
   searchField?: "title" | "notice_number";
   query?: string;
@@ -7,6 +9,8 @@ export type NoticeFilters = {
   deadlineTo?: string;
   minAmount?: string;
   maxAmount?: string;
+  provinceCode?: string;
+  districtCode?: string;
 };
 
 export type NoticeFilterValues = Required<NoticeFilters>;
@@ -26,7 +30,8 @@ export function parseNoticeFilters(params: SearchParams): { values: NoticeFilter
     searchField: value("searchField") === "notice_number" ? "notice_number" : "title",
     query: value("query"), postedFrom: value("postedFrom"), postedTo: value("postedTo"),
     deadlineFrom: value("deadlineFrom"), deadlineTo: value("deadlineTo"),
-    minAmount: value("minAmount"), maxAmount: value("maxAmount")
+    minAmount: value("minAmount"), maxAmount: value("maxAmount"),
+    provinceCode: value("provinceCode"), districtCode: value("districtCode")
   };
   const validDate = (date: string) => !date || (/^\d{4}-\d{2}-\d{2}$/.test(date) && !Number.isNaN(Date.parse(`${date}T00:00:00Z`))
     && new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) === date);
@@ -41,10 +46,16 @@ export function parseNoticeFilters(params: SearchParams): { values: NoticeFilter
   else if (values.deadlineFrom && values.deadlineTo && values.deadlineFrom > values.deadlineTo) error = "마감일 시작일이 종료일보다 늦습니다.";
   else if (!validAmount(values.minAmount) || !validAmount(values.maxAmount)) error = "금액은 0 이상의 정수로 입력해 주세요.";
   else if (values.minAmount && values.maxAmount && BigInt(values.minAmount) > BigInt(values.maxAmount)) error = "최소금액이 최대금액보다 큽니다.";
+  else {
+    const province = regions.find((item) => item.code === values.provinceCode);
+    if ((values.provinceCode && !province) || (values.districtCode && !province?.districts.some((item) => item.code === values.districtCode))) {
+      error = "지역 선택을 확인해 주세요.";
+    }
+  }
 
   const filters: NoticeFilters = {};
   if (values.query) { filters.searchField = values.searchField; filters.query = values.query; }
-  for (const key of ["postedFrom", "postedTo", "deadlineFrom", "deadlineTo", "minAmount", "maxAmount"] as const) {
+  for (const key of ["postedFrom", "postedTo", "deadlineFrom", "deadlineTo", "minAmount", "maxAmount", "provinceCode", "districtCode"] as const) {
     if (values[key]) filters[key] = values[key];
   }
   return { values, filters, error };

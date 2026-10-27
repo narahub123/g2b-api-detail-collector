@@ -17,6 +17,9 @@
 .filter-ranges {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
+.filter-region {
+  grid-column: 1 / -1;
+}
 .notice-filters label {
   display: flex;
   flex-direction: column;
