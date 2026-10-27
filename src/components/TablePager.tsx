@@ -2,7 +2,7 @@
 
 import type { StructuredTableCell } from "@/lib/g2b/structured-table";
 
-import { traceTablePagerBoundary } from "./table-pager-trace";
+import { traceTablePagerBoundary, traceTablePagerEvent } from "./table-pager-trace";
 
 type Row = { cells: StructuredTableCell[]; index: number };
 
@@ -33,7 +33,7 @@ export function TablePager({ total, page, pages, onChange }: { total: number; pa
   if (pages <= 1) return null;
   return <nav className="table-pager" aria-label="표 페이지">
     <span>전체 {total}행 · {page + 1}/{pages} 페이지</span>
-    <button type="button" onClick={() => onChange(page - 1)} disabled={page === 0}>이전</button>
-    <button type="button" onClick={() => onChange(page + 1)} disabled={page + 1 >= pages}>다음</button>
+    <button type="button" onClick={() => { traceTablePagerEvent("page-change", { from: page, to: page - 1, pages, total }); onChange(page - 1); }} disabled={page === 0}>이전</button>
+    <button type="button" onClick={() => { traceTablePagerEvent("page-change", { from: page, to: page + 1, pages, total }); onChange(page + 1); }} disabled={page + 1 >= pages}>다음</button>
   </nav>;
 }
