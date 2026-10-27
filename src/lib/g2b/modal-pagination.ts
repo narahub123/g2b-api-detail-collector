@@ -397,12 +397,21 @@ export async function collectPaginatedModal(
         diagnostic.stage = "페이지 이동 및 DOM 변경 대기";
         const selectedBefore = await selectedPaginationPage(page, dialogId, table.sourceId);
         await tracePagination({ event: "advance-before", invocationId, dialogId, tableId: table.sourceId, expectedPage: currentPage + 1, selectedBefore });
-        await advanceModalPage(
-          page,
-          dialogId,
-          table.sourceId,
-          options.timeoutMs,
-        );
+        // 하위 탐색이 페이지를 초기화한 경우 현재 페이지까지 복구합니다.
+        if (selectedBefore !== null && selectedBefore !== currentPage) {
+          if (selectedBefore < 1 || selectedBefore > currentPage)
+            throw new ModalPaginationError(`페이지 상태 불일치: expected=${currentPage}, actual=${selectedBefore}`);
+          for (let number = selectedBefore; number < currentPage; number++) {
+            await advanceModalPage(page, dialogId, table.sourceId, options.timeoutMs);
+            const restored = await selectedPaginationPage(page, dialogId, table.sourceId);
+            if (restored !== number + 1)
+              throw new ModalPaginationError(`페이지 복구 실패: expected=${number + 1}, actual=${restored}`);
+          }
+        }
+        await advanceModalPage(page, dialogId, table.sourceId, options.timeoutMs);
+        const actualNextPage = await selectedPaginationPage(page, dialogId, table.sourceId);
+        if (actualNextPage !== currentPage + 1)
+          throw new ModalPaginationError(`페이지 이동 불일치: expected=${currentPage + 1}, actual=${actualNextPage}`);
         currentPage++;
         await tracePagination({ event: "advance-after", invocationId, dialogId, tableId: table.sourceId, expectedPage: currentPage, selectedAfter: await selectedPaginationPage(page, dialogId, table.sourceId) });
         pageCount = Math.max(pageCount, currentPage);
