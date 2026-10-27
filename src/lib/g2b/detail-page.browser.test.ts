@@ -52,6 +52,32 @@ it("href 없는 모달 파일 셀도 공통 첨부 식별자로 저장한다", a
   } finally { await page.close(); }
 }, 30000);
 
+it("일반 목록의 뒤쪽 페이지에서 하위 상세를 수집하고 경로를 재생한다", async () => {
+  const page = await browser.newPage();
+  try {
+    await page.setContent(`<button id="open">일반 상세조회</button>
+      <div id="dialog" role="dialog" style="display:none"><h2>일반 상세</h2><button data-close>닫기</button>
+        <div>전체11건</div><table id="general_grid"><thead><tr><th>번호</th></tr></thead><tbody></tbody></table>
+        <div class="pagination"><button id="next">다음</button></div></div>
+      <div id="child" role="dialog" style="display:none"><h2>추가 상세</h2><button data-close>닫기</button>
+        <table><tr><td data-title="내용">뒤쪽 페이지의 상세 정보</td></tr></table></div>
+      <script>let current=0;function render(){document.querySelector('#general_grid tbody').innerHTML=
+        Array.from({length:current?1:10},(_,i)=>'<tr><td col_id="number">'+(current*10+i+1)+
+          (current?'<button id="child-open">추가 상세조회</button>':'')+'</td></tr>').join('');
+        document.querySelector('#next').disabled=!!current;
+        document.querySelector('#child-open')?.addEventListener('click',()=>document.querySelector('#child').style.display='block');}
+      render();document.querySelector('#open').onclick=()=>{current=0;render();document.querySelector('#dialog').style.display='block'};
+      document.querySelector('#next').onclick=()=>{current++;render()};
+      document.querySelectorAll('[data-close]').forEach(x=>x.onclick=()=>x.closest('[role=dialog]').style.display='none');</script>`);
+    const result = await collectModalContents(page);
+    expect(result.captures.find((item) => item.modal.title === "일반 상세")?.modal.sections?.flatMap((section) => section.tables)[0].bodyRows).toHaveLength(11);
+    const child = result.captures.find((item) => item.modal.title === "추가 상세");
+    expect(child?.trigger.path).toContainEqual(expect.objectContaining({ page: 2, id: "general_grid" }));
+    await replayModalPath(page, child?.trigger.path || []);
+    expect(await page.locator("#child").isVisible()).toBe(true);
+  } finally { await page.close(); }
+}, 30000);
+
 it("assigns modal triggers to their structural section, or null when none owns them", async () => {
   const page = await browser.newPage();
   try {

@@ -14,7 +14,7 @@ type TabModalRule = {
 function openingKey(noticeKey: string, capture: ModalCapture, sections: StructuredSection[]): string | null {
   const buttonId = /gridViewPgst_button_(\d+)_(\d+)/.exec(capture.trigger.html);
   if (!buttonId) return null;
-  const rowIndex = Number(buttonId[1]);
+  const localRowIndex = Number(buttonId[1]);
   const columnIndex = Number(buttonId[2]);
   const sourceSections = sections.filter((section) => section.title === capture.trigger.sectionHint);
   if (sourceSections.length !== 1) return null;
@@ -22,7 +22,8 @@ function openingKey(noticeKey: string, capture: ModalCapture, sections: Structur
     const headers = table.headerRows.flat();
     const rebidColumn = headers.find((cell) => cell.value === "재입찰번호")?.column;
     const statusColumn = headers.find((cell) => cell.value === "진행현황")?.column;
-    const row = table.bodyRows[rowIndex];
+    const pageStep = capture.trigger.path?.find((step) => step.page && step.id === table.sourceId);
+    const row = table.bodyRows[localRowIndex + (pageStep?.rowOffset || 0)];
     const statusCell = row?.find((cell) => cell.column === statusColumn);
     const statusMatches = statusCell?.value?.trim() === capture.trigger.value.trim() ||
       statusCell?.contents?.some((content) => content.value.trim() === capture.trigger.value.trim());

@@ -1,4 +1,6 @@
 import * as cheerio from "cheerio";
+import { appendFile, mkdir } from "node:fs/promises";
+import { join } from "node:path";
 import { extractCommonSections } from "./common-content-extractor";
 import { collectAttachments } from "./attachment-collector";
 import { collectClickDownloads } from "./attachment-identity";
@@ -6,6 +8,7 @@ import { tableHasValue } from "./structured-table";
 import { createModalDeduplication } from "./modal-deduplication";
 import type { StructuredTable } from "./structured-table";
 import { fieldText } from "./field-value";
+import { advanceModalPage, collectPaginatedModal, ensureTableIds, ModalPaginationError } from "./modal-pagination";
 import type {
   ModalCapture,
   ScrapedDetail,
@@ -14,6 +17,59 @@ import type {
   ClickDownload,
   ModalTriggerStep,
 } from "./detail-page";
+
+// 모달 탐색 중 어떤 클릭이 상위 테이블의 페이지 상태를 변경하는지 확인하기 위한 진단 로그입니다.
+// 수집 동작에는 관여하지 않으며, 페이지네이션 진단 파일과 같은 폴더에 JSONL로 기록합니다.
+let modalTraceSequence = 0;
+let modalTraceWrite = Promise.resolve();
+const modalTraceFile = join(process.cwd(), ".g2b-pagination-debug", "modal-collector.jsonl");
+
+function recordModalTrace(event: string, details: Record<string, unknown>): void {
+  const record = { at: new Date().toISOString(), event, ...details };
+  const line = JSON.stringify(record);
+  console.info(`[g2b-modal-trace] ${line}`);
+  // 병렬 탐색에서도 기록 순서가 뒤섞이지 않도록 파일 쓰기를 직렬화합니다.
+  modalTraceWrite = modalTraceWrite.then(async () => {
+    await mkdir(join(process.cwd(), ".g2b-pagination-debug"), { recursive: true });
+    await appendFile(modalTraceFile, `${line}\n`, "utf8");
+  }).catch((error: unknown) => {
+    console.warn("[g2b-modal-trace] 로그 파일 기록 실패", error);
+  });
+}
+
+// 선택 페이지의 원본 DOM 상태를 보존합니다. 특정 페이저 구현을 추측해 숫자로 확정하지 않습니다.
+// 추적만을 위한 읽기 작업으로, 페이지 전환이나 클릭 이벤트는 발생시키지 않습니다.
+async function inspectModalPager(
+  page: import("playwright-core").Page,
+  dialogId: string | null,
+  tableId: string | null,
+): Promise<Record<string, unknown>> {
+  try {
+    return await page.evaluate(({ dialogId, tableId }) => {
+      const root = dialogId ? document.getElementById(dialogId) : document.body;
+      if (!root) return { rootFound: false };
+      const table = tableId ? document.getElementById(tableId) : null;
+      const scope = table?.parentElement?.parentElement || root;
+      const controls = [...scope.querySelectorAll("[aria-current], [aria-selected], .selected, .on, .active, [class*='paging'] a, [class*='paging'] button, [class*='pagination'] a, [class*='pagination'] button")]
+        .filter((node) => {
+          const el = node as HTMLElement;
+          return !!el.getClientRects().length && getComputedStyle(el).visibility !== "hidden";
+        })
+        .slice(0, 25)
+        .map((node) => ({
+          tag: node.tagName.toLowerCase(),
+          id: (node as HTMLElement).id,
+          text: (node.textContent || "").trim().slice(0, 40),
+          className: typeof (node as HTMLElement).className === "string" ? (node as HTMLElement).className.slice(0, 120) : "",
+          ariaCurrent: node.getAttribute("aria-current"),
+          ariaSelected: node.getAttribute("aria-selected"),
+        }));
+      return { rootFound: true, tableFound: !!table, controls };
+    }, { dialogId, tableId });
+  } catch (error) {
+    return { inspectError: error instanceof Error ? error.message : String(error) };
+  }
+}
 
 // 화면 텍스트 비교와 필드 레이블 추출에 사용할 공백 정규화 함수입니다.
 const clean = (value: string) => value.replace(/\s+/g, " ").trim();
@@ -61,6 +117,20 @@ type DialogSnapshot = {
   text: string;
   html: string;
 };
+/**
+ * WebSquare는 중첩 팝업을 열 때 상위 프레임 경로를 ID 앞에 계속 붙입니다.
+ * 따라서 전체 ID가 아니라 마지막 프레임의 화면 식별자를 비교해야
+ * A → B → A 형태로 같은 화면이 다시 열리는 순환을 감지할 수 있습니다.
+ * 화면 식별자를 확인할 수 없는 경우에는 제목만으로 서로 다른 화면을 차단하지 않습니다.
+ */
+function modalScreenKey(dialogId: string, title: string | null): string | null {
+  const lastFrame = dialogId.split("_wframe_").at(-1) || dialogId;
+  const screen = lastFrame.replace(/^popupCnts_/, "").replace(/^mainWframe_/, "");
+  if (!screen || screen === dialogId && !dialogId.includes("mainWframe_")) return null;
+  const normalizedTitle = (title || "").replace(/\s+/g, " ").trim();
+  return `${screen}::${normalizedTitle}`;
+}
+
 type Candidate = {
   index: number;
   id: string;
@@ -396,12 +466,16 @@ export async function collectModalContents(
 ): Promise<{
   captures: ModalCapture[];
   discovery: NonNullable<ScrapedDetail["modalDiscovery"]>;
+  sections: StructuredSection[];
 }> {
   // captures에는 저장 기준을 통과한 모달만 담고, failures에는 개별 탐색 오류를 누적합니다.
+  const traceRunId = ++modalTraceSequence;
+  recordModalTrace("collection-start", { traceRunId, url: page.url() });
   const captures: ModalCapture[] = [];
   const failures: string[] = [];
   // 같은 모달 단계의 클릭 요소를 반복 시도하지 않기 위한 방문 기록입니다.
   const visited = new Set<string>();
+  const attemptsByView = new Map<string, number>();
   // 수집 실행별로 중복 검사 상태를 독립적으로 관리합니다.
   const modalDeduplication = createModalDeduplication();
   let candidates = 0;
@@ -412,20 +486,28 @@ export async function collectModalContents(
     parentModalTitle: string | null,
     depth: number,
     path: ModalTriggerStep[],
+    pageNumber = 1,
+    pageTableId: string | null = null,
+    ancestorScreens: readonly string[] = [],
   ): Promise<void> => {
-    // 순환 경로에서 탐색이 무한히 이어지지 않도록 깊이와 클릭 시도 횟수를 제한합니다.
-    // 중첩 깊이는 4단계, 전체 클릭 시도는 60회로 제한하여 탐색이 무한히 확장되지 않게 합니다.
-    if (depth > 4 || attempted >= 60) return;
+    // 같은 화면의 클릭 시도만 제한하여 페이지 수가 많은 표의 하위 상세를 빠뜨리지 않습니다.
+    if (depth > 4) return;
+    const viewKey = `${dialogId || "page"}:${pageTableId || "first"}:${pageNumber}`;
+    if ((attemptsByView.get(viewKey) || 0) >= 1000)
+      throw new ModalPaginationError("한 화면의 조회 버튼 탐색 한도를 초과했습니다.");
     // 현재 페이지 또는 모달에서 클릭 가능한 후보를 찾습니다.
+    recordModalTrace("explore-start", { traceRunId, dialogId, depth, pageNumber, pageTableId,
+      pager: await inspectModalPager(page, dialogId, pageTableId) });
     const found = await clickCandidates(page, dialogId);
     candidates += found.length;
     const root = dialogId
       ? page.locator(`[id=${JSON.stringify(dialogId)}]`)
       : page.locator("body");
     for (const candidate of found) {
-      if (attempted >= 60) break;
+      if ((attemptsByView.get(viewKey) || 0) >= 1000)
+        throw new ModalPaginationError("한 화면의 조회 버튼 탐색 한도를 초과했습니다.");
       // 동일한 모달 단계에서 각 컨트롤을 한 번만 방문합니다.
-      const visitKey = `${dialogId || "page"}:${candidate.id || candidate.index}`;
+      const visitKey = `${dialogId || "page"}:${pageTableId || "first"}:${pageNumber}:${candidate.id || candidate.index}`;
       if (visited.has(visitKey)) continue;
       visited.add(visitKey);
       const control = root.locator(CLICK_SELECTOR).nth(candidate.index);
@@ -434,17 +516,29 @@ export async function collectModalContents(
       const before = await visibleDialogs(page);
       const beforeUrl = page.url();
       attempted++;
+      attemptsByView.set(viewKey, (attemptsByView.get(viewKey) || 0) + 1);
+      recordModalTrace("candidate-before-click", { traceRunId, dialogId, depth, pageNumber, pageTableId,
+        candidate: { id: candidate.id, index: candidate.index, label: candidate.label, value: candidate.value },
+        dialogs: before.map((item) => ({ id: item.id, title: item.title })),
+        pager: await inspectModalPager(page, dialogId, pageTableId) });
       try {
         // 조회용 후보 필터를 통과한 컨트롤에 대해서만 클릭 이벤트를 발생시킵니다.
         // WebSquare의 처리 오버레이가 조회용 컨트롤을 덮을 수 있으므로,
         // 필터 통과 후 이벤트를 직접 발생시켜 오버레이의 클릭 가로채기를 피합니다.
         await control.dispatchEvent("click", undefined, { timeout: 2500 });
+        recordModalTrace("candidate-after-click", { traceRunId, dialogId, depth, pageNumber, pageTableId,
+          candidateId: candidate.id, candidateIndex: candidate.index,
+          pager: await inspectModalPager(page, dialogId, pageTableId) });
         // 새로 열린 모달의 값을 읽기 전에 안정화될 때까지 기다립니다.
         const settling = await waitForModalDataSettled(page, before);
         if (page.url() !== beforeUrl)
           throw new Error("클릭 후 페이지가 이동했습니다.");
         // 클릭 전에는 없었던 새 모달을 식별합니다.
         const after = await visibleDialogs(page);
+        recordModalTrace("candidate-after-settle", { traceRunId, dialogId, depth, pageNumber, pageTableId,
+          candidateId: candidate.id, candidateIndex: candidate.index,
+          settling, dialogs: after.map((item) => ({ id: item.id, title: item.title })),
+          pager: await inspectModalPager(page, dialogId, pageTableId) });
         const fresh = after.find(
           (item) => !before.some((old) => old.id === item.id),
         );
@@ -473,9 +567,10 @@ export async function collectModalContents(
           // 저장 여부와 하위 모달 탐색 여부는 별도의 조건으로 판단합니다.
           // 내용이 있고 중복되지 않은 모달만 captures에 추가합니다.
           // trigger는 어떤 요소를 눌러 열었는지, settling은 값 안정화 대기 결과를 기록합니다.
+          let savedCapture: ModalCapture | null = null;
           if (hasData && !isDuplicate) {
             // 모달 내용과 함께 어떤 클릭 요소에서 열렸는지 및 값 안정화 결과를 기록합니다.
-            captures.push({
+            savedCapture = {
               trigger: {
                 index: candidate.index,
                 tag: candidate.tag,
@@ -492,26 +587,84 @@ export async function collectModalContents(
                 status: settling.status,
                 elapsedMs: settling.elapsedMs,
               },
-            });
+            };
+            captures.push(savedCapture);
           }
           // 저장할 데이터가 없는 모달도 id가 있고 중복되지 않으면 내부 클릭 후보를 탐색합니다.
           // 데이터 저장 여부와 독립적으로 새로운 모달의 하위 컨트롤을 탐색합니다.
           // 이미 확인한 동일 내용의 모달은 다시 탐색하지 않습니다.
-          if (fresh.id && !isDuplicate) {
-            await explore(fresh.id, fresh.title, depth + 1, currentPath);
+          // 같은 화면이 현재 조상 탐색 경로에 이미 존재한다면 하위 재귀만 중단합니다.
+          // 열린 모달의 데이터 저장과 finally의 모달 닫기는 그대로 수행합니다.
+          // 전역 방문 집합이 아닌 조상 경로를 사용하므로 다른 행에서 같은 유형의
+          // 상세 모달을 정상적으로 다시 열어 수집하는 동작은 유지됩니다.
+          const screenKey = fresh.id ? modalScreenKey(fresh.id, fresh.title) : null;
+          const isCircularScreen = screenKey !== null && ancestorScreens.includes(screenKey);
+          if (isCircularScreen) {
+            recordModalTrace("circular-screen-skipped", {
+              traceRunId, dialogId, depth, pageNumber, pageTableId,
+              freshDialogId: fresh.id, freshTitle: fresh.title,
+              screenKey, ancestorScreens,
+            });
+          }
+          if (fresh.id && !isDuplicate && !isCircularScreen) {
+            recordModalTrace("nested-pagination-start", { traceRunId, parentDialogId: dialogId,
+              parentPageNumber: pageNumber, parentTableId: pageTableId, freshDialogId: fresh.id,
+              pager: await inspectModalPager(page, dialogId, pageTableId) });
+            const collected = await collectPaginatedModal(page, fresh.id, page.url(), {
+              onPage: async (number, tableId, rowOffset) => {
+                recordModalTrace("nested-onpage-before", { traceRunId, dialogId: fresh.id, number, tableId,
+                  parentDialogId: dialogId, parentPageNumber: pageNumber, parentTableId: pageTableId,
+                  pager: await inspectModalPager(page, fresh.id, tableId) });
+                const pagePath: ModalTriggerStep[] = number === 1 ? currentPath : [...currentPath,
+                  { id: tableId || "", index: -1, label: "페이지", value: String(number), page: number, rowOffset }];
+                if (savedCapture) {
+                  const snapshot = (await visibleDialogs(page)).find((item) => item.id === fresh.id);
+                  if (snapshot) {
+                    const downloads = await collectClickDownloads(page, page.locator(`[id=${JSON.stringify(fresh.id)}]`));
+                    const attachments = extractModalStructure(snapshot.html, page.url(),
+                      { noticeKey, clickDownloads: downloads, modalIndex }).attachments;
+                    for (const attachment of attachments) {
+                      if (!savedCapture.modal.attachments?.some((item) => item.url === attachment.url))
+                        (savedCapture.modal.attachments ||= []).push(attachment);
+                      if (attachment.url.includes("&modal=") &&
+                        !savedCapture.modal.attachmentSources?.some((item) => item.url === attachment.url))
+                        (savedCapture.modal.attachmentSources ||= []).push({ url: attachment.url, path: pagePath });
+                    }
+                  }
+                }
+                await explore(fresh.id, fresh.title, depth + 1, pagePath, number, tableId,
+                  screenKey ? [...ancestorScreens, screenKey] : ancestorScreens);
+                recordModalTrace("nested-onpage-after", { traceRunId, dialogId: fresh.id, number, tableId,
+                  pager: await inspectModalPager(page, fresh.id, tableId) });
+              },
+            });
+            recordModalTrace("nested-pagination-complete", { traceRunId, freshDialogId: fresh.id,
+              parentDialogId: dialogId, parentPageNumber: pageNumber, parentTableId: pageTableId,
+              pager: await inspectModalPager(page, dialogId, pageTableId) });
+            if (savedCapture) savedCapture.modal.sections = collected.sections;
           }
         }
       } catch (error) {
+        recordModalTrace("candidate-error", { traceRunId, dialogId, depth, pageNumber, pageTableId,
+          candidateId: candidate.id, candidateIndex: candidate.index,
+          error: error instanceof Error ? error.message : String(error),
+          pager: await inspectModalPager(page, dialogId, pageTableId) });
+        if (error instanceof ModalPaginationError) throw error;
         // 개별 후보의 오류는 기록하고 나머지 후보 탐색을 계속합니다.
         failures.push(
           `${candidate.index} ${candidate.label.slice(0, 60)} ${candidate.html.slice(0, 200)}: ${error instanceof Error ? error.message.slice(0, 800) : String(error)}`,
         );
       } finally {
         // 클릭으로 열린 모달을 역순으로 닫아 이전 상태로 복원합니다.
+        recordModalTrace("candidate-before-close", { traceRunId, dialogId, depth, pageNumber, pageTableId,
+          candidateId: candidate.id, candidateIndex: candidate.index,
+          pager: await inspectModalPager(page, dialogId, pageTableId) });
         const opened = (await visibleDialogs(page)).filter(
           (item) => !before.some((old) => old.id === item.id),
         );
         for (const item of opened.reverse()) {
+          recordModalTrace("dialog-close-start", { traceRunId, dialogId, depth, pageNumber, pageTableId,
+            closingDialogId: item.id, pager: await inspectModalPager(page, dialogId, pageTableId) });
           const dialog = item.id
             ? page.locator(`[id=${JSON.stringify(item.id)}]`)
             : page
@@ -528,20 +681,40 @@ export async function collectModalContents(
               await close.dispatchEvent("click", undefined, { timeout: 2500 });
             else await page.keyboard.press("Escape");
             await dialog.waitFor({ state: "hidden", timeout: 2500 });
+            recordModalTrace("dialog-close-complete", { traceRunId, dialogId, depth, pageNumber, pageTableId,
+              closingDialogId: item.id, pager: await inspectModalPager(page, dialogId, pageTableId) });
           } catch (error) {
             failures.push(
               `${candidate.label.slice(0, 60)} 모달 복귀 실패: ${error instanceof Error ? error.message.slice(0, 120) : String(error)}`,
             );
           }
         }
+        recordModalTrace("candidate-after-close", { traceRunId, dialogId, depth, pageNumber, pageTableId,
+          candidateId: candidate.id, candidateIndex: candidate.index,
+          pager: await inspectModalPager(page, dialogId, pageTableId) });
       }
     }
+    recordModalTrace("explore-complete", { traceRunId, dialogId, depth, pageNumber, pageTableId,
+      pager: await inspectModalPager(page, dialogId, pageTableId) });
   };
   // 최상위 페이지부터 시작하고, 저장 결과와 탐색 통계를 함께 반환합니다.
   // 페이지 본문에서 시작하여 새 모달을 발견할 때마다 재귀적으로 하위 후보를 탐색합니다.
-  await explore(null, null, 0, []);
+  const paginatedPage = await collectPaginatedModal(page, null, page.url(), {
+    onPage: async (number, tableId, rowOffset) => {
+      recordModalTrace("root-onpage-before", { traceRunId, number, tableId,
+        pager: await inspectModalPager(page, null, tableId) });
+      const path: ModalTriggerStep[] = number === 1 ? [] :
+        [{ id: tableId || "", index: -1, label: "페이지", value: String(number), page: number, rowOffset }];
+      await explore(null, null, 0, path, number, tableId);
+      recordModalTrace("root-onpage-after", { traceRunId, number, tableId,
+        pager: await inspectModalPager(page, null, tableId) });
+    },
+  });
+  recordModalTrace("collection-complete", { traceRunId, captures: captures.length,
+    candidates, attempted, failures: failures.length });
   return {
     captures,
+    sections: paginatedPage.sections,
     discovery: {
       candidates,
       attempted,
@@ -556,9 +729,17 @@ export async function collectModalContents(
 /** 저장된 조회 경로를 다시 열어 첨부파일이 들어 있는 모달을 찾습니다. */
 export async function replayModalPath(page: import("playwright-core").Page,
   path: ModalTriggerStep[]): Promise<import("playwright-core").Locator> {
-  if (!path.length || path.length > 5) throw new Error("모달 경로가 올바르지 않습니다.");
+  if (!path.length || path.length > 9) throw new Error("모달 경로가 올바르지 않습니다.");
+  await ensureTableIds(page, null);
   let dialogId: string | null = null;
   for (const step of path) {
+    if (step.page !== undefined) {
+      if (!step.id || !Number.isSafeInteger(step.page) || step.page < 2)
+        throw new Error("모달 페이지 경로가 올바르지 않습니다.");
+      await ensureTableIds(page, dialogId);
+      for (let number = 1; number < step.page; number++) await advanceModalPage(page, dialogId, step.id);
+      continue;
+    }
     const candidates = await clickCandidates(page, dialogId);
     const candidate = candidates.find((item) => item.index === step.index && item.id === step.id &&
       item.label === step.label && item.value === step.value);

@@ -53,4 +53,13 @@ describe("공고 본문 이동 대상 판별", () => {
     expect(openingTargetForCell("다른 섹션", 1, 5, "개찰완료", opening)).toBeNull();
     expect(openingTargetForCell("입찰진행현황", 1, 5, "개찰대기", opening)).toBeNull();
   });
+  it("뒤쪽 페이지의 버튼을 합쳐진 표의 원래 행에 연결한다", () => {
+    const opening = [{ number: "opening--R26BK01766517--001--002", triggers: [{
+      sectionHint: "입찰진행현황", value: "개찰완료",
+      html: '<button id="gridViewPgst_button_0_5">개찰완료</button>',
+      path: [{ id: "progress_grid", page: 2, rowOffset: 10 }]
+    }] }];
+    expect(openingTargetForCell("입찰진행현황", 10, 5, "개찰완료", opening))
+      .toEqual({ stage: "opening", reference: opening[0].number });
+  });
 });

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { NoticeUserView } from "./NoticeUserView";
 import type { ScrapedDetail } from "@/lib/g2b/detail-page";
@@ -29,6 +29,21 @@ const detail: ScrapedDetail = {
 
 describe("NoticeUserView", () => {
   afterEach(cleanup);
+
+  it("일반 표의 저장 행을 10행씩 표시하고 다음 페이지로 이동한다", () => {
+    const rows = Array.from({ length: 23 }, (_, index) =>
+      [{ value: String(index + 1), column: 0, rowspan: 1, colspan: 1 }]);
+    render(<NoticeUserView detail={{ ...detail, sections: [{ title: "목록", fields: [], tables: [{
+      headerRows: [[{ value: "번호", column: 0, rowspan: 1, colspan: 1 }]], bodyRows: rows
+    }] }] }} />);
+    const table = screen.getByRole("table", { name: "목록 표 1" });
+    expect(within(table).getAllByRole("row")).toHaveLength(11);
+    fireEvent.click(screen.getByRole("button", { name: "다음" }));
+    expect(within(table).getByText("11")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "다음" }));
+    expect(within(table).getByText("23")).toBeInTheDocument();
+    expect(screen.getByText(/전체 23행/)).toBeInTheDocument();
+  });
 
   it("연결된 모든 모달 섹션의 파일명에 해당 모달의 URL을 적용한다", () => {
     const source: ScrapedDetail = { ...detail, attachments: [], sections: [{ title: "규격", fields: [], tables: [],

@@ -58,6 +58,23 @@ describe("structureNoticeDetail", () => {
     expect(result.detail.sections?.find((section) => section.title === "입찰진행현황")?.details).toEqual([]);
     expect(result.detail.modalCaptures).toEqual([]);
   });
+  it("뒤쪽 페이지의 진행현황 클릭을 합쳐진 표의 행에 맞춘다", () => {
+    const source = detail([]);
+    source.sections?.push({ title: "입찰진행현황", fields: [], tables: [{ sourceId: "progress_grid",
+      headerRows: [[{ value: "재입찰번호", column: 0, rowspan: 1, colspan: 1 },
+        { value: "진행현황", column: 1, rowspan: 1, colspan: 1 }]],
+      bodyRows: Array.from({ length: 11 }, (_, index) => [
+        { value: index === 10 ? "002" : "000", column: 0, rowspan: 1, colspan: 1 },
+        { value: "개찰완료", column: 1, rowspan: 1, colspan: 1 }]) }] });
+    const parent = capture("개찰결과상세조회", [{ label: "결과", value: [{ text: "완료", visible: true }] }],
+      "입찰진행현황", "개찰완료");
+    parent.trigger.html = '<button id="gridViewPgst_button_0_1">개찰완료</button>';
+    parent.trigger.path = [{ id: "progress_grid", index: -1, label: "페이지", value: "2", page: 2, rowOffset: 10 },
+      { id: "gridViewPgst_button_0_1", index: 0, label: "개찰완료", value: "개찰완료" }];
+    source.modalCaptures = [parent];
+    expect(structureNoticeDetail("R26BK01774553--000", source).openingDetailKeys)
+      .toEqual(["opening--R26BK01774553--000--002"]);
+  });
 
   it("중첩 모달의 빈 섹션을 제거한 뒤 연결된 하위 상세와 첨부를 보존합니다", () => {
     const source = detail([]);
@@ -194,6 +211,19 @@ describe("structureNoticeDetail", () => {
     source.modal.fields![0].value = [{ text: "다른 사업", visible: true }];
     await saveIndependentDetails(dir, structureNoticeDetail("R26BK1--000", detail([source])));
     expect(JSON.parse(await readFile(path, "utf8"))).toEqual(upgraded);
+  });
+  it("선택 재수집에서는 기존 개찰 상세 파일을 교체한다", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "g2b-opening-refresh-")); dirs.push(dir);
+    await mkdir(join(dir, "independent-details"));
+    const key = "opening--R26BK01774415--001--000";
+    const path = join(dir, "independent-details", `${key}.json`);
+    await writeFile(path, JSON.stringify({ schemaVersion: 5, number: key, sections: [{ title: "목록", tables: [{ bodyRows: Array(10).fill([]) }] }] }));
+    const structured = structureNoticeDetail("R26BK01774415--001", detail([]));
+    structured.openingDetails.push({ schemaVersion: 5, number: key, title: "개찰결과상세조회",
+      sections: [{ title: "목록", fields: [], tables: [{ headerRows: [], bodyRows: Array(11).fill([]) }] }],
+      capturedAt: "2026-10-27T00:00:00Z", sourceNoticeKey: "R26BK01774415--001" });
+    await saveIndependentDetails(dir, structured, { replaceOpening: true });
+    expect(JSON.parse(await readFile(path, "utf8")).sections[0].tables[0].bodyRows).toHaveLength(11);
   });
   it("classifies numbered triggers without relying on modal titles", () => {
     const numbered = capture("임의 제목", [{ label: "내용", value: [{ text: "계획", visible: true }] }], "공고일반");

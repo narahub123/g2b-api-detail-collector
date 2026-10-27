@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { NoticeComparison } from "./NoticeComparison";
 import type { ScrapedDetail, StructuredTable } from "@/lib/g2b/detail-page";
@@ -26,6 +26,15 @@ const detail: ScrapedDetail = {
 };
 
 describe("NoticeComparison", () => {
+  it("일반 표의 전체 행을 10행씩 나눠 표시한다", () => {
+    const source: ScrapedDetail = { ...detail, modalCaptures: [], sections: [{ title: "일반 목록", fields: [],
+      tables: [simpleTable(["번호"], Array.from({ length: 11 }, (_, index) => [String(index + 1)]))] }] };
+    render(<NoticeComparison api={null} detail={source} />);
+    const table = screen.getByRole("table", { name: "일반 목록 표 1" });
+    expect(within(table).getAllByRole("row")).toHaveLength(11);
+    fireEvent.click(screen.getByRole("button", { name: "다음" }));
+    expect(within(table).getByText("11")).toBeInTheDocument();
+  });
   it("개찰 독립 상세와 그 안의 하위 모달을 함께 표시합니다", () => {
     render(<NoticeComparison api={null} detail={detail} openingDetails={[{
       number: "opening--R26BK1--000--002",

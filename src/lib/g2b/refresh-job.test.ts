@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -82,6 +82,34 @@ describe("selected notice refresh", () => {
     expect(await saved(dir, keys[1])).toBe(before[1]);
     expect(await saved(dir, keys[2])).toBe(before[2]);
     expect(await readdir(join(dir, "notices"))).toHaveLength(3);
+  });
+
+  it("선택한 공고의 기존 개찰 목록만 완전한 재수집 결과로 교체한다", async () => {
+    const dir = await fixture();
+    await mkdir(join(dir, "independent-details"));
+    const openingKey = `opening--${keys[0]}--000`;
+    const path = join(dir, "independent-details", `${openingKey}.json`);
+    await writeFile(path, JSON.stringify({ schemaVersion: 5, number: openingKey, sections: [{
+      title: "목록", tables: [{ bodyRows: Array(10).fill([]) }]
+    }] }));
+    const untouched = await saved(dir, keys[1]);
+    const base = await scrape("https://www.g2b.go.kr/");
+    const openingScrape: ScrapeResult = { ...base, detail: { ...base.detail,
+      sections: [...(base.detail.sections || []), { title: "입찰진행현황", fields: [], tables: [{
+        headerRows: [[{ value: "재입찰번호", column: 0, rowspan: 1, colspan: 1 },
+          { value: "진행현황", column: 1, rowspan: 1, colspan: 1 }]],
+        bodyRows: [[{ value: "000", column: 0, rowspan: 1, colspan: 1 },
+          { value: "개찰완료", column: 1, rowspan: 1, colspan: 1 }]] }] }],
+      modalCaptures: [{ trigger: { index: 0, tag: "button", label: "진행현황", value: "개찰완료",
+        sectionHint: "입찰진행현황", html: '<button id="gridViewPgst_button_0_1">개찰완료</button>' },
+        modal: { title: "개찰결과상세조회", sections: [{ title: "목록", fields: [], tables: [{
+          headerRows: [[{ value: "번호", column: 0, rowspan: 1, colspan: 1 }]],
+          bodyRows: Array.from({ length: 11 }, (_, index) => [{ value: String(index + 1), column: 0, rowspan: 1, colspan: 1 }])
+        }] }] } }] } };
+    const job = await startRefresh([keys[0]], { dataDir: dir, scrape: async () => openingScrape });
+    expect((await finished(job.id, dir))?.results).toEqual([{ key: keys[0], status: "succeeded" }]);
+    expect(JSON.parse(await readFile(path, "utf8")).sections[0].tables[0].bodyRows).toHaveLength(11);
+    expect(await saved(dir, keys[1])).toBe(untouched);
   });
 
   it("keeps failed JSON unchanged while another selected notice succeeds", async () => {

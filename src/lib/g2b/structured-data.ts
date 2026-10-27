@@ -214,9 +214,11 @@ export function structureNoticeDetail(key: string, detail: ScrapedDetail): Struc
  * 번호가 이미 저장된 독립 상세는 덮어쓰지 않고 새 번호만 파일로 기록합니다.
  * @param dataDir 공고와 독립 상세 파일을 담는 데이터 디렉터리
  * @param structured 분류가 끝난 상세와 독립 저장 후보
+ * @param options 선택 재수집 시 개찰 상세를 교체할지 여부
  * @returns 모든 새 독립 파일의 기록이 끝났을 때 완료되는 Promise
  */
-export async function saveIndependentDetails(dataDir: string, structured: StructuredNoticeDetail): Promise<void> {
+export async function saveIndependentDetails(dataDir: string, structured: StructuredNoticeDetail,
+  options: { replaceOpening?: boolean } = {}): Promise<void> {
   for (const [folder, entities] of [["order-plans", structured.orderPlans],
     ["pre-specifications", structured.preSpecifications], ["independent-details", structured.otherDetails],
     ["independent-details", structured.openingDetails]] as const) {
@@ -234,8 +236,9 @@ export async function saveIndependentDetails(dataDir: string, structured: Struct
         }
       }
       const path = join(dataDir, folder, `${entity.number}.json`);
-      // 현재 형식으로 수집한 값은 유지하고 이전 형식만 갱신합니다.
-      try { if ((await readJson<IndependentDetail>(path)).schemaVersion === 5) continue; }
+      // 다른 현재 형식은 유지하고 선택 재수집의 개찰 상세만 갱신합니다.
+      try { if ((await readJson<IndependentDetail>(path)).schemaVersion === 5 &&
+        !(options.replaceOpening && entity.number.startsWith("opening--"))) continue; }
       catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       }

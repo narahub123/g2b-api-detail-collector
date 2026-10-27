@@ -89,9 +89,9 @@ async function transaction<T>(work: (db: pg.PoolClient) => Promise<T>): Promise<
   } finally { db.release(); }
 }
 
-/** 공고와 새 독립 상세 및 참조를 원자적으로 저장합니다. */
+/** 선택 재수집에서만 개찰 상세 교체를 허용하며 공고와 참조를 원자적으로 저장합니다. */
 export async function saveStoredNotice(key: string, record: StoredNotice,
-  structured?: StructuredNoticeDetail): Promise<void> {
+  structured?: StructuredNoticeDetail, options: { replaceOpening?: boolean } = {}): Promise<void> {
   await transaction(async (db) => {
     await upsertNotice(db, key, record);
     if (!structured) return;
@@ -106,10 +106,12 @@ export async function saveStoredNotice(key: string, record: StoredNotice,
         const match = category === "other" ? /^(R\d{2}BK\d{8})-(\d{3})$/.exec(detail.number) : null;
         const existingNotice = match ? await db.query(`SELECT detail FROM ${table("notices")} WHERE key=$1`, [`${match[1]}--${match[2]}`]) : null;
         if (!existingNotice?.rows[0]?.detail) {
-          // 현재 형식의 최초 저장값은 유지하고, 재수집한 이전 형식만 새 자료로 교체합니다.
+          // 다른 독립 상세의 현재 형식은 유지하고 선택 재수집의 개찰 상세만 교체합니다.
+          const updateCondition = category === "opening" && options.replaceOpening ? "" :
+            "WHERE (independent_details.payload->>'schemaVersion') IS DISTINCT FROM '5'";
           await db.query(`INSERT INTO ${table("independent_details")}(detail_key,category,payload) VALUES($1,$2,$3::jsonb)
             ON CONFLICT(detail_key) DO UPDATE SET payload=EXCLUDED.payload
-            WHERE (independent_details.payload->>'schemaVersion') IS DISTINCT FROM '5'`,
+            ${updateCondition}`,
             [detail.number, category, JSON.stringify(detail)]);
         }
         const triggers = structured.independentTriggers.filter((item) => item.number === detail.number).map((item) => item.trigger);

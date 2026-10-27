@@ -5,6 +5,7 @@ import { extractCommonSections } from "./common-content-extractor";
 import type { StructuredTable } from "./structured-table";
 import { collectAttachments } from "./attachment-collector";
 import { collectModalContents } from "./modal-collector";
+import { ModalPaginationError } from "./modal-pagination";
 import { collectClickDownloads } from "./attachment-identity";
 import { fieldText } from "./field-value";
 import type { FieldValuePart } from "./field-value";
@@ -16,7 +17,8 @@ export type { StructuredTable, StructuredTableCell, StructuredTableContent } fro
 export type Attachment = { name: string; url: string | null };
 export type AttachmentMetadata = { orgnlAtchFileNm: string; atchFileSqno: number; scrnIndtYn?: string };
 export type ClickDownload = { cellId: string; name: string; fileNo: string; seq: number };
-export type ModalTriggerStep = { id: string; index: number; label: string; value: string };
+export type ModalTriggerStep = { id: string; index: number; label: string; value: string;
+  page?: number; rowOffset?: number };
 export type StructuredField = { label: string; value: FieldValuePart[]; visible?: boolean; tables?: StructuredTable[] };
 export type StructuredSection = { title: string; fields: StructuredField[]; tables: StructuredTable[];
   details?: { title: string; sections?: StructuredSection[]; fields?: StructuredField[]; tables?: StructuredTable[];
@@ -25,7 +27,8 @@ export type ModalCapture = {
   trigger: { index: number; tag: string; label: string; value: string; sectionHint?: string | null; html: string;
     parentModalTitle?: string | null; path?: ModalTriggerStep[] };
   modal: { text?: string; html?: string; title: string | null; sections?: StructuredSection[];
-    fields?: StructuredField[]; tables?: StructuredTable[]; attachments?: Attachment[] };
+    fields?: StructuredField[]; tables?: StructuredTable[]; attachments?: Attachment[];
+    attachmentSources?: { url: string; path: ModalTriggerStep[] }[] };
   settling?: { status: "settled" | "timeout"; elapsedMs: number };
 };
 export type ScrapedDetail = {
@@ -143,15 +146,20 @@ export async function scrapeDetailPage(url: string): Promise<ScrapeResult> {
     });
     const detail = extractDetailPage(html, url, metadata, clickDownloads);
     const relatedNoticeKeys = extractRelatedNoticeKeys(html);
-    // Preserve the original extraction independently of modal exploration failures.
+    // 일반 모달 탐색 오류는 본문 수집을 유지하되, 페이지 누락은 재수집 실패로 전달합니다.
     try {
-      const { captures, discovery } = await collectModalContents(page, detail.noticeKey);
+      const { captures, discovery, sections } = await collectModalContents(page, detail.noticeKey);
+      detail.sections = sections;
+      if (detail.summary) detail.summary.tableRowCount = sections.reduce((count, section) => count +
+        [...section.tables, ...section.fields.flatMap((field) => field.tables || [])]
+          .reduce((rows, table) => rows + table.bodyRows.length, 0), 0);
       detail.modalCaptures = captures;
       detail.modalDiscovery = discovery;
-      detail.modalAttachmentSources = captures.flatMap((capture) =>
+      detail.modalAttachmentSources = captures.flatMap((capture) => capture.modal.attachmentSources ||
         (capture.modal.attachments || []).filter((attachment) => attachment.url?.includes("&modal="))
           .map((attachment) => ({ url: attachment.url!, path: capture.trigger.path || [] })));
     } catch (error) {
+      if (error instanceof ModalPaginationError) throw error;
       detail.modalCaptures = [];
       detail.modalDiscovery = { candidates: 0, attempted: 0, captured: 0, skipped: 0,
         failures: [error instanceof Error ? error.message : String(error)] };

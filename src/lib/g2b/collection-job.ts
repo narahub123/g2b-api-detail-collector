@@ -283,7 +283,9 @@ async function runRefresh(job: CollectionJob, deps: CollectionDependencies): Pro
         continue;
       }
       const structured = structureNoticeDetail(result.key, scraped.detail);
-      if (!dbMode) await saveIndependentDetails(dir, structured);
+      const replaceOpening = job.mode === "refresh" &&
+        job.results?.some((selected) => selected.key === result.key) === true;
+      if (!dbMode) await saveIndependentDetails(dir, structured, { replaceOpening });
       const updated: StoredNotice = { ...record, key: result.key, detail: structured.detail,
         orderPlanNumbers: structured.orderPlanNumbers, preSpecificationNumbers: structured.preSpecificationNumbers,
         otherDetailNumbers: structured.otherDetailNumbers,
@@ -291,7 +293,7 @@ async function runRefresh(job: CollectionJob, deps: CollectionDependencies): Pro
         independentTriggers: structured.independentTriggers,
         detailError: null };
       updated.normalized = normalizeNotice(updated.api, updated.detail, { number, order });
-      if (dbMode) await saveStoredNotice(result.key, updated, structured);
+      if (dbMode) await saveStoredNotice(result.key, updated, structured, { replaceOpening });
       else await writeJsonAtomic(join(dir, "notices", `${result.key}.json`), updated);
       result.status = "succeeded";
       job.detailSucceeded++;

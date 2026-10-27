@@ -38,6 +38,19 @@ describe("noticeSummary", () => {
     expect(statements.find((item) => item.sql.includes("INSERT INTO public.independent_details"))?.values?.[1]).toBe("opening");
     expect(statements.find((item) => item.sql.includes("INSERT INTO public.notice_independent_refs"))?.values?.[1]).toBe(opening.number);
   });
+  it("선택 재수집에서는 기존 버전 5 개찰 자료를 교체한다", async () => {
+    const statements = fakePool();
+    const key = "R26BK01774415--001";
+    const opening = { schemaVersion: 5 as const, number: `opening--${key}--000`, title: "개찰결과상세조회",
+      sections: [], capturedAt: "2026-10-27T00:00:00Z", sourceNoticeKey: key };
+    await saveStoredNotice(key, { api: null, detail: null }, {
+      detail: { sourceUrl: "https://www.g2b.go.kr/", attachments: [], links: [] },
+      orderPlanNumbers: [], preSpecificationNumbers: [], otherDetailNumbers: [], openingDetailKeys: [opening.number],
+      orderPlans: [], preSpecifications: [], otherDetails: [], openingDetails: [opening], independentTriggers: [], warnings: []
+    }, { replaceOpening: true });
+    const insert = statements.find((item) => item.sql.includes("INSERT INTO public.independent_details"));
+    expect(insert?.sql).not.toContain("WHERE (independent_details.payload->>'schemaVersion')");
+  });
   it("keeps searchable values while retaining the original notice sources", () => {
     const summary = noticeSummary("R26BK1--000", {
       api: { bidNtceNo: "R26BK1", bidNtceOrd: "000", bidNtceNm: "연구 용역", bidNtceDt: "202610250930", presmptPrce: "1,200" },

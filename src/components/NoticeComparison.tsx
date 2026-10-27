@@ -7,6 +7,7 @@ import { safeAttachmentLink } from "@/lib/g2b/attachment-links";
 import { contentSections } from "@/lib/g2b/content-sections";
 import { attachmentLinkMap } from "@/lib/g2b/attachment-map";
 import { fieldText } from "@/lib/g2b/field-value";
+import { TablePager, tablePageRanges } from "./TablePager";
 
 function safeLink(value: string): string | null {
   try {
@@ -46,19 +47,24 @@ function FieldList({ fields, apiLabels = false, group = "필드", links }: { fie
 
 /** 추출된 표 셀의 파일명을 해당 자료에서 확인한 다운로드 URL과 연결합니다. */
 function DataTable({ table, name, links }: { table: StructuredTable; name: string; links?: ReadonlyMap<string, string> }) {
+  const [page, setPage] = useState(0);
   const structured = tableForDisplay(table);
   if (!structured.bodyRows.some((row) => row.some((cell) => Boolean(cell.value?.trim()))))
     return <p className="muted comparison-empty">표에 값이 없습니다.</p>;
+  const rows = structured.bodyRows.map((cells, index) => ({ cells, index }));
+  const ranges = tablePageRanges(rows);
+  const currentPage = Math.min(page, ranges.length - 1);
+  const range = ranges[currentPage];
   return <div className="comparison-table-wrap"><table className="comparison-table" aria-label={name}>
     <thead>{structured.headerRows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) =>
       <th key={cellIndex} scope={cell.colspan > 1 ? "colgroup" : "col"} rowSpan={cell.rowspan} colSpan={cell.colspan}>
         <LinkedValue value={cell.value || ""} links={links} /></th>
     )}</tr>)}</thead>
-    <tbody>{structured.bodyRows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) =>
+    <tbody>{rows.slice(range.start, range.end).map(({ cells, index }) => <tr key={index}>{cells.map((cell, cellIndex) =>
       <td key={cellIndex} rowSpan={cell.rowspan} colSpan={cell.colspan}>
         <LinkedValue value={cell.value ?? ""} links={links} /></td>
     )}</tr>)}</tbody>
-  </table></div>;
+  </table><TablePager total={rows.length} page={currentPage} pages={ranges.length} onChange={setPage} /></div>;
 }
 
 /** 한 자료에 속한 표와 다운로드 링크를 함께 표시합니다. */
@@ -196,3 +202,6 @@ export function NoticeComparison({ api, detail, orderPlans = [], preSpecificatio
     </div>
   </>;
 }
+"use client";
+
+import { useState } from "react";

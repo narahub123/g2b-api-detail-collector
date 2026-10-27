@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import type { ScrapedDetail, StructuredField, StructuredSection, StructuredTable } from "@/lib/g2b/detail-page";
 import { attachmentLinkMap } from "@/lib/g2b/attachment-map";
 import { tableForUserDisplay } from "@/lib/g2b/structured-table";
@@ -7,6 +8,7 @@ import { fieldText } from "@/lib/g2b/field-value";
 import { contentSections } from "@/lib/g2b/content-sections";
 import { openingTargetForCell, splitNavigationValue, type NavigationTarget } from "@/lib/g2b/notice-navigation";
 import { useNoticeNavigation } from "./NoticeNavigationContext";
+import { TablePager, tablePageRanges } from "./TablePager";
 
 /** 화면 문자열과 수집된 첨부파일명을 같은 기준으로 비교합니다. */
 function fileNameKey(value: string): string {
@@ -82,12 +84,16 @@ function hasVisibleDetailContent(detail: LinkedDetail): boolean {
 /** 저장된 표의 행·열 병합 구조를 사용자 화면에 표시합니다. */
 function UserTable({ table, label, links, section }: { table: StructuredTable; label: string;
   links: Map<string, string>; section?: string }) {
+  const [page, setPage] = useState(0);
   if (!hasVisibleTableData(table)) return null;
   const structured = tableForUserDisplay(table);
   const bodyRows = structured.bodyRows.map((cells, index) => ({ cells, index }))
     .filter(({ index }) => structured.bodyRowVisibility?.[index] !== false);
   const headerRows = structured.headerRows.map((cells, index) => ({ cells, index }))
     .filter(({ index }) => structured.headerRowVisibility?.[index] !== false);
+  const ranges = tablePageRanges(bodyRows);
+  const currentPage = Math.min(page, ranges.length - 1);
+  const range = ranges[currentPage];
   return <div className="user-table-wrap"><table className="user-table" aria-label={label}>
     {headerRows.length > 0 && <thead>{headerRows.map(({ cells, index }) => <tr key={index}>
       {cells.map((cell, cellIndex) => <th key={cellIndex}
@@ -95,13 +101,13 @@ function UserTable({ table, label, links, section }: { table: StructuredTable; l
         rowSpan={visibleRowSpan(structured.headerRowVisibility, index, cell.rowspan)} colSpan={cell.colspan}>
         <DownloadValue value={visibleCellValue(cell)} links={links} /></th>)}
     </tr>)}</thead>}
-    <tbody>{bodyRows.map(({ cells, index }) => <tr key={index}>
+    <tbody>{bodyRows.slice(range.start, range.end).map(({ cells, index }) => <tr key={index}>
       {cells.map((cell, cellIndex) => <td key={cellIndex}
         rowSpan={visibleRowSpan(structured.bodyRowVisibility, index, cell.rowspan)} colSpan={cell.colspan}>
         <DownloadValue value={visibleCellValue(cell)} links={links} section={section}
           row={index} column={cell.column} /></td>)}
     </tr>)}</tbody>
-  </table></div>;
+  </table><TablePager total={bodyRows.length} page={currentPage} pages={ranges.length} onChange={setPage} /></div>;
 }
 
 /** 추출된 필드의 표시 가능한 값을 읽기 쉬운 목록으로 보여줍니다. */

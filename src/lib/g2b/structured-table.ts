@@ -4,7 +4,8 @@ export type StructuredTableContent = { value: string; visible: boolean };
 export type StructuredTableCell = { value: string | null; column: number; rowspan: number; colspan: number;
   visible?: boolean; contents?: StructuredTableContent[] };
 export type StructuredTable = { headerRows: StructuredTableCell[][]; bodyRows: StructuredTableCell[][];
-  visible?: boolean; headerRowVisibility?: boolean[]; bodyRowVisibility?: boolean[]; columnVisibility?: boolean[] };
+  visible?: boolean; headerRowVisibility?: boolean[]; bodyRowVisibility?: boolean[]; columnVisibility?: boolean[];
+  sourceId?: string };
 export type LegacyStructuredTable = { columns: string[]; rows: (string | null)[][] };
 
 const clean = (value: string) => value.replace(/\s+/g, " ").trim();
@@ -217,6 +218,7 @@ export function extractDetailTable($: cheerio.CheerioAPI, table: cheerio.Cheerio
   const explicitGrid = /grd|grid/i.test(table.attr("id") || "") || hasColId || hasThead;
   return projectedBody.length || (explicitGrid && hasHeader) ? { headerRows: projectedHeader,
     bodyRows: projectedBody,
+    ...(table.attr("id") ? { sourceId: table.attr("id") } : {}),
     ...(retainedColumns ? { columnVisibility: retainedColumns } : {}),
     visible: isInlineVisible($, table[0]),
     headerRowVisibility: generatedHeader ? [isInlineVisible($, table[0])] :

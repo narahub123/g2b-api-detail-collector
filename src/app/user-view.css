@@ -19,6 +19,10 @@
 .user-table { width: 100%; border-collapse: collapse; font-size: 13px; line-height: 1.6; }
 .user-table th, .user-table td { min-width: 110px; padding: 11px 13px; border: 1px solid #e4ecee; text-align: left; vertical-align: top; white-space: pre-wrap; overflow-wrap: anywhere; }
 .user-table th { color: #375a64; background: #f1f6f7; font-weight: 700; }
+.table-pager { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 10px; font-size: 12px; }
+.table-pager span { margin-right: auto; }
+.table-pager button { padding: 5px 10px; border: 1px solid #bed2d5; border-radius: 5px; background: #fff; cursor: pointer; }
+.table-pager button:disabled { opacity: .45; cursor: default; }
 .user-linked-detail { margin-top: 20px; padding: 18px; border: 1px solid #e1eaec; border-radius: 10px; background: #fbfdfd; }
 .user-linked-detail h3 { margin: 0 0 8px; color: #244750; font-size: 15px; }
 .user-download-link { color: #08747a; font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }

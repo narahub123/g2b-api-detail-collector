@@ -1,7 +1,8 @@
 export type NoticeStage = "plan" | "spec" | "notice" | "opening" | "award" | "contract";
 export type NavigationTarget = { stage: NoticeStage; reference?: string } | { href: string };
 export type NavigationSegment = { text: string; target?: NavigationTarget };
-export type OpeningReference = { number: string; triggers?: { sectionHint?: string | null; value: string; html: string }[] };
+export type OpeningReference = { number: string; triggers?: { sectionHint?: string | null; value: string; html: string;
+  path?: { page?: number; rowOffset?: number }[] }[] };
 export type NavigationTargets = { currentKey: string; relatedKeys: string[]; planNumbers: string[];
   specNumbers: string[]; opening: OpeningReference[] };
 
@@ -57,8 +58,9 @@ export function openingTargetForCell(section: string, row: number, column: numbe
   if (section !== "입찰진행현황" || !value.trim()) return null;
   const matches = references.filter((reference) => reference.triggers?.some((trigger) => {
     const position = /gridViewPgst_button_(\d+)_(\d+)/.exec(trigger.html);
+    const rowOffset = trigger.path?.find((step) => step.page !== undefined)?.rowOffset || 0;
     return trigger.sectionHint === section && trigger.value.trim() === value.trim() &&
-      position && Number(position[1]) === row && Number(position[2]) === column;
+      position && Number(position[1]) + rowOffset === row && Number(position[2]) === column;
   }));
   return matches.length === 1 ? { stage: "opening", reference: matches[0].number } : null;
 }
