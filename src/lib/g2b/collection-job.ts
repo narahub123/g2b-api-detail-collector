@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { readdir, unlink } from "node:fs/promises";
-import { fetchServiceNotices } from "./api-client";
+import { fetchNoticeByKey, fetchServiceNotices } from "./api-client";
 import { parsePostedDateRange } from "./date-range";
 import { scrapeDetailPage, serviceDetailUrl, type ScrapeResult } from "./detail-page";
 import { noticeKey, noticeKeyFromParts } from "./identity";
@@ -44,6 +44,17 @@ async function saveJob(job: CollectionJob, dir: string) {
   await writeJsonAtomic(jobPath(dir, job.id), job);
 }
 
+/** 저장된 API가 없는 공고만 번호로 재조회하고, 조회 오류는 상세 수집과 분리해 기록합니다. */
+async function findMissingApi(key: string, record: StoredNotice, job: CollectionJob,
+  fetcher?: typeof fetch): Promise<ApiNotice | null> {
+  if (record.api) return null;
+  try { return await fetchNoticeByKey(key, fetcher); }
+  catch (error) {
+    job.errors.push(`${key}: API 보완 조회 실패: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
+}
+
 /** 날짜 범위 API 조회와 상세 수집을 순서대로 실행하고 작업 상태를 기록합니다. */
 async function runCollection(job: CollectionJob, deps: CollectionDependencies): Promise<void> {
   const dir = deps.dataDir || defaultDataDir();
@@ -78,11 +89,12 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies): 
     if (dbMode) await saveStoredNotice(key, record, structured);
     else await writeJsonAtomic(pathFor(key), record);
   };
+  /** 기존 공고의 API와 관계를 보존하면서 필요한 저장 레코드를 확보합니다. */
   const ensureRecord = async (key: string, api: ApiNotice | null = null): Promise<StoredNotice> => {
     const identity = parts(key);
     const record = await readRecord(key) || { key, api: null, detail: null, relatedNoticeKeys: [],
       detailUrl: serviceDetailUrl(identity.number, identity.order), detailError: null, collectedAt: new Date().toISOString() };
-    if (api) record.api = api;
+    if (api && !record.api) record.api = api;
     await saveRecord(key, record);
     return record;
   };
@@ -103,10 +115,15 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies): 
     await writeReciprocalRelation(source, related);
     await unlink(path);
   };
+  /** 누락된 API를 보완하고 상세를 수집한 뒤 새로 발견한 관련 공고 키를 반환합니다. */
   const processRecord = async (key: string, api: ApiNotice | null = null): Promise<string[]> => {
     const record = await ensureRecord(key, api);
+    if (!api && !record.api) {
+      const found = await findMissingApi(key, record, job, deps.fetcher);
+      if (found) { record.api = found; await saveRecord(key, record); }
+    }
     if (scraped.has(key)) return [];
-    // A selected API notice may replace legacy detail; related discoveries keep their existing detail.
+    // 날짜 범위 API로 선택된 공고만 이전 형식의 상세를 다시 수집합니다.
     if (record.detail && (!api || (record.orderPlanNumbers !== undefined &&
         record.preSpecificationNumbers !== undefined && !record.detail.text))) return [];
     scraped.add(key);
@@ -247,6 +264,13 @@ async function runRefresh(job: CollectionJob, deps: CollectionDependencies): Pro
         await readJson<StoredNotice>(join(dir, "notices", `${result.key}.json`));
       if (!record) throw new Error(`저장된 공고를 찾을 수 없습니다: ${result.key}`);
       const [number, order] = result.key.split("--");
+      const found = await findMissingApi(result.key, record, job, deps.fetcher);
+      if (found) {
+        record.api = found;
+        record.normalized = normalizeNotice(record.api, record.detail, { number, order });
+        if (dbMode) await saveStoredNotice(result.key, record);
+        else await writeJsonAtomic(join(dir, "notices", `${result.key}.json`), record);
+      }
       let scraped: ScrapeResult;
       try {
         scraped = await scrape(serviceDetailUrl(number, order));

@@ -55,6 +55,48 @@ describe("NoticeUserView", () => {
     expect(screen.getByText("홍길동")).toBeInTheDocument();
   });
 
+  it("최상위와 모달에서 값이 없는 섹션 제목을 숨기고 실제 값과 첨부 링크를 유지한다", () => {
+    const emptyTable = { headerRows: [[{ value: "파일명", column: 0, rowspan: 1, colspan: 1 }]], bodyRows: [] };
+    const source: ScrapedDetail = { ...detail, sections: [
+      { title: "제안요청정보", fields: [], tables: [emptyTable] },
+      { title: "공지사항", fields: [], tables: [], details: [{ title: "공지사항 상세",
+        attachments: [{ name: "안내문.hwp", url: "https://www.g2b.go.kr/notice.hwp" }],
+        sections: [
+          { title: "게시물 첨부파일", fields: [], tables: [emptyTable] },
+          { title: "파일첨부", fields: [{ label: "파일", value: [] }], tables: [] },
+          { title: "미분류", fields: [{ label: "파일", value: [{ text: "안내문.hwp", visible: true }] }], tables: [] }
+        ] }] }
+    ] };
+
+    render(<NoticeUserView detail={source} />);
+
+    expect(screen.queryByText("제안요청정보")).not.toBeInTheDocument();
+    expect(screen.queryByText("게시물 첨부파일")).not.toBeInTheDocument();
+    expect(screen.queryByText("파일첨부")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "미분류" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "안내문.hwp" }))
+      .toHaveAttribute("href", "https://www.g2b.go.kr/notice.hwp");
+  });
+
+  it("값이 없는 모달 섹션에 연결된 하위 상세는 표시한다", () => {
+    const source: ScrapedDetail = { ...detail, sections: [{ title: "공지사항", fields: [], tables: [],
+      details: [{ title: "공지사항 상세", sections: [
+        { title: "빈 섹션", fields: [], tables: [] },
+        { title: "하위 상세 위치", fields: [], tables: [], details: [{ title: "첨부 상세",
+          attachments: [{ name: "결과.hwp", url: "https://www.g2b.go.kr/result.hwp" }],
+          sections: [{ title: "결과", fields: [{ label: "파일", value: [{ text: "결과.hwp", visible: true }] }], tables: [] }]
+        }] }
+      ] }] }] };
+
+    render(<NoticeUserView detail={source} />);
+
+    expect(screen.queryByText("빈 섹션")).not.toBeInTheDocument();
+    expect(screen.getByText("하위 상세 위치")).toBeInTheDocument();
+    expect(screen.getByText("첨부 상세")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "결과.hwp" }))
+      .toHaveAttribute("href", "https://www.g2b.go.kr/result.hwp");
+  });
+
 
   it("shows only visible pieces of a field and omits its hidden empty table", () => {
     const source: ScrapedDetail = { ...detail, sections: [{ title: "투찰제한-일반", visible: true, tables: [],

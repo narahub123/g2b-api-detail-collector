@@ -31,6 +31,46 @@ const scrape = async (url: string): Promise<ScrapeResult> => ({ detail: {
 }, relatedNoticeKeys: keys });
 
 describe("selected notice refresh", () => {
+  it("fills only a missing API for the selected order and keeps its relations", async () => {
+    const dir = await fixture();
+    process.env.G2B_SERVICE_KEY = "test-key";
+    const requests: string[] = [];
+    const fetcher = async (input: RequestInfo | URL) => {
+      requests.push(new URL(String(input)).searchParams.get("inqryDiv")!);
+      return new Response(JSON.stringify({ response: { header: { resultCode: "00" }, body: {
+        totalCount: 2, items: [
+          { bidNtceNo: "R26BK01774570", bidNtceOrd: "001", bidNtceNm: "다른 차수" },
+          { bidNtceNo: "R26BK01774570", bidNtceOrd: "002", bidNtceNm: "대상 차수" }
+        ]
+      } } }));
+    };
+    const job = await startRefresh([keys[0]], { dataDir: dir, fetcher: fetcher as typeof fetch, scrape });
+    expect((await finished(job.id, dir))?.status).toBe("completed");
+    const record = JSON.parse(await saved(dir, keys[0]));
+    expect(requests).toEqual(["2"]);
+    expect(record.api.bidNtceNm).toBe("대상 차수");
+    expect(record.relatedNoticeKeys).toEqual(keys.slice(1));
+    expect(record.detail.sections[0].title).toBe("공고일반");
+    delete process.env.G2B_SERVICE_KEY;
+  });
+
+  it("keeps an existing API and continues detail collection when an API request fails", async () => {
+    const dir = await fixture();
+    process.env.G2B_SERVICE_KEY = "test-key";
+    const existing = JSON.parse(await saved(dir, keys[0]));
+    existing.api = { bidNtceNo: "R26BK01774570", bidNtceOrd: "002", bidNtceNm: "기존 API" };
+    await writeJsonAtomic(join(dir, "notices", `${keys[0]}.json`), existing);
+    let requests = 0;
+    const fetcher = async () => { requests++; throw new Error("API 장애"); };
+    const job = await startRefresh(keys.slice(0, 2), { dataDir: dir, fetcher: fetcher as typeof fetch, scrape });
+    const result = await finished(job.id, dir);
+    expect(result?.detailSucceeded).toBe(2);
+    expect(requests).toBe(1);
+    expect(JSON.parse(await saved(dir, keys[0])).api.bidNtceNm).toBe("기존 API");
+    expect(JSON.parse(await saved(dir, keys[1])).api).toBeNull();
+    delete process.env.G2B_SERVICE_KEY;
+  });
+
   it("refreshes one already successful notice with section visibility and leaves others byte-identical", async () => {
     const dir = await fixture();
     const before = await Promise.all(keys.map((key) => saved(dir, key)));

@@ -59,6 +59,38 @@ describe("structureNoticeDetail", () => {
     expect(result.detail.modalCaptures).toEqual([]);
   });
 
+  it("중첩 모달의 빈 섹션을 제거한 뒤 연결된 하위 상세와 첨부를 보존합니다", () => {
+    const source = detail([]);
+    source.sections?.push({ title: "입찰진행현황", fields: [], tables: [{
+      headerRows: [[{ value: "재입찰번호", column: 0, rowspan: 1, colspan: 1 },
+        { value: "진행현황", column: 1, rowspan: 1, colspan: 1 }]],
+      bodyRows: [[{ value: "002", column: 0, rowspan: 1, colspan: 1 },
+        { value: "개찰완료", column: 1, rowspan: 1, colspan: 1 }]]
+    }] });
+    const parent = capture("개찰결과상세조회", [], "입찰진행현황", "개찰완료");
+    parent.trigger.html = '<button id="gridViewPgst_button_0_1">개찰완료</button>';
+    parent.trigger.path = [{ id: "gridViewPgst_button_0_1", index: 0, label: "개찰완료", value: "개찰완료" }];
+    parent.modal = { title: "개찰결과상세조회", sections: [
+      { title: "빈 섹션", fields: [], tables: [] },
+      { title: "하위 상세 위치", fields: [], tables: [] }
+    ] };
+    const child = capture("예비가격산정결과", [], "하위 상세 위치", "보기");
+    child.trigger.parentModalTitle = "개찰결과상세조회";
+    child.trigger.path = [...parent.trigger.path, { id: "reserve", index: 1, label: "예비가격", value: "보기" }];
+    child.modal = { title: "예비가격산정결과", sections: [
+      { title: "빈 섹션", fields: [], tables: [] },
+      { title: "예비가격", fields: [{ label: "가격", value: [{ text: "90원", visible: true }] }], tables: [] }
+    ], attachments: [{ name: "결과.hwp", url: "https://www.g2b.go.kr/result.hwp" }] };
+    source.modalCaptures = [parent, child];
+
+    const result = structureNoticeDetail("R26BK01774553--000", source);
+
+    expect(result.openingDetails[0].sections?.map((section) => section.title)).toEqual(["하위 상세 위치"]);
+    const nested = result.openingDetails[0].sections?.[0].details?.[0];
+    expect(nested?.sections?.map((section) => section.title)).toEqual(["예비가격"]);
+    expect(nested?.attachments).toEqual([{ name: "결과.hwp", url: "https://www.g2b.go.kr/result.hwp" }]);
+  });
+
   it("재입찰번호를 확인할 수 없으면 기존 종속 상세에 남깁니다", () => {
     const parent = capture("개찰결과상세조회", [{ label: "내용", value: [{ text: "결과", visible: true }] }], "입찰진행현황", "개찰완료");
     const source = detail([parent]);

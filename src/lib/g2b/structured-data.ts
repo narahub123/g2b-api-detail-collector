@@ -1,4 +1,4 @@
-import type { ModalCapture, ScrapedDetail, StructuredField, StructuredTable } from "./detail-page";
+import type { ModalCapture, ScrapedDetail, StructuredField, StructuredSection, StructuredTable } from "./detail-page";
 import { fieldText } from "./field-value";
 import { contentSections } from "./content-sections";
 import { classifyTabModal } from "./tab-modal-classification";
@@ -53,6 +53,21 @@ const hasTableContent = (tables: StructuredTable[]) => tables.some((table) =>
   [...table.headerRows, ...table.bodyRows].some((row) => row.some((cell) => Boolean(cell.value?.trim()))));
 const hasContent = (fields: StructuredField[], tables: StructuredTable[]) =>
   hasFieldContent(fields) || hasTableContent(tables);
+/**
+ * 값이 없고 연결된 하위 상세도 없는 섹션을 모든 저장 경로에서 같은 기준으로 제거합니다.
+ * @param sections 필터링할 섹션 목록
+ * @param unresolvedTitles 귀속되지 않은 모달 때문에 보존해야 하는 최상위 섹션 제목
+ * @returns 하위 상세의 섹션까지 정리된 목록
+ */
+const filterNonemptySections = (sections: StructuredSection[] | undefined,
+  unresolvedTitles?: ReadonlySet<string>): StructuredSection[] | undefined => sections?.map((section) => ({
+    ...section,
+    ...(section.details ? { details: section.details.map((detail) => ({
+      ...detail,
+      ...(detail.sections ? { sections: filterNonemptySections(detail.sections) } : {})
+    })) } : {})
+  })).filter((section) => hasContent(section.fields, section.tables) ||
+    Boolean(section.details?.length) || Boolean(unresolvedTitles?.has(section.title)));
 /** 독립 표와 필드에 연결된 표를 각각 한 번씩 집계할 목록으로 만듭니다. */
 const allTables = (fields: StructuredField[], tables: StructuredTable[]): StructuredTable[] =>
   [...tables, ...fields.flatMap((field) => field.tables ?? [])];
@@ -76,8 +91,7 @@ export function structureNoticeDetail(key: string, detail: ScrapedDetail): Struc
   const sections = detail.sections?.map((section) => ({ ...section, details: [...(section.details || [])] }));
   const modalCaptures: ModalCapture[] = [];
   const warnings: string[] = [];
-  // Preserve an empty section when a modal belonging to it could not be linked.
-  // Such a section is not confirmed empty, even if its visible fields have no values.
+  // 귀속되지 않은 모달이 있으면 해당 섹션이 실제로 비었다고 확정할 수 없어 보존합니다.
   const unresolvedSectionTitles = new Set<string>();
   const sectionByModalTitle = new Map<string, Set<number>>();
   const independentParents = new Map<string, { detail: IndependentDetail; path?: ModalCapture["trigger"]["path"] }[]>();
@@ -171,10 +185,10 @@ export function structureNoticeDetail(key: string, detail: ScrapedDetail): Struc
     if (!contentSections(capture.modal).some((section) => hasContent(section.fields, section.tables)))
       warnings.push(`${key}: ${title || capture.trigger.label}에 저장할 구조화된 값이 없습니다.`);
   }
-  const nonemptySections = sections?.filter((section) =>
-    hasContent(section.fields, section.tables) ||
-    section.details.length > 0 ||
-    unresolvedSectionTitles.has(section.title));
+  // 중첩 모달 연결이 끝난 뒤 필터링해야 부모의 빈 섹션에 연결된 하위 상세가 남습니다.
+  for (const entity of [...orderPlans, ...preSpecifications, ...otherDetails, ...openingDetails])
+    entity.sections = filterNonemptySections(entity.sections);
+  const nonemptySections = filterNonemptySections(sections, unresolvedSectionTitles);
   const structured: ScrapedDetail = { ...detail, sections: nonemptySections, modalCaptures };
   if (structured.summary && nonemptySections) {
     structured.summary = {

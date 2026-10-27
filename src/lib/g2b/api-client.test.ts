@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { fetchServiceNotices } from "./api-client";
+import { fetchNoticeByKey, fetchServiceNotices } from "./api-client";
 
 describe("fetchServiceNotices", () => {
   it("pages through notices in the requested posted date range", async () => {
@@ -41,6 +41,36 @@ describe("fetchServiceNotices", () => {
       return new Response(JSON.stringify({ response: { header: { resultCode: "00" }, body: { totalCount: 0, items: [] } } }));
     });
     for await (const page of fetchServiceNotices({ start: "2026-10-01", end: "2026-10-01" }, fetcher as typeof fetch)) void page;
+    delete process.env.G2B_SERVICE_KEY;
+  });
+});
+
+describe("fetchNoticeByKey", () => {
+  it("uses the notice-number query and selects only the exact order", async () => {
+    process.env.G2B_SERVICE_KEY = "test-key";
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      expect(url.searchParams.get("inqryDiv")).toBe("2");
+      expect(url.searchParams.get("bidNtceNo")).toBe("R26BK1");
+      return new Response(JSON.stringify({ response: { header: { resultCode: "00" }, body: {
+        totalCount: 3, items: [
+          { bidNtceNo: "R26BK1", bidNtceOrd: "000" },
+          { bidNtceNo: "OTHER", bidNtceOrd: "001" },
+          { bidNtceNo: "R26BK1", bidNtceOrd: "001", bidNtceNm: "대상" }
+        ]
+      } } }));
+    });
+    expect(await fetchNoticeByKey("R26BK1--001", fetcher as typeof fetch)).toMatchObject({ bidNtceNm: "대상" });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    delete process.env.G2B_SERVICE_KEY;
+  });
+
+  it("returns no API when the number matches but the requested order does not", async () => {
+    process.env.G2B_SERVICE_KEY = "test-key";
+    const fetcher = async () => new Response(JSON.stringify({ response: { header: { resultCode: "00" }, body: {
+      totalCount: 1, items: [{ bidNtceNo: "R26BK1", bidNtceOrd: "000" }]
+    } } }));
+    expect(await fetchNoticeByKey("R26BK1--001", fetcher as typeof fetch)).toBeNull();
     delete process.env.G2B_SERVICE_KEY;
   });
 });
