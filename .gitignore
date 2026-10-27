@@ -12,3 +12,6 @@ docs
 *.tsbuildinfo
 AGENTS.md
 /benchmarks/results/
+
+# 수집 진단 로그는 로컬에서만 보관합니다.
+.g2b-pagination-debug/
