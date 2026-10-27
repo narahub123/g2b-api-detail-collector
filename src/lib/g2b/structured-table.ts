@@ -4,8 +4,32 @@ export type StructuredTableContent = { value: string; visible: boolean };
 export type StructuredTableCell = { value: string | null; column: number; rowspan: number; colspan: number;
   visible?: boolean; contents?: StructuredTableContent[] };
 export type StructuredTable = { headerRows: StructuredTableCell[][]; bodyRows: StructuredTableCell[][];
-  visible?: boolean; headerRowVisibility?: boolean[]; bodyRowVisibility?: boolean[]; columnVisibility?: boolean[] };
+  visible?: boolean; headerRowVisibility?: boolean[]; bodyRowVisibility?: boolean[]; columnVisibility?: boolean[];
+  sourceId?: string; pagination?: { status: "complete" | "partial" | "unknown"; expectedTotal?: number;
+    collectedRows: number; pageRanges: { page: number; start: number; count: number }[];
+    missingPages?: number[]; errors: string[] } };
 export type LegacyStructuredTable = { columns: string[]; rows: (string | null)[][] };
+
+/** 병합 셀이 경계에 걸리지 않도록 목표 행 수와 가장 가까운 안전한 구간으로 나눕니다. */
+export function paginateTableRows<T extends StructuredTableCell[]>(rows: T[], pageSize = 10): T[][] {
+  const pages: T[][] = [];
+  for (let start = 0; start < rows.length;) {
+    const target = Math.min(start + pageSize, rows.length);
+    const safe = (end: number) => rows.slice(start, end).every((row, offset) =>
+      row.every((cell) => start + offset + cell.rowspan <= end));
+    let end = target;
+    if (!safe(end)) {
+      while (end > start + 1 && !safe(end)) end--;
+      if (!safe(end)) {
+        end = target;
+        while (end < rows.length && !safe(end)) end++;
+      }
+    }
+    pages.push(rows.slice(start, end));
+    start = end;
+  }
+  return pages;
+}
 
 const clean = (value: string) => value.replace(/\s+/g, " ").trim();
 const nonempty = (value: string) => clean(value) || null;
@@ -216,6 +240,7 @@ export function extractDetailTable($: cheerio.CheerioAPI, table: cheerio.Cheerio
   const hasHeader = projectedHeader.some((row) => row.some((cell) => Boolean(cell.value?.trim())));
   const explicitGrid = /grd|grid/i.test(table.attr("id") || "") || hasColId || hasThead;
   return projectedBody.length || (explicitGrid && hasHeader) ? { headerRows: projectedHeader,
+    ...(table.attr("id") ? { sourceId: table.attr("id") } : {}),
     bodyRows: projectedBody,
     ...(retainedColumns ? { columnVisibility: retainedColumns } : {}),
     visible: isInlineVisible($, table[0]),

@@ -6,6 +6,7 @@ import { tableHasValue } from "./structured-table";
 import { createModalDeduplication } from "./modal-deduplication";
 import type { StructuredTable } from "./structured-table";
 import { fieldText } from "./field-value";
+import { applyPaginatedTables, collectPaginatedTables } from "./table-pagination";
 import type {
   ModalCapture,
   ScrapedDetail,
@@ -333,6 +334,8 @@ async function clickCandidates(
             element.hasAttribute("disabled") ||
             element.getAttribute("aria-disabled") === "true" ||
             !!element.closest("nav,header,footer,[id*='navigation']") ||
+            // 표 페이지 이동은 별도 수집기가 처리하므로 모달 열기 후보에서 제외합니다.
+            !!element.closest('.w2pageList,.pagination,[class*="pager"]') ||
             // 관련공고 셀 내부 컨트롤은 이 탐색의 대상에서 제외합니다.
             !!element.closest("td[data-title='관련공고']") ||
             // 폼 제출·초기화·파일 입력 및 다운로드 속성이 있는 요소를 제외합니다.
@@ -455,8 +458,13 @@ export async function collectModalContents(
           const modalIndex = captures.length;
           const clickDownloads = fresh.id
             ? await collectClickDownloads(page, page.locator(`[id=${JSON.stringify(fresh.id)}]`)) : [];
+          const pagedTables = await collectPaginatedTables(page,
+            fresh.id ? page.locator(`[id=${JSON.stringify(fresh.id)}]`) : page.locator(MODAL_SELECTOR).last());
           const structured = extractModalStructure(fresh.html, page.url(),
             { noticeKey, clickDownloads, modalIndex });
+          structured.sections = applyPaginatedTables(structured.sections, pagedTables);
+          structured.tables = structured.sections.flatMap((section) => section.tables);
+          structured.fields = structured.sections.flatMap((section) => section.fields);
           // 필드 값, 테이블 값 또는 제목 외의 충분한 본문 텍스트 중 하나가 있으면 저장 대상입니다.
           // 필드 값·테이블 값이 하나라도 있거나 제목을 뺀 본문이 20자를 넘으면 저장할 데이터가 있다고 봅니다.
           // 이 기준은 저장 여부 판단용이며 하위 탐색을 막는 조건으로 사용하지 않습니다.

@@ -13,6 +13,7 @@ import type { ApiNotice, PostedDateRange } from "./types";
 import { saveIndependentDetails, structureNoticeDetail } from "./structured-data";
 import type { StructuredNoticeDetail } from "./structured-data";
 import { getPool, getStoredNotice, saveNoticeRelation, saveStoredNotice } from "./postgres-store";
+import { shouldReplacePaginatedDetail } from "./pagination-coverage";
 
 export type CollectionJob = {
   id: string;
@@ -141,6 +142,11 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies): 
       return [];
     }
     const structured = structureNoticeDetail(key, result.detail);
+    if (record.detail && !shouldReplacePaginatedDetail(record.detail, structured.detail)) {
+      job.errors.push(`${key}: 불완전한 재수집 결과를 저장하지 않아 기존 상세를 유지했습니다.`);
+      await saveJob(job, dir);
+      return result.relatedNoticeKeys;
+    }
     if (!dbMode) await saveIndependentDetails(dir, structured);
     record.detail = structured.detail;
     record.orderPlanNumbers = structured.orderPlanNumbers;
@@ -283,6 +289,13 @@ async function runRefresh(job: CollectionJob, deps: CollectionDependencies): Pro
         continue;
       }
       const structured = structureNoticeDetail(result.key, scraped.detail);
+      if (record.detail && !shouldReplacePaginatedDetail(record.detail, structured.detail)) {
+        result.status = "succeeded";
+        job.detailSucceeded++;
+        job.errors.push(`${result.key}: 불완전한 재수집 결과를 저장하지 않아 기존 상세를 유지했습니다.`);
+        await saveJob(job, dir);
+        continue;
+      }
       if (!dbMode) await saveIndependentDetails(dir, structured);
       const updated: StoredNotice = { ...record, key: result.key, detail: structured.detail,
         orderPlanNumbers: structured.orderPlanNumbers, preSpecificationNumbers: structured.preSpecificationNumbers,

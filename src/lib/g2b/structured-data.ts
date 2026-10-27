@@ -4,9 +4,12 @@ import { contentSections } from "./content-sections";
 import { classifyTabModal } from "./tab-modal-classification";
 import { join } from "node:path";
 import { readJson, writeJsonAtomic } from "./json-store";
+import { shouldReplacePaginatedDetail } from "./pagination-coverage";
+import { paginationCompleteness } from "./pagination-coverage";
 
 export type IndependentDetail = {
   schemaVersion: 2 | 3 | 4 | 5;
+  paginationAudit?: boolean;
   number: string;
   title: string | null;
   sections?: ScrapedDetail["sections"];
@@ -106,6 +109,7 @@ export function structureNoticeDetail(key: string, detail: ScrapedDetail): Struc
 
     /** 기존 독립 상세 형식에 모달의 구조화된 내용을 담습니다. */
     const independentDetail = (detailKey: string): IndependentDetail => ({ schemaVersion: 5, number: detailKey, title,
+      paginationAudit: detail.paginationAudit,
       sections: contentSections(capture.modal, title || "미분류").map((section) => ({ ...section,
         details: [...(section.details || [])] })),
       attachments: capture.modal.attachments || [], capturedAt: detail.capturedAt || new Date().toISOString(),
@@ -206,6 +210,10 @@ export function structureNoticeDetail(key: string, detail: ScrapedDetail): Struc
   delete structured.baseAmountCaptures;
   delete structured.changeNoticeCaptures;
   delete structured.text;
+  for (const item of [structured, ...orderPlans, ...preSpecifications, ...otherDetails, ...openingDetails]) {
+    if (paginationCompleteness(item) === "partial")
+      warnings.push(`${key}: ${"number" in item ? item.number : "공고 상세"}의 표가 부분 수집되었습니다.`);
+  }
   return { detail: structured, orderPlanNumbers, preSpecificationNumbers, otherDetailNumbers, openingDetailKeys,
     orderPlans, preSpecifications, otherDetails, openingDetails, independentTriggers, warnings };
 }
@@ -234,8 +242,12 @@ export async function saveIndependentDetails(dataDir: string, structured: Struct
         }
       }
       const path = join(dataDir, folder, `${entity.number}.json`);
-      // 현재 형식으로 수집한 값은 유지하고 이전 형식만 갱신합니다.
-      try { if ((await readJson<IndependentDetail>(path)).schemaVersion === 5) continue; }
+      // 완전한 기존 자료와 완전성을 알 수 없는 기존 자료를 부분 재수집 결과로 덮어쓰지 않습니다.
+      try {
+        const previous = await readJson<IndependentDetail>(path);
+        if (previous.schemaVersion === 5 && (previous.sourceNoticeKey !== entity.sourceNoticeKey ||
+          !entity.paginationAudit || !shouldReplacePaginatedDetail(previous, entity))) continue;
+      }
       catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       }

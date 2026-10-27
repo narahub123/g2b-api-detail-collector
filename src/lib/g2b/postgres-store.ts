@@ -6,6 +6,7 @@ import type { IndependentDetail, StructuredNoticeDetail } from "./structured-dat
 import type { ModalCapture } from "./detail-page";
 import type { NoticeFilters } from "./notice-filters";
 import regions from "@/data/regions.json";
+import { shouldReplacePaginatedDetail } from "./pagination-coverage";
 
 type Category = "order-plan" | "pre-specification" | "other" | "opening";
 type Queryable = Pick<pg.PoolClient, "query">;
@@ -93,6 +94,14 @@ async function transaction<T>(work: (db: pg.PoolClient) => Promise<T>): Promise<
 export async function saveStoredNotice(key: string, record: StoredNotice,
   structured?: StructuredNoticeDetail): Promise<void> {
   await transaction(async (db) => {
+    if (record.detail?.paginationAudit) {
+      const old = await db.query<{ detail: StoredNotice["detail"] }>(
+        `SELECT detail FROM ${table("notices")} WHERE key=$1`, [key]);
+      if (!shouldReplacePaginatedDetail(old.rows[0]?.detail, record.detail)) {
+        record = { ...record, detail: old.rows[0].detail };
+        structured = undefined;
+      }
+    }
     await upsertNotice(db, key, record);
     if (!structured) return;
     const groups: [Category, IndependentDetail[]][] = [
@@ -106,11 +115,15 @@ export async function saveStoredNotice(key: string, record: StoredNotice,
         const match = category === "other" ? /^(R\d{2}BK\d{8})-(\d{3})$/.exec(detail.number) : null;
         const existingNotice = match ? await db.query(`SELECT detail FROM ${table("notices")} WHERE key=$1`, [`${match[1]}--${match[2]}`]) : null;
         if (!existingNotice?.rows[0]?.detail) {
-          // 현재 형식의 최초 저장값은 유지하고, 재수집한 이전 형식만 새 자료로 교체합니다.
-          await db.query(`INSERT INTO ${table("independent_details")}(detail_key,category,payload) VALUES($1,$2,$3::jsonb)
-            ON CONFLICT(detail_key) DO UPDATE SET payload=EXCLUDED.payload
-            WHERE (independent_details.payload->>'schemaVersion') IS DISTINCT FROM '5'`,
-            [detail.number, category, JSON.stringify(detail)]);
+          const previous = await db.query<{ payload: IndependentDetail }>(
+            `SELECT payload FROM ${table("independent_details")} WHERE detail_key=$1`, [detail.number]);
+          if (!previous.rows[0]?.payload || previous.rows[0].payload.schemaVersion !== 5 || (detail.paginationAudit &&
+            previous.rows[0].payload.sourceNoticeKey === detail.sourceNoticeKey &&
+            shouldReplacePaginatedDetail(previous.rows[0].payload, detail))) {
+            await db.query(`INSERT INTO ${table("independent_details")}(detail_key,category,payload) VALUES($1,$2,$3::jsonb)
+              ON CONFLICT(detail_key) DO UPDATE SET payload=EXCLUDED.payload`,
+              [detail.number, category, JSON.stringify(detail)]);
+          }
         }
         const triggers = structured.independentTriggers.filter((item) => item.number === detail.number).map((item) => item.trigger);
         await db.query(`INSERT INTO ${table("notice_independent_refs")}(notice_key,detail_key,category,position,triggers)
