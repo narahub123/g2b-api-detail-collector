@@ -47,6 +47,17 @@ describe("noticeSummary", () => {
       postedAt: "2026-10-25 09:30:00", amount: "1200" });
   });
 
+  it("수요기관과 공고기관을 각각의 요약 컬럼으로 저장합니다", async () => {
+    const statements = fakePool();
+    await saveStoredNotice("R26BK1--000", { api: { bidNtceNo: "R26BK1", bidNtceOrd: "000",
+      dminsttNm: "국무조정실", ntceInsttNm: "조달청" }, detail: null });
+    const insert = statements.find((item) => item.sql.includes("INSERT INTO public.notices"));
+    expect(insert?.sql).toContain("demand_agency, notice_agency");
+    expect(insert?.sql).toContain("demand_agency=EXCLUDED.demand_agency");
+    expect(insert?.sql).toContain("notice_agency=EXCLUDED.notice_agency");
+    expect(insert?.values?.slice(7, 9)).toEqual(["국무조정실", "조달청"]);
+  });
+
   it("commits a bidirectional relation in one transaction", async () => {
     const statements = fakePool();
     await saveNoticeRelation("R26BK1--000", "R26BK2--001");

@@ -9,6 +9,7 @@ try {
   await client.connect();
   await client.query("BEGIN");
   await client.query(await readFile(fileURLToPath(new URL("../db/migrations/0002-rename-text-identifiers.sql", import.meta.url)), "utf8"));
+  await client.query(await readFile(fileURLToPath(new URL("../db/migrations/0004-split-agencies.sql", import.meta.url)), "utf8"));
   await client.query(await readFile(fileURLToPath(new URL("../db/schema.sql", import.meta.url)), "utf8"));
   await client.query(await readFile(fileURLToPath(new URL("../db/migrations/0003-opening-category.sql", import.meta.url)), "utf8"));
   await client.query("COMMIT");
