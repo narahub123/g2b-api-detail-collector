@@ -13,6 +13,7 @@
 3. [`.env.local`](.env.local)의 `G2B_SERVICE_KEY=` 뒤에 공공데이터포털에서 발급받은 나라장터 입찰공고정보서비스 인증키를 입력합니다. 일반 인증키와 URL 인코딩된 인증키를 모두 사용할 수 있습니다. `.env`도 사용할 수 있지만 `.env.local`에 같은 변수가 있으면 그 값이 우선합니다. 두 파일 모두 Git에서 제외됩니다.
 4. `.env.local`에 Neon 연결 문자열을 `DATABASE_URL=`로 설정합니다.
 5. `npm run db:migrate`로 DB 스키마를 적용합니다.
+   기존 `data/jobs/` 실행 기록이 있으면 `npm run db:import-jobs`를 한 번 실행합니다. 다시 실행해도 이미 이관한 작업은 중복 저장하지 않으며 원본 JSON은 유지합니다.
 6. `npm run dev`를 실행하고 사용자 목록 `http://localhost:3000` 또는 관리자 화면 `http://localhost:3000/admin`을 엽니다.
 7. 관리자 화면에서 **공고 게시일**의 시작일과 종료일을 선택해 `공고 수집 시작`을 누릅니다. 두 날짜 모두 조회 범위에 포함됩니다.
 
@@ -29,7 +30,7 @@ Chrome이 기본 설치 위치에 없으면 `.env.local`에 `G2B_CHROME_PATH=Chr
 - Neon `independent_details`, `notice_independent_refs`: 발주계획·사전규격·개찰·기타 독립 상세와 공고 참조
 - Neon `notice_relations`: 직접 발견한 공고의 양방향 관계
 - 공고 상세의 `baseAmountCaptures`, `changeNoticeCaptures`는 해당 공고 차수에 종속된 정보입니다. 분류되지 않은 모달은 `modalCaptures`에 남습니다.
-- `data/jobs/`: 수집 진행 상태와 오류
+- Neon `collection_jobs`, `collection_lock`: 새 수집 작업의 진행 상태·오류와 공통 실행 잠금. 이전 `data/jobs/` JSON은 이관 후에도 원본으로 남습니다.
 
 테이블과 각 컬럼의 한국어 설명은 [`db/schema.sql`](db/schema.sql)의 PostgreSQL `COMMENT`로 관리합니다. `npm run db:migrate`를 다시 실행하면 기존 테이블의 설명도 갱신됩니다. `api`, `detail`, `payload`, `triggers`는 수집 원본의 구조가 달라질 수 있어 JSONB로 보존합니다.
 
@@ -39,7 +40,7 @@ Chrome이 기본 설치 위치에 없으면 `.env.local`에 `G2B_CHROME_PATH=Chr
 
 개찰결과상세 모달은 `입찰진행현황` 표에서 클릭한 행의 재입찰번호를 확인하면 `opening--공고키--재입찰번호`로 독립 저장하고 개찰 탭에 표시합니다. 모달 안에서 열린 하위 상세도 같은 독립 상세에 포함합니다. 재입찰번호를 확인하지 못하면 기존 공고 상세에 두고 경고를 기록합니다. 기존 DB에서는 `npm run db:migrate`로 `opening` 분류를 허용해야 합니다.
 
-`data/`는 Git에서 제외됩니다. 한 번에 한 수집 작업을 실행합니다. 개별 상세 페이지 수집에 실패해도 해당 공고의 API 응답은 저장하고 화면에 실패 상태를 표시합니다.
+`data/`는 Git에서 제외됩니다. 한 번에 한 수집 작업을 실행합니다. 새 작업 상태는 DB에 저장하므로 서버 프로세스가 달라도 같은 작업을 조회할 수 있습니다. 개별 상세 페이지 수집에 실패해도 해당 공고의 API 응답은 저장하고 관리자 화면에 실패 상태를 표시합니다.
 
 선택 재수집은 성공한 공고의 DB 상세와 독립 상세 참조를 트랜잭션으로 교체합니다. 실패한 공고와 선택하지 않은 공고의 DB 자료는 그대로 둡니다. 번호별 독립 상세는 현재 형식으로 먼저 저장된 값을 유지하고, 이전 형식의 값은 재수집 시 교체합니다.
 

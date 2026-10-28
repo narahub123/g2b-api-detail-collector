@@ -85,7 +85,11 @@ it.skipIf(!process.env.LIVE_DB_TEST || !process.env.DATABASE_URL)(
       expect(await listNotices()).toHaveLength(2);
       const record = await getNoticeRecord("R26BK1--000");
       expect(record?.relatedNoticeKeys).toContain("R26BK2--000");
-      expect(record?.orderPlans[0].detail?.sections?.[0].fields[0].value).toBe("예산");
+      expect(record?.orderPlans[0].detail?.sections?.[0].fields[0].value).toEqual([{ text: "예산", visible: true }]);
+      const storedJob = await runtime.__g2bPgPool!.query(`SELECT status,state FROM ${schema}.collection_jobs WHERE id=$1`, [job.id]);
+      expect(storedJob.rows[0]).toMatchObject({ status: "completed", state: { id: job.id, status: "completed" } });
+      const lock = await runtime.__g2bPgPool!.query(`SELECT job_id FROM ${schema}.collection_lock WHERE id=1`);
+      expect(lock.rows[0].job_id).toBeNull();
       const related = await getNoticeRecord("R26BK2--000");
       expect(related?.relatedNoticeKeys).toContain("R26BK1--000");
       const summary = await runtime.__g2bPgPool!.query(`SELECT title, amount, posted_at FROM ${schema}.notices WHERE key=$1`, ["R26BK1--000"]);
@@ -103,7 +107,8 @@ it.skipIf(!process.env.LIVE_DB_TEST || !process.env.DATABASE_URL)(
       expect((await getNoticeRecord("R26BK1--000"))?.normalized.title.value).toBe("갱신된 용역");
       const refreshedRefs = await runtime.__g2bPgPool!.query(`SELECT detail_key,category FROM ${schema}.notice_independent_refs WHERE notice_key=$1`, ["R26BK1--000"]);
       expect(refreshedRefs.rows, JSON.stringify(refreshed?.errors)).toHaveLength(1);
-      expect((await getNoticeRecord("R26BK1--000"))?.orderPlans[0].detail?.sections?.[0].fields[0].value).toBe("예산");
+      expect((await getNoticeRecord("R26BK1--000"))?.orderPlans[0].detail?.sections?.[0].fields[0].value)
+        .toEqual([{ text: "예산", visible: true }]);
       const failedRefresh = await startRefresh(["R26BK1--000"], { storage: "postgres", dataDir: dir,
         scrape: async () => { throw new Error("상세 접근 실패"); } });
       expect((await finished(failedRefresh.id, dir))?.detailFailed).toBe(1);

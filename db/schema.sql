@@ -81,6 +81,25 @@ CREATE TABLE IF NOT EXISTS public.notice_relations (
   CHECK (source_key <> related_key)
 );
 
+-- 수집 작업 상태는 웹 서버와 독립 실행기가 공유하는 DB 기록으로 유지합니다.
+CREATE TABLE IF NOT EXISTS public.collection_jobs (
+  id uuid PRIMARY KEY,
+  state jsonb NOT NULL,
+  status text NOT NULL CHECK (status IN ('running', 'completed', 'failed', 'interrupted')),
+  started_at timestamptz NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS collection_jobs_started_at_idx ON public.collection_jobs (started_at DESC);
+
+-- 한 번에 한 작업만 실행하도록 임대 소유자와 만료 시각을 보관합니다.
+CREATE TABLE IF NOT EXISTS public.collection_lock (
+  id integer PRIMARY KEY CHECK (id = 1),
+  job_id uuid,
+  token uuid,
+  expires_at timestamptz
+);
+INSERT INTO public.collection_lock (id) VALUES (1) ON CONFLICT DO NOTHING;
+
 COMMENT ON TABLE public.notices IS '공고번호와 차수별 수집 자료. API 항목과 상세 원문을 보존하고 자주 조회하는 요약 값은 별도 컬럼에 둔다.';
 COMMENT ON COLUMN public.notices.key IS '공고번호와 공고차수를 --로 결합한 앱 내부 식별자.';
 COMMENT ON COLUMN public.notices.notice_number IS '나라장터 입찰공고번호를 문자열로 보존한 값. API의 bidNtceNo에 해당한다.';
@@ -115,3 +134,8 @@ COMMENT ON COLUMN public.notice_independent_refs.triggers IS '해당 번호를 �
 COMMENT ON TABLE public.notice_relations IS '상세 페이지에서 직접 발견한 공고 관계. 한 관계를 양쪽 방향의 두 행으로 저장한다.';
 COMMENT ON COLUMN public.notice_relations.source_key IS '관계의 출발 공고를 가리키는 notices.key.';
 COMMENT ON COLUMN public.notice_relations.related_key IS '출발 공고에서 직접 발견한 관련 공고의 notices.key.';
+
+COMMENT ON TABLE public.collection_jobs IS '수동·자동 수집 작업의 상태와 최종 결과를 보존한다.';
+COMMENT ON COLUMN public.collection_jobs.state IS '작업 진행 단계, 건수, 오류와 공고별 결과를 담은 JSON.';
+COMMENT ON TABLE public.collection_lock IS '수집 작업 하나만 실행하기 위한 만료 가능한 DB 임대 잠금.';
+COMMENT ON COLUMN public.collection_lock.token IS '이전 실행자가 새 작업의 잠금을 해제하지 못하게 하는 소유 토큰.';

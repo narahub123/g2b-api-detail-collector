@@ -8,7 +8,8 @@
     "build": "next build",
     "start": "next start",
     "test": "vitest run",
-    "db:migrate": "node --env-file=.env.local scripts/migrate-db.mjs"
+    "db:migrate": "node --env-file=.env.local scripts/migrate-db.mjs",
+    "db:import-jobs": "node --env-file=.env.local scripts/import-jobs.mjs"
   },
   "dependencies": {
     "cheerio": "^1.1.2",
