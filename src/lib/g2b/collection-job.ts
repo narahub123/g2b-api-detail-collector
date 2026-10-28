@@ -127,7 +127,12 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies, l
   const processRecord = async (key: string, api: ApiNotice | null = null): Promise<string[]> => {
     const record = await ensureRecord(key, api);
     if (!api && !record.api) {
+      // 날짜 범위 조회에 없던 관련 공고의 API 대상은 조회 전에 목표에 포함합니다.
+      job.apiTotal = (job.apiTotal || 0) + 1;
+      await persist();
       const found = await findMissingApi(key, record, job, deps.fetcher);
+      job.apiProcessed = (job.apiProcessed || 0) + 1;
+      await persist();
       if (found) { record.api = found; await saveRecord(key, record); }
     }
     if (scraped.has(key)) return [];
