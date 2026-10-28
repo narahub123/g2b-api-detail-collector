@@ -7,6 +7,12 @@ export type PostedTimeRange = { start: string; end: string };
 const SERVICE_URL = "https://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoServc";
 const PAGE_SIZE = 1000;
 
+/** 조회 실패를 날짜와 페이지에 연결해 작업 진단에서 원인을 찾게 합니다. */
+export class ApiPageError extends Error {
+  constructor(message: string, public readonly date: string, public readonly pageNo: number,
+    public override readonly cause: unknown) { super(message); this.name = "ApiPageError"; }
+}
+
 function asItems(value: unknown): ApiNotice[] {
   if (Array.isArray(value)) return value as ApiNotice[];
   if (value && typeof value === "object" && "item" in value) {
@@ -69,7 +75,8 @@ async function preparePages(windows: QueryWindow[], fetcher: typeof fetch): Prom
     url.searchParams.set("inqryDiv", "1");
     url.searchParams.set("inqryBgnDt", window.start);
     url.searchParams.set("inqryEndDt", window.end);
-    return fetchBody(url, fetcher);
+    try { return await fetchBody(url, fetcher); }
+    catch (error) { throw new ApiPageError(error instanceof Error ? error.message : String(error), window.date, pageNo, error); }
   };
   const firstPages: Awaited<ReturnType<typeof fetchBody>>[] = [];
   let total = 0;

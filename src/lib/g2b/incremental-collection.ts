@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { fetchNoticeByKey, prepareServiceNoticesByMinute, type PostedTimeRange } from "./api-client";
+import { ApiPageError, fetchNoticeByKey, prepareServiceNoticesByMinute, type PostedTimeRange } from "./api-client";
+import { addDiagnostic, redactDiagnostic } from "./collection-diagnostics";
 import { acquireDbJob, releaseDbLease, renewDbLease, saveDbJob } from "./collection-job-store";
 import type { CollectionJob } from "./collection-job";
 import { scrapeDetailPage, serviceDetailUrl, type ScrapeResult } from "./detail-page";
@@ -70,9 +71,12 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
   }, 30_000);
   timer.unref();
   const ensureLease = async () => {
-    if (lost || !await store.renew(job.id, token)) throw new Error("수집 작업 잠금을 잃었습니다.");
+    try { if (lost || !await store.renew(job.id, token)) throw new Error("수집 작업 잠금을 잃었습니다."); }
+    catch (error) { addDiagnostic(job, { severity: "failure", stage: "lease", operation: "renew-lease", error }); throw error; }
   };
-  const persist = async () => { await ensureLease(); await store.saveJob(job, token); };
+  const persist = async () => { await ensureLease();
+    try { await store.saveJob(job, token); }
+    catch (error) { addDiagnostic(job, { severity: "failure", stage: "database", operation: "save-job", error }); throw error; } };
   const scrape = options.scrape || scrapeDetailPage;
   const seenApi = new Set<string>();
   const attemptedThisRun = new Set<string>();
@@ -98,6 +102,10 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
         await ensureLease();
         await store.saveAttempt({ key, attempts: Math.min(3, (previous?.attempts || 0) +
           (pendingInThisRun ? 1 : 0)) || 1, status: "succeeded", error: null });
+        // 기존 상세와 성공 시도 기록이 모두 확인된 뒤에만 복구를 확정합니다.
+        if (previous?.status === "failed") addDiagnostic(job, { severity: "retry", stage: "detail",
+          operation: "scrape-detail", target: { key }, attempt: (previous.attempts || 0) + (pendingInThisRun ? 1 : 0),
+          outcome: "recovered", error: previous.error || "이전 상세 수집 실패 후 복구" });
         if (pendingInThisRun) {
           results.set(key, "succeeded");
           recount();
@@ -123,7 +131,9 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
       const result = await scrape(serviceDetailUrl(number, order));
       extracted = { result, structured: structureNoticeDetail(key, result.detail) };
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = redactDiagnostic(error instanceof Error ? error.message : String(error));
+      addDiagnostic(job, { severity: "failure", stage: "detail", operation: "scrape-detail", target: { key },
+        attempt: (previous?.attempts || 0) + 1, outcome: (previous?.attempts || 0) < 2 ? "retrying" : "failed", error });
       record.detailError = message;
       await ensureLease();
       await store.saveNotice(key, record);
@@ -137,6 +147,12 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
       return;
     }
     record.detail = extracted.structured.detail;
+    for (const warning of extracted.result.warnings || [])
+      addDiagnostic(job, { severity: "warning", stage: warning.stage, operation: warning.operation, target: { key }, error: warning.message });
+    for (const warning of extracted.result.detail.modalDiscovery?.failures || [])
+      addDiagnostic(job, { severity: "warning", stage: "modal", operation: "collect-modal", target: { key }, error: warning });
+    for (const warning of extracted.structured.warnings)
+      addDiagnostic(job, { severity: "warning", stage: "transform", operation: "structure-detail", target: { key }, error: warning });
     record.detailError = null;
     record.orderPlanNumbers = extracted.structured.orderPlanNumbers;
     record.preSpecificationNumbers = extracted.structured.preSpecificationNumbers;
@@ -146,6 +162,10 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
     await ensureLease();
     await store.saveNotice(key, record, extracted.structured);
     await store.saveAttempt({ key, attempts: (previous?.attempts || 0) + 1, status: "succeeded", error: null });
+    // 상세와 시도 기록 저장이 끝난 후 복구 성공을 작업 진단에 반영합니다.
+    if (previous?.status === "failed" || retry)
+      addDiagnostic(job, { severity: "retry", stage: "detail", operation: "scrape-detail", target: { key },
+        attempt: (previous?.attempts || 0) + 1, outcome: "recovered", error: previous?.error || "이전 상세 수집 실패 후 복구" });
     results.set(key, "succeeded");
     recount();
     await persist();
@@ -156,22 +176,28 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
         if (noticeKeyFromParts(relatedNumber, relatedOrder) !== related) throw new Error("잘못된 공고 키");
       } catch {
         job.errors.push(`${key}: 잘못된 관련 공고 키 ${related}`);
+        addDiagnostic(job, { severity: "warning", stage: "transform", operation: "related-notice-key", target: { key }, error: `잘못된 관련 공고 키 ${related}` });
         continue;
       }
       await ensureLease();
       await store.saveRelation(key, related);
       if (attemptedThisRun.has(related)) continue;
-      const relatedApi = await fetchNoticeByKey(related, options.fetcher).catch(() => null);
+      const relatedApi = await fetchNoticeByKey(related, options.fetcher).catch((error) => {
+        addDiagnostic(job, { severity: "warning", stage: "api", operation: "fetch-related-notice", target: { key: related }, error });
+        return null;
+      });
       await handle(related, relatedApi);
     }
     } catch (error) {
       // 저장 오류로 중단된 공고는 같은 조회 구간의 즉시 재시도에서 다시 처리합니다.
+      addDiagnostic(job, { severity: "failure", stage: "database", operation: "process-notice", target: { key }, error });
       if (!retry) attemptedThisRun.delete(key);
       throw error;
     }
   };
   try {
     // 한 실행의 API 실패는 같은 구간 전체를 한 번만 다시 조회합니다.
+    let previousWindowError: unknown;
     for (let run = 0; run < 2; run++) {
       try {
         // 첫 페이지를 먼저 확인해 현재 조회 구간의 목표를 저장합니다.
@@ -188,7 +214,8 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
             job.apiProcessed = (job.apiProcessed || 0) + 1;
             let key: string;
             try { key = noticeKey(item); }
-            catch (error) { job.errors.push(error instanceof Error ? error.message : String(error)); continue; }
+            catch (error) { job.errors.push(error instanceof Error ? error.message : String(error));
+              addDiagnostic(job, { severity: "warning", stage: "transform", operation: "notice-key", error }); continue; }
             if (seenApi.has(key)) continue;
             seenApi.add(key);
             job.apiCount++;
@@ -198,9 +225,16 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
           job.phase = "api";
           await persist();
         }
+        if (run > 0) addDiagnostic(job, { severity: "retry", stage: "api", operation: "run-window",
+          attempt: run + 1, outcome: "recovered", error: previousWindowError || "조회 구간 재시도 성공" });
         break;
       } catch (error) {
+        addDiagnostic(job, { severity: "failure", stage: error instanceof ApiPageError ? "api" : "collection",
+          operation: error instanceof ApiPageError ? "fetch-page" : "run-window",
+          target: error instanceof ApiPageError ? { date: error.date, pageNo: error.pageNo } : undefined,
+          attempt: run + 1, outcome: run === 0 ? "retrying" : "failed", error });
         if (run === 1) throw error;
+        previousWindowError = error;
         job.errors.push(`조회 구간 재시도: ${error instanceof Error ? error.message : String(error)}`);
         seenApi.clear();
         job.apiCount = 0;
@@ -216,6 +250,7 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
   } catch (error) {
     job.status = "failed";
     job.errors.push(error instanceof Error ? error.message : String(error));
+    if (!(error instanceof ApiPageError)) addDiagnostic(job, { severity: "failure", stage: "collection", operation: "run-incremental", error });
   } finally {
     job.phase = "done";
     job.finishedAt = new Date().toISOString();

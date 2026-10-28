@@ -1,8 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { getPool } from "./postgres-store";
 import type { CollectionJob } from "./collection-job";
+import { diagnosticCounts, redactDiagnostic } from "./collection-diagnostics";
 
 const leaseDuration = "2 minutes";
+
+/** 기존 오류 문자열을 포함한 작업 JSON에서 비밀값을 제거합니다. */
+function safeJobJson(job: CollectionJob): string {
+  return JSON.stringify(job, (_key, value: unknown) => typeof value === "string" ? redactDiagnostic(value) : value);
+}
 
 /** 풀러 연결에서도 안전하게 쓸 수 있도록 스키마가 지정된 작업 테이블을 반환합니다. */
 function table(name: "collection_jobs" | "collection_lock"): string {
@@ -22,7 +28,7 @@ export async function acquireDbJob(job: CollectionJob): Promise<string> {
   if (!claimed.rowCount) throw new Error("이미 수집 작업이 진행 중입니다.");
   try {
     await pool.query(`INSERT INTO ${table("collection_jobs")}(id,state,status,started_at)
-      VALUES($1::uuid,$2::jsonb,$3,$4::timestamptz)`, [job.id, JSON.stringify(job), job.status, job.startedAt]);
+      VALUES($1::uuid,$2::jsonb,$3,$4::timestamptz)`, [job.id, safeJobJson(job), job.status, job.startedAt]);
     return token;
   } catch (error) {
     await releaseDbLease(job.id, token).catch(() => undefined);
@@ -36,7 +42,7 @@ export async function saveDbJob(job: CollectionJob, token: string): Promise<void
     SET state=$1::jsonb, status=$2, updated_at=now()
     WHERE id=$3::uuid AND EXISTS (SELECT 1 FROM ${table("collection_lock")}
       WHERE id=1 AND job_id=$3::uuid AND token=$4::uuid AND expires_at>now())`,
-    [JSON.stringify(job), job.status, job.id, token]);
+    [safeJobJson(job), job.status, job.id, token]);
   if (!updated.rowCount) throw new Error("수집 작업 잠금을 잃었습니다.");
 }
 
@@ -74,4 +80,25 @@ export async function getLatestDbJob(): Promise<CollectionJob | null> {
   const result = await getPool().query<{ id: string }>(
     `SELECT id FROM ${table("collection_jobs")} ORDER BY started_at DESC, id DESC LIMIT 1`);
   return result.rows[0] ? getDbJob(result.rows[0].id) : null;
+}
+
+export type CollectionJobSummary = Pick<CollectionJob, "id" | "mode" | "status" | "startedAt" | "finishedAt" | "range" | "windowStart" | "windowEnd" | "detailSucceeded" | "detailFailed"> & {
+  failureCount: number; warningCount: number; retryCount: number; legacyErrorCount: number; overflowCount: number;
+};
+
+/** 최신 작업을 페이지 단위로 읽고 진단 상세를 제외한 요약만 반환합니다. */
+export async function listDbJobs(page: number): Promise<{ items: CollectionJobSummary[]; hasNext: boolean }> {
+  const safePage = Number.isSafeInteger(page) && page > 0 ? Math.min(page, 1000) : 1;
+  const rows = await getPool().query<{ state: CollectionJob }>(
+    `SELECT state FROM ${table("collection_jobs")} ORDER BY started_at DESC,id DESC LIMIT $1 OFFSET $2`,
+    [21, (safePage - 1) * 20]);
+  return { items: rows.rows.slice(0, 20).map(({ state }) => {
+    const counts = diagnosticCounts(state);
+    return { id: state.id, mode: state.mode, status: state.status, startedAt: state.startedAt,
+      finishedAt: state.finishedAt, range: state.range, windowStart: state.windowStart, windowEnd: state.windowEnd,
+      detailSucceeded: state.detailSucceeded, detailFailed: state.detailFailed,
+      failureCount: counts.failure, warningCount: counts.warning, retryCount: counts.retry,
+      legacyErrorCount: state.diagnostics ? 0 : state.errors.length,
+      overflowCount: state.diagnostics?.overflowCount || 0 };
+  }), hasNext: rows.rows.length > 20 };
 }

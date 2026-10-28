@@ -62,6 +62,7 @@ it("이미 저장된 상세로 이전 실패 기록만 복구할 때 이번 작�
   expect(job).toMatchObject({ status: "completed", apiTotal: 1, apiProcessed: 1,
     detailTotal: 0, detailSucceeded: 0, detailFailed: 0 });
   expect(memory.attempts.get("R26BK1--000")?.status).toBe("succeeded");
+  expect(job.diagnostics?.events).toContainEqual(expect.objectContaining({ severity: "retry", outcome: "recovered", target: { key: "R26BK1--000" } }));
   delete process.env.G2B_SERVICE_KEY;
 });
 
@@ -104,9 +105,11 @@ it("상세 실패는 전체 순회 뒤 한 번, 다음 작업에서 한 번 재�
   const first = await runIncrementalCollection(options);
   expect(calls).toEqual(["R26BK1", "R26BK2", "R26BK1"]);
   expect(first).toMatchObject({ status: "completed", detailSucceeded: 1, detailFailed: 1 });
+  expect(first.diagnostics?.events.filter((event) => event.stage === "detail" && event.severity === "failure")).toHaveLength(2);
   expect(memory.attempts.get("R26BK1--000")).toMatchObject({ attempts: 2, status: "failed" });
   const second = await runIncrementalCollection(options);
   expect(second).toMatchObject({ status: "completed", detailSucceeded: 1, detailFailed: 0 });
+  expect(second.diagnostics?.events).toContainEqual(expect.objectContaining({ severity: "retry", stage: "detail", outcome: "recovered" }));
   expect(memory.attempts.get("R26BK1--000")).toMatchObject({ attempts: 3, status: "succeeded" });
   expect(calls).toEqual(["R26BK1", "R26BK2", "R26BK1", "R26BK1"]);
   delete process.env.G2B_SERVICE_KEY;
@@ -168,6 +171,33 @@ it("상세 저장 직후 시도 기록 오류가 나도 같은 구간 재조회�
     scrape: async (url) => ({ detail: { sourceUrl: url, sections: [], text: "완료", attachments: [], links: [] }, relatedNoticeKeys: [] }) });
   expect(job).toMatchObject({ status: "completed", detailSucceeded: 1, detailFailed: 0 });
   expect(memory.attempts.get("R26BK4--000")?.status).toBe("succeeded");
+  delete process.env.G2B_SERVICE_KEY;
+});
+
+it.each(["상세 저장", "시도 기록"])("%s 실패 전에는 복구 성공을 기록하지 않습니다", async (failurePoint) => {
+  process.env.G2B_SERVICE_KEY = "test-key";
+  const memory = memoryStore();
+  const key = "R26BK5--000";
+  memory.attempts.set(key, { key, attempts: 1, status: "failed", error: "이전 상세 실패" });
+  const saveNotice = memory.store.saveNotice;
+  const saveAttempt = memory.store.saveAttempt;
+  memory.store.saveNotice = async (noticeKey, record, structured) => {
+    if (failurePoint === "상세 저장" && structured) throw new Error("상세 저장 오류");
+    await saveNotice(noticeKey, record, structured);
+  };
+  memory.store.saveAttempt = async (attempt) => {
+    if (failurePoint === "시도 기록" && attempt.status === "succeeded") throw new Error("시도 기록 저장 오류");
+    await saveAttempt(attempt);
+  };
+  const fetcher = async () => new Response(JSON.stringify({ response: { header: { resultCode: "00" }, body: {
+    totalCount: 1, items: [{ bidNtceNo: "R26BK5", bidNtceOrd: "000" }]
+  } } }));
+  const job = await runIncrementalCollection({ start: "2026-10-27T00:00:00.000Z", end: "2026-10-27T01:00:00.000Z",
+    store: memory.store, fetcher: fetcher as typeof fetch,
+    scrape: async (url) => ({ detail: { sourceUrl: url, sections: [], text: "완료", attachments: [], links: [] }, relatedNoticeKeys: [] }) });
+  expect(job.status).toBe("failed");
+  expect(job.diagnostics?.events.some((entry) => entry.outcome === "recovered" && entry.target?.key === key)).toBe(false);
+  expect(memory.jobs.at(-1)?.diagnostics?.events.some((entry) => entry.outcome === "recovered" && entry.target?.key === key)).toBe(false);
   delete process.env.G2B_SERVICE_KEY;
 });
 

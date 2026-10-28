@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { acquireDbJob, getDbJob, releaseDbLease, renewDbLease, saveDbJob } from "./collection-job-store";
+import { acquireDbJob, getDbJob, listDbJobs, releaseDbLease, renewDbLease, saveDbJob } from "./collection-job-store";
 import type { CollectionJob } from "./collection-job";
 
 const runtime = globalThis as typeof globalThis & { __g2bPgPool?: unknown };
@@ -16,6 +16,20 @@ function job(id: string): CollectionJob {
 }
 
 describe("DB 수집 작업 잠금", () => {
+  it("작업 이력은 진단 상세 대신 요약과 다음 페이지 여부만 반환합니다", async () => {
+    process.env.DATABASE_URL = "postgres://test";
+    const queries: unknown[][] = [];
+    runtime.__g2bPgPool = { query: async (_sql: string, values: unknown[]) => {
+      queries.push(values);
+      return { rows: [{ state: { ...job("11111111-1111-4111-8111-111111111111"), diagnostics: {
+        events: [{ severity: "failure" }], overflowCount: 0,
+        types: { x: { count: 1, representative: { severity: "failure" } } } } } }], rowCount: 1 };
+    } };
+    const result = await listDbJobs(1);
+    expect(result.items[0]).toMatchObject({ failureCount: 1, warningCount: 0 });
+    expect(JSON.stringify(result)).not.toContain("events");
+    expect(queries[0]).toEqual([21, 0]);
+  });
   it("서로 다른 실행자가 같은 잠금을 획득할 수 없고 해제 후 새 작업이 시작됩니다", async () => {
     const saved = new Map<string, CollectionJob>();
     let owner: string | null = null;
@@ -58,8 +72,12 @@ describe("DB 수집 작업 잠금", () => {
     expect(await renewDbLease(first.id, firstToken)).toBe(true);
     first.apiCount = 3;
     first.results = [{ key: "R26BK1--000", status: "succeeded" }];
+    process.env.G2B_SERVICE_KEY = "secret-test-key";
+    first.errors.push("serviceKey=secret-test-key");
     await saveDbJob(first, firstToken);
     expect((await getDbJob(first.id))?.apiCount).toBe(3);
+    expect((await getDbJob(first.id))?.errors[0]).not.toContain("secret-test-key");
+    delete process.env.G2B_SERVICE_KEY;
     expect((await getDbJob(first.id))?.results).toEqual([{ key: "R26BK1--000", status: "succeeded" }]);
     await releaseDbLease(first.id, firstToken);
     expect(await renewDbLease(first.id, firstToken)).toBe(false);
