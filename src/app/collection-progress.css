@@ -1,0 +1,109 @@
+.collection-progress-section {
+  margin-bottom: 20px;
+}
+.collection-progress-section .collection-progress-toggle {
+  font-size: 22px;
+  line-height: 1;
+}
+.collection-progress {
+  display: grid;
+  gap: 16px;
+  padding: 16px 0 4px;
+  color: #263e48;
+}
+.collection-progress-overview {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.collection-progress-mode {
+  color: #637784;
+  font-size: 14px;
+}
+.collection-progress-status {
+  font-size: 13px;
+  font-weight: 700;
+  padding: 6px 11px;
+  border-radius: 999px;
+  background: #e7f5ee;
+  color: #20744b;
+}
+.collection-progress-status--running {
+  background: #e9f2fc;
+  color: #255d9a;
+}
+.collection-progress-status--failed,
+.collection-progress-status--cancelled {
+  background: #fff0ed;
+  color: #a63e35;
+}
+.collection-progress-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.collection-progress-metric {
+  min-width: 0;
+  padding: 14px;
+  background: #f5f8f9;
+  border: 1px solid #e5ecee;
+  border-radius: 10px;
+  display: grid;
+  gap: 7px;
+}
+.collection-progress-metric > span {
+  font-size: 12px;
+  color: #637784;
+}
+.collection-progress-metric > strong {
+  font-size: 17px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+.collection-progress-outcomes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  font-size: 14px;
+}
+.collection-progress-outcomes strong {
+  margin-left: 5px;
+}
+.collection-progress-error {
+  margin: 0;
+  color: #a63e35;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.collection-progress-results {
+  border-top: 1px solid #e5ecee;
+  padding-top: 12px;
+}
+.collection-progress-results > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  list-style: none;
+}
+
+.collection-progress-results > summary::-webkit-details-marker {
+  display: none;
+}
+
+.collection-progress-results-chevron {
+  flex-shrink: 0;
+  transition: transform 0.15s ease;
+}
+
+.collection-progress-results[open] .collection-progress-results-chevron {
+  transform: rotate(90deg);
+}
+
+@media (max-width: 640px) {
+  .collection-progress-metrics {
+    grid-template-columns: 1fr;
+  }
+}

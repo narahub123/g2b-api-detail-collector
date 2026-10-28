@@ -1,0 +1,19 @@
+/* 상세 섹션과 관리자 폼의 공통 아코디언 */
+.form-accordion { min-width: 0; margin-bottom: 20px; }
+.form-accordion > summary::marker { content: ""; }
+.form-accordion > summary .form-accordion-chevron {
+  display: block;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  border: 0;
+  padding: 0;
+  transform: rotate(0deg);
+  transform-origin: center center;
+  transition: transform .15s ease;
+}
+.form-accordion[open] > summary .form-accordion-chevron { transform: rotate(90deg); }
+.form-accordion-description { margin: 8px 0 18px; color: #637784; font-size: 14px; line-height: 1.7; }
+.form-accordion .notice-filters { padding: 0; margin: 0; border: 0; border-radius: 0; box-shadow: none; }
+.collect-panel.form-accordion { padding: 0; border: 1px solid #dce6e9; border-radius: 14px; box-shadow: none; }
+.filter-accordion { box-shadow: none; }
