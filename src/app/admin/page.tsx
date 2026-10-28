@@ -1,10 +1,12 @@
 import { CollectionForm } from "@/components/CollectionForm";
+import { AutomationSettingsForm } from "@/components/AutomationSettingsForm";
 import { NoticeList } from "@/components/NoticeList";
 import { NoticeFilters } from "@/components/NoticeFilters";
 import { NoticePagination } from "@/components/NoticePagination";
 import { listNoticePage } from "@/lib/g2b/notices";
 import { parseNoticeFilters, parseNoticePage } from "@/lib/g2b/notice-filters";
 import "../notice-list-controls.css";
+import "../automation-settings.css";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,6 +23,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
       <p>공고 게시일 범위로 수집하거나 저장된 공고를 다시 수집할 수 있습니다.</p>
     </section>
     <CollectionForm />
+    <AutomationSettingsForm />
     <section className="results-section"><div className="results-heading"><div><span className="eyebrow">SAVED NOTICES</span><h2>수집된 공고 {result && <span>{result.totalCount}</span>}</h2></div><p>제목을 누르면 관리자 상세를 보고, 체크박스로 재수집할 공고를 선택할 수 있습니다.</p></div>
       <NoticeFilters basePath="/admin" values={values} error={error} />
       {result && <><NoticeList key={`${result.page}:${JSON.stringify(filters)}`} notices={result.notices} /><NoticePagination basePath="/admin" page={result.page} totalPages={result.totalPages} filters={filters} /></>}</section>

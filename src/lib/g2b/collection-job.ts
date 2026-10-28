@@ -31,6 +31,7 @@ export type CollectionJob = {
   finishedAt?: string;
   windowStart?: string;
   windowEnd?: string;
+  activationId?: string;
   continuation?: boolean;
   cursor?: { date: string; pageNo: number };
 };

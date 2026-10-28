@@ -1,7 +1,15 @@
 import { runIncrementalCollection } from "../src/lib/g2b/incremental-collection";
+import { runScheduledCollection } from "../src/lib/g2b/scheduled-collection";
 
 /** 명령 인수의 시작·종료 시각을 읽고 증분 수집 결과를 종료 코드에 반영합니다. */
 async function main() {
+  if (process.argv.slice(2).includes("--scheduled")) {
+    if (process.argv.length !== 3) throw new Error("--scheduled는 다른 인수와 함께 사용할 수 없습니다.");
+    const result = await runScheduledCollection();
+    console.log(JSON.stringify(result));
+    if (result.kind === "failed") process.exitCode = 1;
+    return;
+  }
   const args = Object.fromEntries(process.argv.slice(2).map((value) => {
     const match = /^(--start|--end)=(.+)$/.exec(value);
     if (!match) throw new Error(`알 수 없는 인수: ${value}`);

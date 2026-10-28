@@ -12,7 +12,7 @@ import { getIncrementalCheckpoint, getNoticeAttempt, listFailedNoticeAttempts, s
 
 export type NoticeAttempt = { key: string; attempts: number; status: "failed" | "succeeded"; error: string | null };
 export type IncrementalStore = {
-  getCheckpoint(): Promise<string | null>;
+  getCheckpoint(activationId?: string): Promise<string | null>;
   acquire(job: CollectionJob): Promise<string>;
   saveJob(job: CollectionJob, token: string): Promise<void>;
   renew(jobId: string, token: string): Promise<boolean>;
@@ -33,6 +33,7 @@ const dbStore: IncrementalStore = {
 };
 
 type RunOptions = PostedTimeRange & {
+  activationId?: string;
   store?: IncrementalStore;
   fetcher?: typeof fetch;
   scrape?: (url: string) => Promise<ScrapeResult>;
@@ -53,9 +54,10 @@ function windowFor(start: string, end: string, checkpoint: string | null) {
 /** 분 단위 API 구간을 수집하고 상세 실패를 작업 사이에 이어서 재시도합니다. */
 export async function runIncrementalCollection(options: RunOptions): Promise<CollectionJob> {
   const store = options.store || dbStore;
-  const { windowStart, windowEnd, continuation } = windowFor(options.start, options.end, await store.getCheckpoint());
+  const { windowStart, windowEnd, continuation } = windowFor(options.start, options.end,
+    await store.getCheckpoint(options.activationId));
   const job: CollectionJob = { id: randomUUID(), mode: "incremental", status: "running", phase: "api",
-    range: null, windowStart, windowEnd, continuation, apiCount: 0, detailSucceeded: 0,
+    range: null, windowStart, windowEnd, activationId: options.activationId, continuation, apiCount: 0, detailSucceeded: 0,
     detailFailed: 0, errors: [], results: [], startedAt: new Date().toISOString() };
   const token = await store.acquire(job);
   let lost = false;

@@ -60,7 +60,7 @@ export function CollectionForm({ fetcher = fetch }: { fetcher?: typeof fetch }) 
     <div className="panel-copy">
       <span className="eyebrow">DATA COLLECTION</span>
       <h2 id="collect-heading">공고 수집</h2>
-      <p>공고 게시일 범위를 지정하면 용역 공고와 공개 상세 정보를 로컬에 저장합니다.</p>
+      <p>공고 게시일 범위를 지정하면 용역 공고와 공개 상세 정보를 DB에 저장합니다.</p>
     </div>
     <form onSubmit={submit} className="collect-form">
       <label>시작일<input type="date" value={start} onChange={(event) => setStart(event.target.value)} /></label>
@@ -70,9 +70,15 @@ export function CollectionForm({ fetcher = fetch }: { fetcher?: typeof fetch }) 
     </form>
     {error && <p role="alert" className="error-message">{error}</p>}
     {job && job.mode !== "refresh" && <div className="job-progress" aria-live="polite">
-      <strong>{job.status === "running" ? "수집 진행 중" : job.status === "completed" ? "수집 완료" : "수집 중단"}</strong>
+      <strong>{job.status === "running" ? "수집 진행 중" : job.status === "completed" ? "수집 완료" :
+        job.status === "failed" ? "수집 실패" : "수집 중단"}</strong>
+      <span>{job.mode === "incremental" ? "자동 수집" : "수동 수집"}</span>
       <span>API {job.apiCount}건</span><span>상세 성공 {job.detailSucceeded}건</span><span>상세 실패 {job.detailFailed}건</span>
       {job.errors.length > 0 && <small>{job.errors.at(-1)}</small>}
+      {job.results && job.results.length > 0 && <details className="job-results"><summary>공고별 결과 {job.results.length}건</summary>
+        <ul>{job.results.map((result) => <li key={result.key}>{result.key}: {result.status === "succeeded" ? "수집 완료" :
+          result.status === "failed" ? "수집 실패" : "수집 전"}</li>)}</ul>
+      </details>}
     </div>}
   </section>;
 }

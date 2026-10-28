@@ -9,7 +9,7 @@ function table(name: "collection_jobs" | "collection_notice_attempts" | "collect
 }
 
 /** 가장 멀리 정상 완료한 증분 작업의 조회 끝 시각을 반환합니다. */
-export async function getIncrementalCheckpoint(): Promise<string | null> {
+export async function getIncrementalCheckpoint(activationId?: string): Promise<string | null> {
   // 이전 실행자가 잠금을 잃은 기록을 먼저 확정해야 다음 작업의 상태가 모호하지 않습니다.
   await getPool().query(`UPDATE ${table("collection_jobs")} AS jobs
     SET status='interrupted', updated_at=now(),
@@ -21,7 +21,8 @@ export async function getIncrementalCheckpoint(): Promise<string | null> {
   const result = await getPool().query<{ checkpoint: string | null }>(
     `SELECT to_char(MAX((state->>'windowEnd')::timestamptz) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS checkpoint
      FROM ${table("collection_jobs")} WHERE status='completed' AND state->>'mode'='incremental'
-       AND state ? 'windowEnd'`);
+       AND state ? 'windowEnd'${activationId ? " AND state->>'activationId'=$1" : ""}`,
+    activationId ? [activationId] : []);
   return result.rows[0]?.checkpoint || null;
 }
 

@@ -111,6 +111,21 @@ CREATE TABLE IF NOT EXISTS public.collection_notice_attempts (
 CREATE INDEX IF NOT EXISTS collection_notice_attempts_retry_idx
   ON public.collection_notice_attempts (updated_at) WHERE status = 'failed' AND attempts < 3;
 
+-- 자동 설정은 비활성화 상태로 시작하며 활성화할 때마다 시작점과 예약 기준을 새로 정합니다.
+CREATE TABLE IF NOT EXISTS public.collection_automation (
+  id integer PRIMARY KEY CHECK (id = 1),
+  enabled boolean NOT NULL DEFAULT false,
+  schedule text NOT NULL DEFAULT 'interval' CHECK (schedule IN ('interval', 'times')),
+  interval_minutes integer NOT NULL DEFAULT 60 CHECK (interval_minutes IN (30, 60, 120, 180)),
+  times text[] NOT NULL DEFAULT '{}',
+  start_at timestamptz,
+  activated_at timestamptz,
+  activation_id uuid,
+  last_due_at timestamptz,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+INSERT INTO public.collection_automation (id) VALUES (1) ON CONFLICT DO NOTHING;
+
 COMMENT ON TABLE public.notices IS '공고번호와 차수별 수집 자료. API 항목과 상세 원문을 보존하고 자주 조회하는 요약 값은 별도 컬럼에 둔다.';
 COMMENT ON COLUMN public.notices.key IS '공고번호와 공고차수를 --로 결합한 앱 내부 식별자.';
 COMMENT ON COLUMN public.notices.notice_number IS '나라장터 입찰공고번호를 문자열로 보존한 값. API의 bidNtceNo에 해당한다.';
@@ -151,3 +166,4 @@ COMMENT ON COLUMN public.collection_jobs.state IS '작업 진행 단계, 건수,
 COMMENT ON TABLE public.collection_lock IS '수집 작업 하나만 실행하기 위한 만료 가능한 DB 임대 잠금.';
 COMMENT ON COLUMN public.collection_lock.token IS '이전 실행자가 새 작업의 잠금을 해제하지 못하게 하는 소유 토큰.';
 COMMENT ON TABLE public.collection_notice_attempts IS '증분 수집에서 공고별 상세 시도 횟수와 최종 결과를 보존한다.';
+COMMENT ON TABLE public.collection_automation IS '자동 수집의 활성화 상태, 서울 예약 시각 및 조회 시작점을 보존한다.';
