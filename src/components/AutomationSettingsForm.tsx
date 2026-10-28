@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import type { AutomationSettings } from "@/lib/g2b/automation-schedule";
 
+type DisplaySettings = AutomationSettings & { schedulerDelayed?: boolean };
+
 /** UTC로 저장된 예약 기준을 서울 시각으로 표시합니다. */
 function seoulText(value: string | null): string {
   if (!value) return "없음";
@@ -12,7 +14,7 @@ function seoulText(value: string | null): string {
 
 /** 자동 수집 활성화와 주기·다중 예약 시각을 관리자 화면에서 편집합니다. */
 export function AutomationSettingsForm({ fetcher = fetch }: { fetcher?: typeof fetch }) {
-  const [settings, setSettings] = useState<AutomationSettings | null>(null);
+  const [settings, setSettings] = useState<DisplaySettings | null>(null);
   const [enabled, setEnabled] = useState(false);
   const [schedule, setSchedule] = useState<"interval" | "times">("interval");
   const [intervalMinutes, setIntervalMinutes] = useState<30 | 60 | 120 | 180>(60);
@@ -26,7 +28,7 @@ export function AutomationSettingsForm({ fetcher = fetch }: { fetcher?: typeof f
     void fetcher("/api/automation", { cache: "no-store" }).then(async (response) => {
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "자동 설정을 읽지 못했습니다.");
-      return body as AutomationSettings;
+      return body as DisplaySettings;
     }).then((loaded) => {
       setSettings(loaded);
       setEnabled(loaded.enabled);
@@ -50,7 +52,7 @@ export function AutomationSettingsForm({ fetcher = fetch }: { fetcher?: typeof f
         headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "자동 설정을 저장하지 못했습니다.");
-      setSettings(body as AutomationSettings);
+      setSettings(body as DisplaySettings);
       setStartAt("");
       setMessage("자동 수집 설정을 저장했습니다.");
     } catch (cause) {
@@ -62,7 +64,9 @@ export function AutomationSettingsForm({ fetcher = fetch }: { fetcher?: typeof f
     <div className="panel-copy"><span className="eyebrow">AUTOMATION</span>
       <h2 id="automation-heading">자동 수집 설정</h2>
       <p>예약 시각은 서울 시각을 사용합니다. 진행 중인 작업은 설정을 꺼도 완료될 때까지 계속됩니다.</p></div>
-    <p className="automation-summary">외부 예약 호출은 다음 단계에서 연결합니다. 현재는 설정 저장 후 명령을 직접 호출해야 실행됩니다.</p>
+    <p className="automation-summary">공개 저장소는 60일간 활동이 없으면 GitHub Actions 예약이 중지될 수 있습니다. <a
+      href="https://github.com/narahub123/g2b-api-detail-collector/actions/workflows/collect.yml">예약 실행 기록 확인</a></p>
+    {settings?.schedulerDelayed && <p role="alert" className="error-message">예정 시각 이후 15분이 지나도록 예약 실행 기록이 없습니다. GitHub Actions 상태를 확인하세요.</p>}
     {settings && <p className="automation-summary">현재 {settings.enabled ? "활성화" : "비활성화"} · 조회 시작 {seoulText(settings.startAt)}
       {settings.lastDueAt && <> · 마지막 예약 {seoulText(settings.lastDueAt)}</>}</p>}
     {settings && <form className="automation-form" onSubmit={submit}>

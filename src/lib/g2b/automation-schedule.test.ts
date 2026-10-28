@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { applyAutomationSettings, latestDueTime, type AutomationSettings } from "./automation-schedule";
+import { applyAutomationSettings, latestDueTime, schedulerIsLate, type AutomationSettings } from "./automation-schedule";
 
 const base: AutomationSettings = { enabled: false, schedule: "interval", intervalMinutes: 60, times: [],
   startAt: null, activatedAt: null, activationId: null, lastDueAt: null };
@@ -40,4 +40,14 @@ it("재활성화할 때 시작 시각을 다시 요구하고 예약 기준을 �
     times: [], startAt: "2026-10-27T10:00" }, new Date("2026-10-27T03:00:00.000Z"));
   expect(next.activationId).not.toBe(active.activationId);
   expect(next.lastDueAt).toBeNull();
+});
+
+it("예약이 15분 이상 처리되지 않으면 관리자 경고 대상으로 표시합니다", () => {
+  const settings: AutomationSettings = { ...base, enabled: true,
+    activatedAt: "2026-10-27T00:07:00.000Z", startAt: "2026-10-26T00:00:00.000Z" };
+  expect(schedulerIsLate(settings, new Date("2026-10-27T01:21:00.000Z"))).toBe(false);
+  expect(schedulerIsLate(settings, new Date("2026-10-27T01:22:00.000Z"))).toBe(true);
+  expect(schedulerIsLate({ ...settings, lastDueAt: "2026-10-27T01:07:00.000Z" },
+    new Date("2026-10-27T01:22:00.000Z"))).toBe(false);
+  expect(schedulerIsLate(base, new Date("2026-10-27T01:22:00.000Z"))).toBe(false);
 });

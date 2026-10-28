@@ -84,3 +84,8 @@ export function latestDueTime(settings: AutomationSettings, now: Date): string |
   if (dueMs === null || (settings.lastDueAt && dueMs <= Date.parse(settings.lastDueAt))) return null;
   return new Date(dueMs).toISOString();
 }
+
+/** 예약 시각에서 15분이 지나도록 실행 기록이 없으면 지연으로 판단합니다. */
+export function schedulerIsLate(settings: AutomationSettings, now: Date): boolean {
+  return latestDueTime(settings, new Date(now.getTime() - 15 * 60_000)) !== null;
+}

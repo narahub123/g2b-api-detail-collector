@@ -1,0 +1,60 @@
+name: G2B collection
+
+on:
+  workflow_dispatch:
+    inputs:
+      start:
+        description: "검증용 조회 시작 시각 (UTC ISO, 비우면 예약 판단)"
+        required: false
+        type: string
+      end:
+        description: "검증용 조회 종료 시각 (UTC ISO, 선택)"
+        required: false
+        type: string
+  schedule:
+    - cron: "2/5 * * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: g2b-collection
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    # 실제 연동 검증 전에는 예약 이벤트가 수집을 시작하지 않습니다.
+    if: github.event_name == 'workflow_dispatch' || vars.G2B_SCHEDULE_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      G2B_SERVICE_KEY: ${{ secrets.G2B_SERVICE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - name: Check configuration and Chrome
+        shell: bash
+        run: |
+          test -n "$DATABASE_URL" || { echo 'DATABASE_URL secret is missing'; exit 1; }
+          test -n "$G2B_SERVICE_KEY" || { echo 'G2B_SERVICE_KEY secret is missing'; exit 1; }
+          google-chrome --version
+          echo "G2B_CHROME_PATH=$(command -v google-chrome)" >> "$GITHUB_ENV"
+      - name: Install dependencies
+        run: npm ci
+      - name: Run collection
+        shell: bash
+        env:
+          MANUAL_START: ${{ inputs.start }}
+          MANUAL_END: ${{ inputs.end }}
+        run: |
+          if [[ -n "$MANUAL_START" ]]; then
+            args=("--start=$MANUAL_START")
+            if [[ -n "$MANUAL_END" ]]; then args+=("--end=$MANUAL_END"); fi
+            npm run collect:incremental -- "${args[@]}"
+          else
+            npm run collect:incremental -- --scheduled
+          fi
