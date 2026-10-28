@@ -79,6 +79,8 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
     catch (error) { addDiagnostic(job, { severity: "failure", stage: "database", operation: "save-job", error }); throw error; } };
   const scrape = options.scrape || scrapeDetailPage;
   const seenApi = new Set<string>();
+  const relatedApiTargets = new Set<string>();
+  const relatedApiCompleted = new Set<string>();
   const attemptedThisRun = new Set<string>();
   const firstFailures = new Set<string>();
   const results = new Map<string, "pending" | "succeeded" | "failed">();
@@ -182,10 +184,24 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
       await ensureLease();
       await store.saveRelation(key, related);
       if (attemptedThisRun.has(related)) continue;
-      const relatedApi = await fetchNoticeByKey(related, options.fetcher).catch((error) => {
-        addDiagnostic(job, { severity: "warning", stage: "api", operation: "fetch-related-notice", target: { key: related }, error });
-        return null;
-      });
+      let relatedApi: ApiNotice | null = null;
+      if (!(await store.getNotice(related))?.api) {
+        // 저장된 API가 없는 관련 공고만 번호별로 조회하고 전체 목표에 더합니다.
+        if (!relatedApiTargets.has(related)) {
+          relatedApiTargets.add(related);
+          job.apiTotal = (job.apiTotal || 0) + 1;
+          await persist();
+        }
+        relatedApi = await fetchNoticeByKey(related, options.fetcher).catch((error) => {
+          addDiagnostic(job, { severity: "warning", stage: "api", operation: "fetch-related-notice", target: { key: related }, error });
+          return null;
+        });
+        if (!relatedApiCompleted.has(related)) {
+          relatedApiCompleted.add(related);
+          job.apiProcessed = (job.apiProcessed || 0) + 1;
+          await persist();
+        }
+      }
       await handle(related, relatedApi);
     }
     } catch (error) {
@@ -203,7 +219,7 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
         // 첫 페이지를 먼저 확인해 현재 조회 구간의 목표를 저장합니다.
         const prepared = await prepareServiceNoticesByMinute(
           { start: windowStart, end: windowEnd }, options.fetcher);
-        job.apiTotal = prepared.total;
+        job.apiTotal = prepared.total + relatedApiTargets.size;
         await persist();
         const priorFailures = await store.getFailedAttempts();
         for (const item of priorFailures) {
@@ -238,7 +254,7 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
         job.errors.push(`조회 구간 재시도: ${error instanceof Error ? error.message : String(error)}`);
         seenApi.clear();
         job.apiCount = 0;
-        job.apiProcessed = 0;
+        job.apiProcessed = relatedApiCompleted.size;
         job.apiTotal = undefined;
         await persist();
       }

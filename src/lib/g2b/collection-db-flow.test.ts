@@ -17,8 +17,8 @@ vi.mock("./postgres-store", () => ({
   saveNoticeRelation: db.saveNoticeRelation
 }));
 vi.mock("./collection-job-store", () => ({
-  acquireDbJob: async (job: { id: string }) => { db.jobs.set(job.id, job); return "lease-token"; },
-  saveDbJob: async (job: { id: string }) => { db.jobs.set(job.id, job); },
+  acquireDbJob: async (job: { id: string }) => { db.jobs.set(job.id, structuredClone(job)); return "lease-token"; },
+  saveDbJob: async (job: { id: string }) => { db.jobs.set(job.id, structuredClone(job)); },
   renewDbLease: async () => true,
   releaseDbLease: db.releaseDbLease,
   getDbJob: async (id: string) => db.jobs.get(id) || null,
@@ -55,6 +55,51 @@ it("수집한 공고의 API와 상세를 DB 저장소에 기록합니다", async
   expect(db.saveStoredNotice).toHaveBeenCalledWith("R26BK1--000",
     expect.objectContaining({ api: expect.objectContaining({ bidNtceNm: "연구 용역" }),
       detail: expect.objectContaining({ sourceUrl: expect.any(String) }) }), expect.any(Object));
+});
+
+it("수동 수집은 관련 공고 API 조회 전에 목표를 늘리고 완료 후 처리 건수를 늘립니다", async () => {
+  process.env.G2B_SERVICE_KEY = "test-key";
+  let relatedRequested!: () => void;
+  const requested = new Promise<void>((resolve) => { relatedRequested = resolve; });
+  let releaseRelated!: () => void;
+  const blocked = new Promise<void>((resolve) => { releaseRelated = resolve; });
+  const fetcher = async (input: RequestInfo | URL) => {
+    const byNumber = new URL(String(input)).searchParams.get("inqryDiv") === "2";
+    if (byNumber) { relatedRequested(); await blocked; }
+    return new Response(JSON.stringify({ response: { header: { resultCode: "00" }, body: {
+      totalCount: 1, items: [{ bidNtceNo: byNumber ? "R26BK2" : "R26BK1", bidNtceOrd: "000" }]
+    } } }));
+  };
+  const job = await startCollection({ start: "2026-10-28", end: "2026-10-28" }, {
+    fetcher: fetcher as typeof fetch,
+    scrape: async (url) => ({ detail: { sourceUrl: url, sections: [], attachments: [], links: [] },
+      relatedNoticeKeys: url.includes("R26BK1") ? ["R26BK2--000"] : [] })
+  });
+  await requested;
+  try {
+    expect(await getCollectionJob(job.id)).toMatchObject({ status: "running", apiTotal: 2, apiProcessed: 1 });
+  } finally { releaseRelated(); }
+  await vi.waitFor(() => expect(db.releaseDbLease).toHaveBeenCalledWith(job.id, "lease-token"));
+  expect(await getCollectionJob(job.id)).toMatchObject({ status: "completed", apiTotal: 2, apiProcessed: 2,
+    apiCount: 1, detailTotal: 2 });
+});
+
+it("관련 공고 API 조회가 실패해도 대상과 처리 건수를 함께 기록합니다", async () => {
+  process.env.G2B_SERVICE_KEY = "test-key";
+  const fetcher = async (input: RequestInfo | URL) => {
+    if (new URL(String(input)).searchParams.get("inqryDiv") === "2") throw new Error("번호 조회 오류");
+    return new Response(JSON.stringify({ response: { header: { resultCode: "00" }, body: {
+      totalCount: 1, items: [{ bidNtceNo: "R26BK1", bidNtceOrd: "000" }]
+    } } }));
+  };
+  const job = await startCollection({ start: "2026-10-28", end: "2026-10-28" }, {
+    fetcher: fetcher as typeof fetch,
+    scrape: async (url) => ({ detail: { sourceUrl: url, sections: [], attachments: [], links: [] },
+      relatedNoticeKeys: url.includes("R26BK1") ? ["R26BK2--000"] : [] })
+  });
+  await vi.waitFor(() => expect(db.releaseDbLease).toHaveBeenCalledWith(job.id, "lease-token"));
+  expect(await getCollectionJob(job.id)).toMatchObject({ status: "completed", apiTotal: 2, apiProcessed: 2,
+    apiCount: 1, detailTotal: 2 });
 });
 
 it("재수집 실패 시 DB의 기존 상세를 유지합니다", async () => {

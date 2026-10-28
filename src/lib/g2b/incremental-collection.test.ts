@@ -39,9 +39,66 @@ it("자동 수집은 API 응답 건수와 고유 공고를 분리하고 관련 �
     end: "2026-10-27T01:00:00.000Z", store: memory.store, fetcher: fetcher as typeof fetch,
     scrape: async (url) => ({ detail: { sourceUrl: url, sections: [], text: "완료", attachments: [], links: [] },
       relatedNoticeKeys: url.includes("R26BK1") ? ["R26BK2--000"] : [] }) });
-  expect(job).toMatchObject({ status: "completed", apiTotal: 2, apiProcessed: 2, apiCount: 1,
+  expect(job).toMatchObject({ status: "completed", apiTotal: 3, apiProcessed: 3, apiCount: 1,
     detailTotal: 2, detailSucceeded: 2, detailFailed: 0 });
   expect(memory.jobs.some((snapshot) => snapshot.apiTotal === 2 && snapshot.detailTotal === 0)).toBe(true);
+  delete process.env.G2B_SERVICE_KEY;
+});
+
+it("자동 수집이 API 페이지를 재시도해도 관련 공고 목표는 한 번만 더합니다", async () => {
+  process.env.G2B_SERVICE_KEY = "test-key";
+  const memory = memoryStore();
+  let secondPageCalls = 0;
+  let relatedCalls = 0;
+  const fetcher = async (input: RequestInfo | URL) => {
+    const url = new URL(String(input));
+    if (url.searchParams.get("inqryDiv") === "2") {
+      relatedCalls++;
+      return new Response(JSON.stringify({ response: { header: { resultCode: "00" }, body: {
+        totalCount: 1, items: [{ bidNtceNo: "R26BK2", bidNtceOrd: "000" }]
+      } } }));
+    }
+    const secondPage = url.searchParams.get("pageNo") === "2";
+    if (secondPage && ++secondPageCalls === 1) throw new Error("일시적인 페이지 오류");
+    const items = secondPage ? [{ bidNtceNo: "R26BK3", bidNtceOrd: "000" }]
+      : Array.from({ length: 1000 }, () => ({ bidNtceNo: "R26BK1", bidNtceOrd: "000" }));
+    return new Response(JSON.stringify({ response: { header: { resultCode: "00" }, body: {
+      totalCount: 1001, items
+    } } }));
+  };
+  const job = await runIncrementalCollection({ start: "2026-10-27T00:00:00.000Z",
+    end: "2026-10-27T01:00:00.000Z", store: memory.store, fetcher: fetcher as typeof fetch,
+    scrape: async (url) => ({ detail: { sourceUrl: url, sections: [], text: "완료", attachments: [], links: [] },
+      relatedNoticeKeys: url.includes("R26BK1") ? ["R26BK2--000"] : [] }) });
+  expect(job).toMatchObject({ status: "completed", apiTotal: 1002, apiProcessed: 1002,
+    apiCount: 2, detailTotal: 3 });
+  expect(relatedCalls).toBe(1);
+  delete process.env.G2B_SERVICE_KEY;
+});
+
+it("관련 공고의 API가 이미 저장되어 있으면 추가 API 대상으로 세지 않습니다", async () => {
+  process.env.G2B_SERVICE_KEY = "test-key";
+  const memory = memoryStore();
+  memory.notices.set("R26BK2--000", { key: "R26BK2--000",
+    api: { bidNtceNo: "R26BK2", bidNtceOrd: "000" }, detail: null,
+    detailError: null, relatedNoticeKeys: [] });
+  let byNumberCalls = 0;
+  const fetcher = async (input: RequestInfo | URL) => {
+    if (new URL(String(input)).searchParams.get("inqryDiv") === "2") {
+      byNumberCalls++;
+      throw new Error("저장된 API를 재조회하면 안 됩니다.");
+    }
+    return new Response(JSON.stringify({ response: { header: { resultCode: "00" }, body: {
+      totalCount: 1, items: [{ bidNtceNo: "R26BK1", bidNtceOrd: "000" }]
+    } } }));
+  };
+  const job = await runIncrementalCollection({ start: "2026-10-27T00:00:00.000Z",
+    end: "2026-10-27T01:00:00.000Z", store: memory.store, fetcher: fetcher as typeof fetch,
+    scrape: async (url) => ({ detail: { sourceUrl: url, sections: [], text: "완료", attachments: [], links: [] },
+      relatedNoticeKeys: url.includes("R26BK1") ? ["R26BK2--000"] : [] }) });
+  expect(job).toMatchObject({ status: "completed", apiTotal: 1, apiProcessed: 1,
+    detailTotal: 2, detailSucceeded: 2 });
+  expect(byNumberCalls).toBe(0);
   delete process.env.G2B_SERVICE_KEY;
 });
 
