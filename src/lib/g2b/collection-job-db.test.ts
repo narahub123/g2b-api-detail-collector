@@ -37,7 +37,8 @@ it("PostgreSQL 작업은 JSON 작업 파일 없이 DB 상태를 저장하고 잠
     { storage: "postgres", dataDir: dir, fetcher: fetcher as typeof fetch });
   await vi.waitFor(() => expect(dbJobs.releaseDbLease).toHaveBeenCalledWith(job.id, "lease-token"));
   expect(dbJobs.acquireDbJob).toHaveBeenCalledWith(expect.objectContaining({ id: job.id }));
-  expect(dbJobs.saveDbJob).toHaveBeenCalledWith(expect.objectContaining({ status: "completed" }), "lease-token");
+  expect(dbJobs.saveDbJob).toHaveBeenCalledWith(expect.objectContaining({ status: "completed",
+    apiTotal: 0, apiProcessed: 0, detailTotal: 0 }), "lease-token");
   expect(await readdir(join(dir, "jobs")).catch(() => [])).toEqual([]);
   expect(await readdir(join(dir, "api")).catch(() => [])).toEqual([]);
 });

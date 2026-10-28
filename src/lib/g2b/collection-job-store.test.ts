@@ -57,8 +57,10 @@ describe("DB 수집 작업 잠금", () => {
     await expect(acquireDbJob(second)).rejects.toThrow("이미 수집 작업");
     expect(await renewDbLease(first.id, firstToken)).toBe(true);
     first.apiCount = 3;
+    first.results = [{ key: "R26BK1--000", status: "succeeded" }];
     await saveDbJob(first, firstToken);
     expect((await getDbJob(first.id))?.apiCount).toBe(3);
+    expect((await getDbJob(first.id))?.results).toEqual([{ key: "R26BK1--000", status: "succeeded" }]);
     await releaseDbLease(first.id, firstToken);
     expect(await renewDbLease(first.id, firstToken)).toBe(false);
     await expect(saveDbJob(first, firstToken)).rejects.toThrow("잠금을 잃었습니다");

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { readdir, unlink } from "node:fs/promises";
-import { fetchNoticeByKey, fetchServiceNotices } from "./api-client";
+import { fetchNoticeByKey, prepareServiceNotices } from "./api-client";
 import { parsePostedDateRange } from "./date-range";
 import { scrapeDetailPage, serviceDetailUrl, type ScrapeResult } from "./detail-page";
 import { noticeKey, noticeKeyFromParts } from "./identity";
@@ -24,6 +24,9 @@ export type CollectionJob = {
   range: PostedDateRange | null;
   results?: { key: string; status: "pending" | "succeeded" | "failed"; error?: string }[];
   apiCount: number;
+  apiTotal?: number;
+  apiProcessed?: number;
+  detailTotal?: number;
   detailSucceeded: number;
   detailFailed: number;
   errors: string[];
@@ -164,6 +167,10 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies, l
     if (record.detail && (!api || (record.orderPlanNumbers !== undefined &&
         record.preSpecificationNumbers !== undefined && !record.detail.text))) return [];
     scraped.add(key);
+    // 상세 수집을 시작하기 전에 공고별 상태를 남겨 새로고침 후에도 진행 대상을 확인합니다.
+    const noticeResult: NonNullable<CollectionJob["results"]>[number] = { key, status: "pending" };
+    (job.results ??= []).push(noticeResult);
+    job.detailTotal = (job.detailTotal || 0) + 1;
     job.phase = "detail";
     await persist();
     const identity = parts(key);
@@ -171,6 +178,8 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies, l
     try { result = await scrape(serviceDetailUrl(identity.number, identity.order)); }
     catch (error) {
       record.detailError = error instanceof Error ? error.message : "상세 수집 오류";
+      noticeResult.status = "failed";
+      noticeResult.error = record.detailError;
       job.detailFailed++;
       job.errors.push(`${key}: ${record.detailError}`);
       await saveRecord(key, record);
@@ -179,7 +188,10 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies, l
     }
     const structured = structureNoticeDetail(key, result.detail);
     if (record.detail && !shouldReplacePaginatedDetail(record.detail, structured.detail)) {
-      job.errors.push(`${key}: 불완전한 재수집 결과를 저장하지 않아 기존 상세를 유지했습니다.`);
+      noticeResult.status = "failed";
+      noticeResult.error = "불완전한 재수집 결과를 저장하지 않아 기존 상세를 유지했습니다.";
+      job.errors.push(`${key}: ${noticeResult.error}`);
+      job.detailFailed++;
       await persist();
       return result.relatedNoticeKeys;
     }
@@ -193,6 +205,7 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies, l
     record.detailError = null;
     await saveRecord(key, record, structured);
     job.errors.push(...structured.warnings);
+    noticeResult.status = "succeeded";
     job.detailSucceeded++;
     await persist();
     return result.relatedNoticeKeys;
@@ -245,10 +258,15 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies, l
     }
   };
   try {
+    // 상세 수집 전에 날짜별 API 건수를 확정하고 첫 페이지를 재사용합니다.
+    const prepared = await prepareServiceNotices(job.range!, deps.fetcher);
+    job.apiTotal = prepared.total;
+    await persist();
     await recoverRelationIntents();
     await drainRelated();
-    for await (const page of fetchServiceNotices(job.range!, deps.fetcher)) {
+    for await (const page of prepared.pages) {
       for (const item of page.items) {
+        job.apiProcessed = (job.apiProcessed || 0) + 1;
         let key: string;
         try { key = noticeKey(item); }
         catch (error) { job.errors.push(error instanceof Error ? error.message : "공고 식별 오류"); continue; }
@@ -284,7 +302,8 @@ export async function startCollection(range: PostedDateRange, deps: CollectionDe
   if (jobRuntime.__g2bActiveJobId) throw new Error("이미 수집 작업이 진행 중입니다.");
   const job: CollectionJob = {
     id: randomUUID(), mode: "collection", status: "running", phase: "api", range,
-    apiCount: 0, detailSucceeded: 0, detailFailed: 0, errors: [], startedAt: new Date().toISOString()
+    results: [], apiCount: 0, apiProcessed: 0, detailTotal: 0,
+    detailSucceeded: 0, detailFailed: 0, errors: [], startedAt: new Date().toISOString()
   };
   jobRuntime.__g2bActiveJobId = job.id;
   try {
@@ -388,6 +407,7 @@ export async function startRefresh(keys: string[], deps: CollectionDependencies 
   if (jobRuntime.__g2bActiveJobId) throw new Error("이미 수집 작업이 진행 중입니다.");
   const job: CollectionJob = { id: randomUUID(), mode: "refresh", status: "running", phase: "detail", range: null,
     results: unique.map((key) => ({ key, status: "pending" })), apiCount: 0,
+    apiTotal: 0, apiProcessed: 0, detailTotal: unique.length,
     detailSucceeded: 0, detailFailed: 0, errors: [], startedAt: new Date().toISOString() };
   jobRuntime.__g2bActiveJobId = job.id;
   try {

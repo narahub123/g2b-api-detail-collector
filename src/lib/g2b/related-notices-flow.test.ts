@@ -54,6 +54,10 @@ describe("related notices", () => {
     for (let i = 0; i < 100 && (await getCollectionJob(job.id, dir))?.status === "running"; i++)
       await new Promise((resolve) => setTimeout(resolve, 20));
     const related = await getNoticeRecord("R26BK1--001", dir);
+    expect(await getCollectionJob(job.id, dir)).toMatchObject({ apiTotal: 1, apiProcessed: 1,
+      detailTotal: 2, detailSucceeded: 2, results: [
+        { key: "R26BK1--002", status: "succeeded" }, { key: "R26BK1--001", status: "succeeded" }
+      ] });
     expect(queries).toEqual(["1", "2"]);
     expect(related?.api?.bidNtceNm).toBe("이전");
     expect(related?.detail?.sections?.[0].title).toBe("공고일반");
@@ -111,10 +115,12 @@ describe("related notices", () => {
       detail: detail("R26BK1", "001"), relatedNoticeKeys: []
     });
     const called: string[] = [];
-    await collect([{ bidNtceNo: "R26BK1", bidNtceOrd: "002", bidNtceNm: "현재" }], dir, async (url) => {
+    const state = await collect([{ bidNtceNo: "R26BK1", bidNtceOrd: "002", bidNtceNm: "현재" }], dir, async (url) => {
       called.push(new URL(url).searchParams.get("bidPbancOrd")!);
       return { detail: detail("R26BK1", "002"), relatedNoticeKeys: ["R26BK1--001"] };
     });
+    expect(state).toMatchObject({ detailTotal: 1, detailSucceeded: 1,
+      results: [{ key: "R26BK1--002", status: "succeeded" }] });
     expect(called).toEqual(["002"]);
     expect((await getNoticeRecord("R26BK1--002", dir))?.relatedNoticeKeys).toEqual(["R26BK1--001"]);
     expect((await getNoticeRecord("R26BK1--001", dir))?.relatedNoticeKeys).toEqual(["R26BK1--002"]);

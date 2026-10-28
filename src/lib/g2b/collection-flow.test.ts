@@ -12,6 +12,55 @@ const dirs: string[] = [];
 afterEach(async () => { delete process.env.G2B_SERVICE_KEY; await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))); });
 
 describe("collection flow", () => {
+  it("API 전체 건수와 중복을 분리하고 실제 상세 대상만 DB 작업 상태 형식에 기록합니다", async () => {
+    process.env.G2B_SERVICE_KEY = "test-key";
+    const dataDir = await mkdtemp(join(tmpdir(), "g2b-progress-")); dirs.push(dataDir);
+    const fetcher = async () => new Response(JSON.stringify({ response: { header: { resultCode: "00" }, body: {
+      totalCount: 2, items: [{ bidNtceNo: "R26BK1", bidNtceOrd: "000" },
+        { bidNtceNo: "R26BK1", bidNtceOrd: "000" }]
+    } } }));
+    let releaseScrape!: () => void;
+    const pause = new Promise<void>((resolve) => { releaseScrape = resolve; });
+    const job = await startCollection(parsePostedDateRange("2026-10-01", "2026-10-01"), {
+      dataDir, fetcher: fetcher as typeof fetch,
+      scrape: async (url) => {
+        await pause;
+        return { detail: { sourceUrl: url, sections: [], text: "완료", attachments: [], links: [] },
+          relatedNoticeKeys: [] };
+      }
+    });
+    let running = await getCollectionJob(job.id, dataDir);
+    for (let i = 0; i < 100 && running?.detailTotal !== 1; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      running = await getCollectionJob(job.id, dataDir);
+    }
+    expect(running).toMatchObject({ status: "running", apiTotal: 2, apiProcessed: 1, detailTotal: 1,
+      results: [{ key: "R26BK1--000", status: "pending" }] });
+    releaseScrape();
+    let finished = await getCollectionJob(job.id, dataDir);
+    for (let i = 0; i < 100 && finished?.status === "running"; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      finished = await getCollectionJob(job.id, dataDir);
+    }
+    expect(finished).toMatchObject({ status: "completed", apiTotal: 2, apiProcessed: 2,
+      apiCount: 1, detailTotal: 1, detailSucceeded: 1, detailFailed: 0,
+      results: [{ key: "R26BK1--000", status: "succeeded" }] });
+  });
+
+  it("첫 API 조회가 실패하면 목표 건수를 확정하지 않습니다", async () => {
+    process.env.G2B_SERVICE_KEY = "test-key";
+    const dataDir = await mkdtemp(join(tmpdir(), "g2b-target-error-")); dirs.push(dataDir);
+    const job = await startCollection(parsePostedDateRange("2026-10-01", "2026-10-01"), {
+      dataDir, fetcher: (async () => { throw new Error("API 장애"); }) as typeof fetch
+    });
+    let finished = await getCollectionJob(job.id, dataDir);
+    for (let i = 0; i < 100 && finished?.status === "running"; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      finished = await getCollectionJob(job.id, dataDir);
+    }
+    expect(finished).toMatchObject({ status: "failed", apiProcessed: 0 });
+    expect(finished?.apiTotal).toBeUndefined();
+  });
   it("refreshes a legacy notice selected by API collection while preserving it on scrape failure", async () => {
     process.env.G2B_SERVICE_KEY = "test-key";
     const dataDir = await mkdtemp(join(tmpdir(), "g2b-refresh-")); dirs.push(dataDir);
@@ -32,11 +81,16 @@ describe("collection flow", () => {
       }
       return state;
     };
-    expect((await collect(async () => { throw new Error("일시 실패"); }))?.detailFailed).toBe(1);
+    expect(await collect(async () => { throw new Error("일시 실패"); })).toMatchObject({
+      detailFailed: 1, results: [{ key: "R26BK1--000", status: "failed", error: "일시 실패" }]
+    });
     expect(JSON.parse(await readFile(path, "utf8")).detail.text).toBe("기존 본문");
-    expect((await collect(async () => ({ detail: { sourceUrl: "new", sections: [{ title: "공고일반", fields: [
+    const recovered = await collect(async () => ({ detail: { sourceUrl: "new", sections: [{ title: "공고일반", fields: [
       { label: "공고명", value: [{ text: "신규", visible: true }] }
-    ], tables: [] }], text: "신규 본문", attachments: [], links: [] }, relatedNoticeKeys: [] })))?.detailSucceeded).toBe(1);
+    ], tables: [] }], text: "신규 본문", attachments: [], links: [] }, relatedNoticeKeys: [] }));
+    expect(recovered).toMatchObject({
+      detailSucceeded: 1, results: [{ key: "R26BK1--000", status: "succeeded" }]
+    });
     const saved = JSON.parse(await readFile(path, "utf8"));
     expect(saved.detail).not.toHaveProperty("fields");
     expect(saved.detail.sections[0].fields).toContainEqual({ label: "공고명", value: [{ text: "신규", visible: true }] });
