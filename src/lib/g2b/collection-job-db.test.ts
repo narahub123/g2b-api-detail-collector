@@ -34,7 +34,7 @@ it("PostgreSQL 작업은 JSON 작업 파일 없이 DB 상태를 저장하고 잠
   const fetcher = async () => new Response(JSON.stringify({ response: { header: { resultCode: "00" },
     body: { totalCount: 0, items: [] } } }));
   const job = await startCollection({ start: "2026-10-28", end: "2026-10-28" },
-    { storage: "postgres", dataDir: dir, fetcher: fetcher as typeof fetch });
+    { fetcher: fetcher as typeof fetch });
   await vi.waitFor(() => expect(dbJobs.releaseDbLease).toHaveBeenCalledWith(job.id, "lease-token"));
   expect(dbJobs.acquireDbJob).toHaveBeenCalledWith(expect.objectContaining({ id: job.id }));
   expect(dbJobs.saveDbJob).toHaveBeenCalledWith(expect.objectContaining({ status: "completed",

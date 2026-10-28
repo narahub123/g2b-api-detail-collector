@@ -2,9 +2,6 @@ import type { ModalCapture, ScrapedDetail, StructuredField, StructuredSection, S
 import { fieldText } from "./field-value";
 import { contentSections } from "./content-sections";
 import { classifyTabModal } from "./tab-modal-classification";
-import { join } from "node:path";
-import { readJson, writeJsonAtomic } from "./json-store";
-import { shouldReplacePaginatedDetail } from "./pagination-coverage";
 import { paginationCompleteness } from "./pagination-coverage";
 
 export type IndependentDetail = {
@@ -216,42 +213,4 @@ export function structureNoticeDetail(key: string, detail: ScrapedDetail): Struc
   }
   return { detail: structured, orderPlanNumbers, preSpecificationNumbers, otherDetailNumbers, openingDetailKeys,
     orderPlans, preSpecifications, otherDetails, openingDetails, independentTriggers, warnings };
-}
-
-/**
- * 번호가 이미 저장된 독립 상세는 덮어쓰지 않고 새 번호만 파일로 기록합니다.
- * @param dataDir 공고와 독립 상세 파일을 담는 데이터 디렉터리
- * @param structured 분류가 끝난 상세와 독립 저장 후보
- * @returns 모든 새 독립 파일의 기록이 끝났을 때 완료되는 Promise
- */
-export async function saveIndependentDetails(dataDir: string, structured: StructuredNoticeDetail): Promise<void> {
-  for (const [folder, entities] of [["order-plans", structured.orderPlans],
-    ["pre-specifications", structured.preSpecifications], ["independent-details", structured.otherDetails],
-    ["independent-details", structured.openingDetails]] as const) {
-    for (const entity of entities) {
-      if (folder === "independent-details") {
-        const match = /^(R\d{2}BK\d{8})-(\d{3})$/.exec(entity.number);
-        if (match) {
-          const noticePath = join(dataDir, "notices", `${match[1]}--${match[2]}.json`);
-          try {
-            const notice = await readJson<{ detail?: ScrapedDetail | null }>(noticePath);
-            if (notice.detail) continue;
-          } catch (error) {
-            if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-          }
-        }
-      }
-      const path = join(dataDir, folder, `${entity.number}.json`);
-      // 완전한 기존 자료와 완전성을 알 수 없는 기존 자료를 부분 재수집 결과로 덮어쓰지 않습니다.
-      try {
-        const previous = await readJson<IndependentDetail>(path);
-        if (previous.schemaVersion === 5 && (previous.sourceNoticeKey !== entity.sourceNoticeKey ||
-          !entity.paginationAudit || !shouldReplacePaginatedDetail(previous, entity))) continue;
-      }
-      catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      }
-      await writeJsonAtomic(path, entity);
-    }
-  }
 }
