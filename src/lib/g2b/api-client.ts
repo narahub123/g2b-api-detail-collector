@@ -57,30 +57,60 @@ export async function fetchNoticeByKey(key: string, fetcher: typeof fetch = fetc
   }
 }
 
-/** 게시일 범위의 용역 입찰공고를 날짜와 페이지별로 조회합니다. */
-export async function* fetchServiceNotices(
-  range: PostedDateRange,
-  fetcher: typeof fetch = fetch
-): AsyncGenerator<ApiPage> {
-  for (const date of postedDays(range)) {
-    for (let pageNo = 1; ; pageNo++) {
-      const url = new URL(SERVICE_URL);
-      url.searchParams.set("pageNo", String(pageNo));
-      url.searchParams.set("inqryDiv", "1");
-      url.searchParams.set("inqryBgnDt", date.replaceAll("-", "") + "0000");
-      url.searchParams.set("inqryEndDt", date.replaceAll("-", "") + "2359");
-      const { items, total, raw } = await fetchBody(url, fetcher);
-      yield { date, pageNo, items, raw };
-      if (!Number.isFinite(total) || pageNo * PAGE_SIZE >= total || items.length === 0) break;
+type QueryWindow = { date: string; start: string; end: string };
+type PreparedPages = { total: number; pages: AsyncGenerator<ApiPage> };
+
+/** 날짜별 첫 응답을 합산한 뒤 같은 응답을 실제 페이지 순회에 재사용합니다. */
+async function preparePages(windows: QueryWindow[], fetcher: typeof fetch): Promise<PreparedPages> {
+  /** 선조회와 실제 순회가 동일한 요청 조건을 사용하도록 페이지를 가져옵니다. */
+  const fetchPage = async (window: QueryWindow, pageNo: number) => {
+    const url = new URL(SERVICE_URL);
+    url.searchParams.set("pageNo", String(pageNo));
+    url.searchParams.set("inqryDiv", "1");
+    url.searchParams.set("inqryBgnDt", window.start);
+    url.searchParams.set("inqryEndDt", window.end);
+    return fetchBody(url, fetcher);
+  };
+  const firstPages: Awaited<ReturnType<typeof fetchBody>>[] = [];
+  let total = 0;
+  for (const window of windows) {
+    const first = await fetchPage(window, 1);
+    if (!Number.isSafeInteger(first.total) || first.total < 0) {
+      throw new Error("나라장터 API의 전체 건수가 올바르지 않습니다.");
+    }
+    firstPages.push(first);
+    total += first.total;
+  }
+  /** 보관한 첫 페이지 뒤에 남은 페이지를 필요한 시점에 조회합니다. */
+  async function* pages(): AsyncGenerator<ApiPage> {
+    for (const [index, window] of windows.entries()) {
+      let response = firstPages[index];
+      for (let pageNo = 1; ; pageNo++) {
+        yield { date: window.date, pageNo, items: response.items, raw: response.raw };
+        if (pageNo * PAGE_SIZE >= response.total || response.items.length === 0) break;
+        response = await fetchPage(window, pageNo + 1);
+      }
     }
   }
+  return { total, pages: pages() };
+}
+
+/** 게시일 범위의 일별 첫 페이지를 확인해 전체 API 건수를 준비합니다. */
+export async function prepareServiceNotices(range: PostedDateRange, fetcher: typeof fetch = fetch): Promise<PreparedPages> {
+  return preparePages([...postedDays(range)].map((date) => ({
+    date, start: date.replaceAll("-", "") + "0000", end: date.replaceAll("-", "") + "2359"
+  })), fetcher);
+}
+
+/** 게시일 범위의 용역 입찰공고를 날짜와 페이지별로 조회합니다. */
+export async function* fetchServiceNotices(range: PostedDateRange, fetcher: typeof fetch = fetch): AsyncGenerator<ApiPage> {
+  yield* (await prepareServiceNotices(range, fetcher)).pages;
 }
 
 /** UTC 조회 구간을 서울 날짜별 분 단위 API 요청으로 나눠 가져옵니다. */
-export async function* fetchServiceNoticesByMinute(
-  range: PostedTimeRange,
-  fetcher: typeof fetch = fetch
-): AsyncGenerator<ApiPage> {
+export async function prepareServiceNoticesByMinute(
+  range: PostedTimeRange, fetcher: typeof fetch = fetch
+): Promise<PreparedPages> {
   const start = Date.parse(range.start);
   const end = Date.parse(range.end);
   if (!Number.isFinite(start) || !Number.isFinite(end) || start > end) {
@@ -89,19 +119,20 @@ export async function* fetchServiceNoticesByMinute(
   const offset = 9 * 60 * 60_000;
   const localStart = start + offset;
   const localEnd = end + offset;
+  const windows: QueryWindow[] = [];
   for (let day = Math.floor(localStart / 86_400_000) * 86_400_000; day <= localEnd; day += 86_400_000) {
     const from = new Date(Math.max(localStart, day));
     const to = new Date(Math.min(localEnd, day + 86_400_000 - 60_000));
     const date = new Date(day).toISOString().slice(0, 10);
-    for (let pageNo = 1; ; pageNo++) {
-      const url = new URL(SERVICE_URL);
-      url.searchParams.set("pageNo", String(pageNo));
-      url.searchParams.set("inqryDiv", "1");
-      url.searchParams.set("inqryBgnDt", from.toISOString().slice(0, 16).replace(/[-T:]/g, ""));
-      url.searchParams.set("inqryEndDt", to.toISOString().slice(0, 16).replace(/[-T:]/g, ""));
-      const { items, total, raw } = await fetchBody(url, fetcher);
-      yield { date, pageNo, items, raw };
-      if (!Number.isFinite(total) || pageNo * PAGE_SIZE >= total || items.length === 0) break;
-    }
+    windows.push({ date, start: from.toISOString().slice(0, 16).replace(/[-T:]/g, ""),
+      end: to.toISOString().slice(0, 16).replace(/[-T:]/g, "") });
   }
+  return preparePages(windows, fetcher);
+}
+
+/** 분 단위 API 구간을 서울 날짜별로 조회합니다. */
+export async function* fetchServiceNoticesByMinute(
+  range: PostedTimeRange, fetcher: typeof fetch = fetch
+): AsyncGenerator<ApiPage> {
+  yield* (await prepareServiceNoticesByMinute(range, fetcher)).pages;
 }

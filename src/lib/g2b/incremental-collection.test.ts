@@ -1,15 +1,16 @@
 import { expect, it } from "vitest";
 import { runIncrementalCollection, type IncrementalStore } from "./incremental-collection";
 import type { StoredNotice } from "./notices";
+import type { CollectionJob } from "./collection-job";
 
 function memoryStore() {
   const notices = new Map<string, StoredNotice>();
   const attempts = new Map<string, { key: string; attempts: number; status: "failed" | "succeeded"; error: string | null }>();
-  const jobs: { status: string; windowEnd?: string; detailSucceeded: number; detailFailed: number }[] = [];
+  const jobs: CollectionJob[] = [];
   const store: IncrementalStore = {
     getCheckpoint: async () => [...jobs].reverse().find((job) => job.status === "completed")?.windowEnd || null,
     acquire: async () => "token",
-    saveJob: async (job) => { jobs.push({ status: job.status, windowEnd: job.windowEnd, detailSucceeded: job.detailSucceeded, detailFailed: job.detailFailed }); },
+    saveJob: async (job) => { jobs.push(structuredClone(job)); },
     renew: async () => true,
     release: async () => undefined,
     getNotice: async (key) => notices.get(key) || null,
@@ -21,6 +22,48 @@ function memoryStore() {
   };
   return { store, notices, attempts, jobs };
 }
+
+it("자동 수집은 API 응답 건수와 고유 공고를 분리하고 관련 상세 대상을 추가합니다", async () => {
+  process.env.G2B_SERVICE_KEY = "test-key";
+  const memory = memoryStore();
+  const fetcher = async (input: RequestInfo | URL) => {
+    const url = new URL(String(input));
+    const byNumber = url.searchParams.get("inqryDiv") === "2";
+    return new Response(JSON.stringify({ response: { header: { resultCode: "00" }, body: {
+      totalCount: byNumber ? 1 : 2, items: byNumber
+        ? [{ bidNtceNo: "R26BK2", bidNtceOrd: "000" }]
+        : [{ bidNtceNo: "R26BK1", bidNtceOrd: "000" }, { bidNtceNo: "R26BK1", bidNtceOrd: "000" }]
+    } } }));
+  };
+  const job = await runIncrementalCollection({ start: "2026-10-27T00:00:00.000Z",
+    end: "2026-10-27T01:00:00.000Z", store: memory.store, fetcher: fetcher as typeof fetch,
+    scrape: async (url) => ({ detail: { sourceUrl: url, sections: [], text: "완료", attachments: [], links: [] },
+      relatedNoticeKeys: url.includes("R26BK1") ? ["R26BK2--000"] : [] }) });
+  expect(job).toMatchObject({ status: "completed", apiTotal: 2, apiProcessed: 2, apiCount: 1,
+    detailTotal: 2, detailSucceeded: 2, detailFailed: 0 });
+  expect(memory.jobs.some((snapshot) => snapshot.apiTotal === 2 && snapshot.detailTotal === 0)).toBe(true);
+  delete process.env.G2B_SERVICE_KEY;
+});
+
+it("이미 저장된 상세로 이전 실패 기록만 복구할 때 이번 작업의 상세 대상에는 넣지 않습니다", async () => {
+  process.env.G2B_SERVICE_KEY = "test-key";
+  const memory = memoryStore();
+  memory.notices.set("R26BK1--000", { key: "R26BK1--000", api: null,
+    detail: { sourceUrl: "stored", sections: [], text: "완료", attachments: [], links: [] },
+    detailError: null, relatedNoticeKeys: [] });
+  memory.attempts.set("R26BK1--000", { key: "R26BK1--000", attempts: 1,
+    status: "failed", error: "이전 오류" });
+  const fetcher = async () => new Response(JSON.stringify({ response: { header: { resultCode: "00" }, body: {
+    totalCount: 1, items: [{ bidNtceNo: "R26BK1", bidNtceOrd: "000" }]
+  } } }));
+  const job = await runIncrementalCollection({ start: "2026-10-27T00:00:00.000Z",
+    end: "2026-10-27T01:00:00.000Z", store: memory.store, fetcher: fetcher as typeof fetch,
+    scrape: async () => { throw new Error("기존 상세를 다시 수집하면 안 됩니다."); } });
+  expect(job).toMatchObject({ status: "completed", apiTotal: 1, apiProcessed: 1,
+    detailTotal: 0, detailSucceeded: 0, detailFailed: 0 });
+  expect(memory.attempts.get("R26BK1--000")?.status).toBe("succeeded");
+  delete process.env.G2B_SERVICE_KEY;
+});
 
 it("4시간 구간을 이어받고 성공한 상세를 중복 추출하지 않습니다", async () => {
   process.env.G2B_SERVICE_KEY = "test-key";
@@ -34,7 +77,7 @@ it("4시간 구간을 이어받고 성공한 상세를 중복 추출하지 않�
     scrape: async (url: string) => { scrapes++; return { detail: { sourceUrl: url, sections: [], text: "완료", attachments: [], links: [] }, relatedNoticeKeys: [] }; } };
   const first = await runIncrementalCollection(options);
   expect(first).toMatchObject({ status: "completed", windowEnd: "2026-10-27T04:00:00.000Z", continuation: true,
-    apiCount: 1, detailSucceeded: 1, detailFailed: 0 });
+    apiTotal: 2, apiProcessed: 2, apiCount: 1, detailTotal: 1, detailSucceeded: 1, detailFailed: 0 });
   const second = await runIncrementalCollection(options);
   expect(second).toMatchObject({ status: "completed", windowStart: "2026-10-27T04:00:00.000Z",
     windowEnd: "2026-10-27T05:00:00.000Z", continuation: false, detailSucceeded: 0, detailFailed: 0 });
@@ -81,7 +124,8 @@ it("전체 조회가 두 번 실패하면 다음 작업이 같은 구간을 다�
   const options = { start: "2026-10-27T00:00:00.000Z", end: "2026-10-27T01:00:00.000Z",
     store: memory.store, fetcher: fetcher as typeof fetch };
   const failed = await runIncrementalCollection(options);
-  expect(failed).toMatchObject({ status: "failed", windowStart: options.start });
+  expect(failed).toMatchObject({ status: "failed", windowStart: options.start, apiProcessed: 0 });
+  expect(failed.apiTotal).toBeUndefined();
   expect(calls).toBe(2);
   const recovered = await runIncrementalCollection(options);
   expect(recovered).toMatchObject({ status: "completed", windowStart: options.start, windowEnd: options.end });

@@ -1,5 +1,51 @@
 import { describe, expect, it, vi } from "vitest";
-import { fetchNoticeByKey, fetchServiceNotices, fetchServiceNoticesByMinute } from "./api-client";
+import { fetchNoticeByKey, fetchServiceNotices, fetchServiceNoticesByMinute,
+  prepareServiceNotices, prepareServiceNoticesByMinute } from "./api-client";
+
+it("여러 날짜의 첫 페이지로 전체 API 목표를 계산하고 수집에 재사용합니다", async () => {
+  process.env.G2B_SERVICE_KEY = "test-key";
+  const calls: string[] = [];
+  const fetcher = async (input: RequestInfo | URL) => {
+    const url = new URL(String(input));
+    const date = url.searchParams.get("inqryBgnDt")?.slice(0, 8);
+    const page = Number(url.searchParams.get("pageNo"));
+    calls.push(`${date}-${page}`);
+    const totalCount = date === "20261001" ? 1001 : 1;
+    return new Response(JSON.stringify({ response: { header: { resultCode: "00" }, body: {
+      totalCount, items: [{ bidNtceNo: `${date}-${page}`, bidNtceOrd: "000" }]
+    } } }));
+  };
+  const prepared = await prepareServiceNotices({ start: "2026-10-01", end: "2026-10-02" }, fetcher as typeof fetch);
+  expect(prepared.total).toBe(1002);
+  expect(calls).toEqual(["20261001-1", "20261002-1"]);
+  const pages = [];
+  for await (const page of prepared.pages) pages.push(page);
+  expect(pages.map((page) => `${page.date}-${page.pageNo}`)).toEqual([
+    "2026-10-01-1", "2026-10-01-2", "2026-10-02-1"
+  ]);
+  expect(calls).toEqual(["20261001-1", "20261002-1", "20261001-2"]);
+  delete process.env.G2B_SERVICE_KEY;
+});
+
+it("자동 수집도 서울 날짜별 첫 페이지로 목표를 계산합니다", async () => {
+  process.env.G2B_SERVICE_KEY = "test-key";
+  const calls: string[] = [];
+  const fetcher = async (input: RequestInfo | URL) => {
+    const url = new URL(String(input));
+    const date = url.searchParams.get("inqryBgnDt")?.slice(0, 8) || "";
+    calls.push(date);
+    return new Response(JSON.stringify({ response: { header: { resultCode: "00" }, body: {
+      totalCount: date === "20261027" ? 2 : 3, items: []
+    } } }));
+  };
+  const prepared = await prepareServiceNoticesByMinute({
+    start: "2026-10-27T14:30:00.000Z", end: "2026-10-27T15:30:00.000Z"
+  }, fetcher as typeof fetch);
+  expect(prepared.total).toBe(5);
+  for await (const page of prepared.pages) void page;
+  expect(calls).toEqual(["20261027", "20261028"]);
+  delete process.env.G2B_SERVICE_KEY;
+});
 
 it("분 단위 조회를 서울 시각으로 변환하고 자정에서 구간을 나눕니다", async () => {
   process.env.G2B_SERVICE_KEY = "test-key";

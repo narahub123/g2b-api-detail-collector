@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { CollectionJob } from "@/lib/g2b/collection-job";
 
+/** 최신 수집 작업을 복원하고 목표 대비 진행 상태를 관리자에게 보여줍니다. */
 export function CollectionForm({ fetcher = fetch }: { fetcher?: typeof fetch }) {
   const router = useRouter();
   const [start, setStart] = useState("");
@@ -73,7 +74,12 @@ export function CollectionForm({ fetcher = fetch }: { fetcher?: typeof fetch }) 
       <strong>{job.status === "running" ? "수집 진행 중" : job.status === "completed" ? "수집 완료" :
         job.status === "failed" ? "수집 실패" : "수집 중단"}</strong>
       <span>{job.mode === "incremental" ? "자동 수집" : "수동 수집"}</span>
-      <span>API {job.apiCount}건</span><span>상세 성공 {job.detailSucceeded}건</span><span>상세 실패 {job.detailFailed}건</span>
+      <span>{job.apiTotal === undefined
+        ? job.status === "running" ? "API 목표 확인 중" : job.apiProcessed !== undefined ? "API 목표 확인 실패" : `API ${job.apiCount}건`
+        : `API ${job.apiProcessed ?? 0}/${job.apiTotal}건`}</span>
+      {job.apiTotal !== undefined && <span>고유 공고 {job.apiCount}건</span>}
+      {job.detailTotal !== undefined && <span>상세 {job.detailSucceeded + job.detailFailed}/{job.detailTotal}건</span>}
+      <span>상세 성공 {job.detailSucceeded}건</span><span>상세 실패 {job.detailFailed}건</span>
       {job.errors.length > 0 && <small>{job.errors.at(-1)}</small>}
       {job.results && job.results.length > 0 && <details className="job-results"><summary>공고별 결과 {job.results.length}건</summary>
         <ul>{job.results.map((result) => <li key={result.key}>{result.key}: {result.status === "succeeded" ? "수집 완료" :

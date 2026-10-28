@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { fetchNoticeByKey, fetchServiceNoticesByMinute, type PostedTimeRange } from "./api-client";
+import { fetchNoticeByKey, prepareServiceNoticesByMinute, type PostedTimeRange } from "./api-client";
 import { acquireDbJob, releaseDbLease, renewDbLease, saveDbJob } from "./collection-job-store";
 import type { CollectionJob } from "./collection-job";
 import { scrapeDetailPage, serviceDetailUrl, type ScrapeResult } from "./detail-page";
@@ -57,7 +57,8 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
   const { windowStart, windowEnd, continuation } = windowFor(options.start, options.end,
     await store.getCheckpoint(options.activationId));
   const job: CollectionJob = { id: randomUUID(), mode: "incremental", status: "running", phase: "api",
-    range: null, windowStart, windowEnd, activationId: options.activationId, continuation, apiCount: 0, detailSucceeded: 0,
+    range: null, windowStart, windowEnd, activationId: options.activationId, continuation,
+    apiCount: 0, apiProcessed: 0, detailTotal: 0, detailSucceeded: 0,
     detailFailed: 0, errors: [], results: [], startedAt: new Date().toISOString() };
   const token = await store.acquire(job);
   let lost = false;
@@ -91,14 +92,17 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
     else if (api && !record.api) record.api = api;
     const previous = await store.getAttempt(key);
     if (record.detail) {
-      if (results.get(key) === "pending" || previous?.status === "failed") {
+      const pendingInThisRun = results.get(key) === "pending";
+      if (pendingInThisRun || previous?.status === "failed") {
         // 상세 저장과 시도 기록 사이에 오류가 났다면 이미 저장된 성공을 확정합니다.
         await ensureLease();
         await store.saveAttempt({ key, attempts: Math.min(3, (previous?.attempts || 0) +
-          (results.get(key) === "pending" ? 1 : 0)) || 1, status: "succeeded", error: null });
-        results.set(key, "succeeded");
-        recount();
-        await persist();
+          (pendingInThisRun ? 1 : 0)) || 1, status: "succeeded", error: null });
+        if (pendingInThisRun) {
+          results.set(key, "succeeded");
+          recount();
+          await persist();
+        }
       }
       return;
     }
@@ -106,11 +110,10 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
     await ensureLease();
     await store.saveNotice(key, record);
     if ((previous?.attempts || 0) >= 3) {
-      results.set(key, "failed");
-      recount();
       return;
     }
     job.phase = "detail";
+    if (!results.has(key)) job.detailTotal = (job.detailTotal || 0) + 1;
     results.set(key, "pending");
     recount();
     await persist();
@@ -171,12 +174,18 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
     // 한 실행의 API 실패는 같은 구간 전체를 한 번만 다시 조회합니다.
     for (let run = 0; run < 2; run++) {
       try {
+        // 첫 페이지를 먼저 확인해 현재 조회 구간의 목표를 저장합니다.
+        const prepared = await prepareServiceNoticesByMinute(
+          { start: windowStart, end: windowEnd }, options.fetcher);
+        job.apiTotal = prepared.total;
+        await persist();
         const priorFailures = await store.getFailedAttempts();
         for (const item of priorFailures) {
           if (item.attempts < 3) await handle(item.key, null);
         }
-        for await (const page of fetchServiceNoticesByMinute({ start: windowStart, end: windowEnd }, options.fetcher)) {
+        for await (const page of prepared.pages) {
           for (const item of page.items) {
+            job.apiProcessed = (job.apiProcessed || 0) + 1;
             let key: string;
             try { key = noticeKey(item); }
             catch (error) { job.errors.push(error instanceof Error ? error.message : String(error)); continue; }
@@ -195,6 +204,9 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
         job.errors.push(`조회 구간 재시도: ${error instanceof Error ? error.message : String(error)}`);
         seenApi.clear();
         job.apiCount = 0;
+        job.apiProcessed = 0;
+        job.apiTotal = undefined;
+        await persist();
       }
     }
     for (const key of firstFailures) {

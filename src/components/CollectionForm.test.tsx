@@ -7,6 +7,35 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 afterEach(cleanup);
 
 describe("CollectionForm", () => {
+  it("저장된 수동 수집의 공고별 결과를 표시합니다", async () => {
+    const fetcher = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: "job", mode: "collection",
+      status: "completed", phase: "done", apiTotal: 2, apiProcessed: 2, apiCount: 2,
+      detailTotal: 2, detailSucceeded: 1, detailFailed: 1, errors: [],
+      results: [{ key: "R26BK1--000", status: "succeeded" },
+        { key: "R26BK2--000", status: "failed", error: "상세 접근 실패" }] }) });
+    render(<CollectionForm fetcher={fetcher as typeof fetch} />);
+    expect(await screen.findByText("공고별 결과 2건")).toBeInTheDocument();
+    expect(screen.getByText(/R26BK1--000: 수집 완료/)).toBeInTheDocument();
+    expect(screen.getByText(/R26BK2--000: 수집 실패/)).toBeInTheDocument();
+  });
+  it("새로고침 후 DB에서 읽은 실행 상태의 API·상세 목표를 표시합니다", async () => {
+    const fetcher = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: "job", mode: "collection",
+      status: "running", phase: "detail", apiTotal: 12, apiProcessed: 4, apiCount: 3,
+      detailTotal: 2, detailSucceeded: 1, detailFailed: 0, errors: [] }) });
+    render(<CollectionForm fetcher={fetcher as typeof fetch} />);
+    expect(await screen.findByText("API 4/12건")).toBeInTheDocument();
+    expect(screen.getByText("상세 1/2건")).toBeInTheDocument();
+    expect(screen.getByText("고유 공고 3건")).toBeInTheDocument();
+  });
+
+  it("첫 페이지 목표를 아직 확인하지 못한 작업은 확인 중으로 표시합니다", async () => {
+    const fetcher = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: "job", mode: "collection",
+      status: "running", phase: "api", apiCount: 0, apiProcessed: 0, detailTotal: 0,
+      detailSucceeded: 0, detailFailed: 0, errors: [] }) });
+    render(<CollectionForm fetcher={fetcher as typeof fetch} />);
+    expect(await screen.findByText("API 목표 확인 중")).toBeInTheDocument();
+    expect(screen.getByText("상세 0/0건")).toBeInTheDocument();
+  });
   it("최신 자동 작업의 실패 상태와 공고별 결과를 표시합니다", async () => {
     const fetcher = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: "job", mode: "incremental",
       status: "failed", phase: "done", apiCount: 2, detailSucceeded: 1, detailFailed: 1,
