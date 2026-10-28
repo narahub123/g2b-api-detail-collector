@@ -85,7 +85,7 @@ describe("collection flow", () => {
       expect(notice.detail).not.toHaveProperty("text");
     }
   });
-  it("persists API pages, distinct orders, scraped detail and a partial failure", async () => {
+  it("stores distinct orders and partial detail failures without API page files", async () => {
     process.env.G2B_SERVICE_KEY = "test-key";
     const dataDir = await mkdtemp(join(tmpdir(), "g2b-flow-")); dirs.push(dataDir);
     const fetcher = async () => new Response(JSON.stringify({ response: { header: { resultCode: "00" }, body: {
@@ -114,8 +114,6 @@ describe("collection flow", () => {
     expect(notices).toHaveLength(2);
     expect((await getNotice("R26BK1--000", dataDir))?.title.value).toBe("첫 차수 상세");
     expect((await getNotice("R26BK1--001", dataDir))?.scrapeStatus).toBe("failed");
-    const rawFiles = await readdir(join(dataDir, "api", job.id));
-    expect(rawFiles).toHaveLength(1);
-    expect(JSON.parse(await readFile(join(dataDir, "api", job.id, rawFiles[0]), "utf8")).response.body.items).toHaveLength(2);
+    expect(await readdir(join(dataDir, "api")).catch(() => [])).toEqual([]);
   });
 });

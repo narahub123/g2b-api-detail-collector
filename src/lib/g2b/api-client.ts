@@ -2,6 +2,8 @@ import { postedDays } from "./date-range";
 import { noticeKey } from "./identity";
 import type { ApiNotice, ApiPage, PostedDateRange } from "./types";
 
+export type PostedTimeRange = { start: string; end: string };
+
 const SERVICE_URL = "https://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoServc";
 const PAGE_SIZE = 1000;
 
@@ -67,6 +69,36 @@ export async function* fetchServiceNotices(
       url.searchParams.set("inqryDiv", "1");
       url.searchParams.set("inqryBgnDt", date.replaceAll("-", "") + "0000");
       url.searchParams.set("inqryEndDt", date.replaceAll("-", "") + "2359");
+      const { items, total, raw } = await fetchBody(url, fetcher);
+      yield { date, pageNo, items, raw };
+      if (!Number.isFinite(total) || pageNo * PAGE_SIZE >= total || items.length === 0) break;
+    }
+  }
+}
+
+/** UTC 조회 구간을 서울 날짜별 분 단위 API 요청으로 나눠 가져옵니다. */
+export async function* fetchServiceNoticesByMinute(
+  range: PostedTimeRange,
+  fetcher: typeof fetch = fetch
+): AsyncGenerator<ApiPage> {
+  const start = Date.parse(range.start);
+  const end = Date.parse(range.end);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start > end) {
+    throw new Error("유효한 분 단위 조회 구간을 입력하세요.");
+  }
+  const offset = 9 * 60 * 60_000;
+  const localStart = start + offset;
+  const localEnd = end + offset;
+  for (let day = Math.floor(localStart / 86_400_000) * 86_400_000; day <= localEnd; day += 86_400_000) {
+    const from = new Date(Math.max(localStart, day));
+    const to = new Date(Math.min(localEnd, day + 86_400_000 - 60_000));
+    const date = new Date(day).toISOString().slice(0, 10);
+    for (let pageNo = 1; ; pageNo++) {
+      const url = new URL(SERVICE_URL);
+      url.searchParams.set("pageNo", String(pageNo));
+      url.searchParams.set("inqryDiv", "1");
+      url.searchParams.set("inqryBgnDt", from.toISOString().slice(0, 16).replace(/[-T:]/g, ""));
+      url.searchParams.set("inqryEndDt", to.toISOString().slice(0, 16).replace(/[-T:]/g, ""));
       const { items, total, raw } = await fetchBody(url, fetcher);
       yield { date, pageNo, items, raw };
       if (!Number.isFinite(total) || pageNo * PAGE_SIZE >= total || items.length === 0) break;

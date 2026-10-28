@@ -9,7 +9,8 @@
     "start": "next start",
     "test": "vitest run",
     "db:migrate": "node --env-file=.env.local scripts/migrate-db.mjs",
-    "db:import-jobs": "node --env-file=.env.local scripts/import-jobs.mjs"
+    "db:import-jobs": "node --env-file=.env.local scripts/import-jobs.mjs",
+    "collect:incremental": "node --env-file=.env.local --import tsx scripts/collect-incremental.ts"
   },
   "dependencies": {
     "cheerio": "^1.1.2",
@@ -27,6 +28,7 @@
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "jsdom": "^26.1.0",
+    "tsx": "^4.23.15",
     "typescript": "^5.8.0",
     "vitest": "^5.0.5"
   }

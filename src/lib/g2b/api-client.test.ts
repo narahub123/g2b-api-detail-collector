@@ -1,5 +1,21 @@
 import { describe, expect, it, vi } from "vitest";
-import { fetchNoticeByKey, fetchServiceNotices } from "./api-client";
+import { fetchNoticeByKey, fetchServiceNotices, fetchServiceNoticesByMinute } from "./api-client";
+
+it("분 단위 조회를 서울 시각으로 변환하고 자정에서 구간을 나눕니다", async () => {
+  process.env.G2B_SERVICE_KEY = "test-key";
+  const calls: string[] = [];
+  const fetcher = async (input: RequestInfo | URL) => {
+    const url = new URL(String(input));
+    calls.push(`${url.searchParams.get("inqryBgnDt")}-${url.searchParams.get("inqryEndDt")}`);
+    return new Response(JSON.stringify({ response: { header: { resultCode: "00" }, body: { totalCount: 0, items: [] } } }));
+  };
+  const pages = [];
+  for await (const page of fetchServiceNoticesByMinute(
+    { start: "2026-10-27T14:30:00.000Z", end: "2026-10-27T15:30:00.000Z" }, fetcher as typeof fetch)) pages.push(page);
+  expect(calls).toEqual(["202610272330-202610272359", "202610280000-202610280030"]);
+  expect(pages.map((page) => [page.date, page.pageNo])).toEqual([["2026-10-27", 1], ["2026-10-28", 1]]);
+  delete process.env.G2B_SERVICE_KEY;
+});
 
 describe("fetchServiceNotices", () => {
   it("pages through notices in the requested posted date range", async () => {

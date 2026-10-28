@@ -6,6 +6,7 @@ import pg from "pg";
 import { expect, it } from "vitest";
 import { startCollection, startRefresh, getCollectionJob } from "./collection-job";
 import { getNoticeRecord, listNotices } from "./notices";
+import { runIncrementalCollection } from "./incremental-collection";
 
 const runtime = globalThis as typeof globalThis & { __g2bPgPool?: pg.Pool };
 
@@ -51,6 +52,51 @@ async function finished(id: string, dir: string) {
   }
   throw new Error("수집 작업 시간 초과");
 }
+
+it.skipIf(!process.env.LIVE_DB_TEST || !process.env.DATABASE_URL)(
+  "resumes a four-hour window and persists detail retry state in an isolated PostgreSQL schema", async () => {
+    const schema = `g2b_test_${randomUUID().replaceAll("-", "")}`;
+    const directUrl = new URL(process.env.DATABASE_URL!);
+    directUrl.hostname = directUrl.hostname.replace("-pooler.", ".");
+    const admin = new pg.Client({ connectionString: directUrl.toString() });
+    const oldSchema = process.env.G2B_DB_SCHEMA;
+    const oldKey = process.env.G2B_SERVICE_KEY;
+    await admin.connect();
+    try {
+      await admin.query(`CREATE SCHEMA "${schema}"`);
+      const ddl = await readFile(join(process.cwd(), "db", "schema.sql"), "utf8");
+      await admin.query(ddl.replaceAll("public.", `${schema}.`));
+      process.env.G2B_DB_SCHEMA = schema;
+      process.env.G2B_SERVICE_KEY = "test-key";
+      runtime.__g2bPgPool = new pg.Pool({ connectionString: directUrl.toString(), max: 2 });
+      let attempts = 0;
+      const fetcher = async () => new Response(JSON.stringify({ response: { header: { resultCode: "00" },
+        body: { totalCount: 1, items: [{ bidNtceNo: "R26BK7", bidNtceOrd: "000" }] } } }));
+      const options = { start: "2026-10-27T00:00:00.000Z", end: "2026-10-27T05:00:00.000Z",
+        fetcher: fetcher as typeof fetch, scrape: async (url: string) => {
+          attempts++;
+          if (attempts < 3) throw new Error("일시 오류");
+          return { detail: { sourceUrl: url, sections: [], text: "완료", attachments: [], links: [] }, relatedNoticeKeys: [] };
+        } };
+      const first = await runIncrementalCollection(options);
+      expect(first).toMatchObject({ status: "completed", windowEnd: "2026-10-27T04:00:00.000Z",
+        detailSucceeded: 0, detailFailed: 1 });
+      const second = await runIncrementalCollection(options);
+      expect(second).toMatchObject({ status: "completed", windowStart: "2026-10-27T04:00:00.000Z",
+        detailSucceeded: 1, detailFailed: 0 });
+      expect(attempts).toBe(3);
+      const rows = await admin.query(`SELECT attempts,status FROM ${schema}.collection_notice_attempts`);
+      expect(rows.rows).toEqual([{ attempts: 3, status: "succeeded" }]);
+      expect((await getNoticeRecord("R26BK7--000"))?.detail).toBeTruthy();
+    } finally {
+      if (oldSchema === undefined) delete process.env.G2B_DB_SCHEMA; else process.env.G2B_DB_SCHEMA = oldSchema;
+      if (oldKey === undefined) delete process.env.G2B_SERVICE_KEY; else process.env.G2B_SERVICE_KEY = oldKey;
+      if (runtime.__g2bPgPool) await runtime.__g2bPgPool.end();
+      delete runtime.__g2bPgPool;
+      await admin.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
+      await admin.end();
+    }
+  }, 60_000);
 
 it.skipIf(!process.env.LIVE_DB_TEST || !process.env.DATABASE_URL)(
   "stores collection, relations, independent details and refresh in an isolated PostgreSQL schema", async () => {

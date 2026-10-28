@@ -39,4 +39,5 @@ it("PostgreSQL 작업은 JSON 작업 파일 없이 DB 상태를 저장하고 잠
   expect(dbJobs.acquireDbJob).toHaveBeenCalledWith(expect.objectContaining({ id: job.id }));
   expect(dbJobs.saveDbJob).toHaveBeenCalledWith(expect.objectContaining({ status: "completed" }), "lease-token");
   expect(await readdir(join(dir, "jobs")).catch(() => [])).toEqual([]);
+  expect(await readdir(join(dir, "api")).catch(() => [])).toEqual([]);
 });

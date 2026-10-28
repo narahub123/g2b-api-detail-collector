@@ -18,7 +18,7 @@ import { shouldReplacePaginatedDetail } from "./pagination-coverage";
 
 export type CollectionJob = {
   id: string;
-  mode?: "collection" | "refresh";
+  mode?: "collection" | "refresh" | "incremental";
   status: "running" | "completed" | "failed" | "interrupted";
   phase: "api" | "detail" | "done";
   range: PostedDateRange | null;
@@ -29,6 +29,10 @@ export type CollectionJob = {
   errors: string[];
   startedAt: string;
   finishedAt?: string;
+  windowStart?: string;
+  windowEnd?: string;
+  continuation?: boolean;
+  cursor?: { date: string; pageNo: number };
 };
 
 type CollectionDependencies = {
@@ -243,7 +247,6 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies, l
     await recoverRelationIntents();
     await drainRelated();
     for await (const page of fetchServiceNotices(job.range!, deps.fetcher)) {
-      await writeJsonAtomic(join(dir, "api", job.id, `${page.date}-${page.pageNo}.json`), page.raw);
       for (const item of page.items) {
         let key: string;
         try { key = noticeKey(item); }

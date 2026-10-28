@@ -23,14 +23,20 @@
 
 Chrome이 기본 설치 위치에 없으면 `.env.local`에 `G2B_CHROME_PATH=Chrome 실행 파일의 절대 경로`를 추가합니다.
 
+## 증분 수집 명령
+
+DB 스키마를 적용한 뒤 `npm run collect:incremental -- --start=2026-10-27T00:00:00Z`로 분 단위 증분 수집을 실행합니다. `--start`는 첫 실행의 UTC 조회 시작 시각이며, 이후에는 마지막으로 정상 완료한 작업의 조회 끝 시각부터 겹쳐 조회합니다. 검증할 때는 `--end=2026-10-27T05:00:00Z`처럼 종료 시각을 고정할 수 있습니다. 한 번에 최대 4시간을 처리하고 `continuation: true`를 출력하면 같은 명령을 다시 실행해 남은 구간을 처리합니다. 설정 화면과 예약 실행은 다음 단계에서 연결합니다.
+
+전체 조회가 실패하면 같은 구간을 즉시 한 번 더 조회합니다. 두 번 모두 실패하거나 실행이 중단되면 다음 실행에서 마지막 정상 완료 구간부터 다시 조회합니다. 상세 실패는 전체 순회 후 한 번, 다음 실행에서 한 번 더 시도하며 공고별 총 세 번 실패하면 자동 시도를 멈춥니다. 관리자 화면에서 선택 재수집은 계속 사용할 수 있습니다.
+
 ## 저장 위치
 
-- `data/api/<작업 ID>/`: API 호출별 전체 JSON 응답
 - Neon `notices`: 공고번호·차수별 API 항목, 상세 원문(JSONB), 분석용 요약 컬럼
 - Neon `independent_details`, `notice_independent_refs`: 발주계획·사전규격·개찰·기타 독립 상세와 공고 참조
 - Neon `notice_relations`: 직접 발견한 공고의 양방향 관계
 - 공고 상세의 `baseAmountCaptures`, `changeNoticeCaptures`는 해당 공고 차수에 종속된 정보입니다. 분류되지 않은 모달은 `modalCaptures`에 남습니다.
 - Neon `collection_jobs`, `collection_lock`: 새 수집 작업의 진행 상태·오류와 공통 실행 잠금. 이전 `data/jobs/` JSON은 이관 후에도 원본으로 남습니다.
+- Neon `collection_notice_attempts`: 증분 수집 공고별 상세 시도 횟수와 실패·성공 상태. API 페이지 위치와 조회 구간은 `collection_jobs.state`에 남습니다.
 
 테이블과 각 컬럼의 한국어 설명은 [`db/schema.sql`](db/schema.sql)의 PostgreSQL `COMMENT`로 관리합니다. `npm run db:migrate`를 다시 실행하면 기존 테이블의 설명도 갱신됩니다. `api`, `detail`, `payload`, `triggers`는 수집 원본의 구조가 달라질 수 있어 JSONB로 보존합니다.
 
@@ -71,5 +77,5 @@ npm test -- --run src/lib/g2b/api-client.live.test.ts src/lib/g2b/detail-page.li
 
 ## 첫 버전의 범위
 
-용역 공고만 수집합니다. 첨부 문서 본문 분석, 자동 갱신, 개인별 입찰 적합성 판정은 포함하지 않습니다. 화면의 `정보 없음`은 수집한 API와 공개 상세 페이지에서 해당 값을 확인하지 못했다는 뜻입니다. 최종 참가 조건과 제출 내용은 나라장터 원문 및 첨부파일을 확인하세요.
+용역 공고만 수집합니다. 첨부 문서 본문 분석, 예약 실행, 개인별 입찰 적합성 판정은 포함하지 않습니다. 화면의 `정보 없음`은 수집한 API와 공개 상세 페이지에서 해당 값을 확인하지 못했다는 뜻입니다. 최종 참가 조건과 제출 내용은 나라장터 원문 및 첨부파일을 확인하세요.
 # g2b-api-detail-collector
