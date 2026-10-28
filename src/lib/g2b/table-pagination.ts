@@ -13,9 +13,9 @@ type Match = { gridId: string; pagerIndex: number; ambiguous: boolean; total?: n
 /** 가장 가까운 1:1 컨테이너를 기준으로 그리드와 페이지 컨트롤을 연결합니다. */
 async function findMatches(scope: Locator): Promise<Match[]> {
   return scope.evaluate((root, { gridSelector, pagerSelector }) => {
-    const visible = (element: Element) => Boolean(element.getClientRects().length) &&
-      getComputedStyle(element).display !== "none" && getComputedStyle(element).visibility !== "hidden";
-    const grids = ([...root.querySelectorAll(gridSelector)] as HTMLTableElement[]).filter(visible);
+    const grids = ([...root.querySelectorAll(gridSelector)] as HTMLTableElement[]).filter((element) =>
+      Boolean(element.getClientRects().length) && getComputedStyle(element).display !== "none" &&
+      getComputedStyle(element).visibility !== "hidden");
     const pagers = [...root.querySelectorAll(pagerSelector)] as HTMLElement[];
     return grids.map((grid) => {
       let container: Element | null = grid.closest('.gvwbox,[data-table-container],.table-container');
@@ -25,8 +25,12 @@ async function findMatches(scope: Locator): Promise<Match[]> {
           container = container.parentElement;
       }
       const localPagers = container && container !== root ? [...container.querySelectorAll(pagerSelector)]
-        .filter((item) => visible(item) && !item.parentElement?.closest(pagerSelector)) : [];
-      const localGrids = container && container !== root ? [...container.querySelectorAll(gridSelector)].filter(visible) : [];
+        .filter((item) => Boolean(item.getClientRects().length) &&
+          getComputedStyle(item).display !== "none" && getComputedStyle(item).visibility !== "hidden" &&
+          !item.parentElement?.closest(pagerSelector)) : [];
+      const localGrids = container && container !== root ? [...container.querySelectorAll(gridSelector)]
+        .filter((element) => Boolean(element.getClientRects().length) &&
+          getComputedStyle(element).display !== "none" && getComputedStyle(element).visibility !== "hidden") : [];
       const unique = localPagers.length === 1 && localGrids.length === 1
         ? { pagerIndex: pagers.indexOf(localPagers[0] as HTMLElement), ancestor: container! } : null;
       const parentText = unique?.ancestor.parentElement?.textContent || "";
@@ -54,11 +58,14 @@ type PagerState = { current: number; numbers: number[]; hasNext: boolean; pageCo
 async function readPager(pager: Locator): Promise<PagerState | null> {
   return pager.evaluate((node) => {
     const links = [...node.querySelectorAll('a,button,[data-page]')] as HTMLElement[];
-    const number = (element: HTMLElement) => Number(element.getAttribute("index") || element.getAttribute("data-page") || element.textContent?.trim());
     const selected = links.filter((link) => link.matches('.w2pageList_label_selected,[aria-current="page"],.active,[aria-selected="true"]'));
-    if (selected.length !== 1 || !Number.isSafeInteger(number(selected[0]))) return null;
-    const current = number(selected[0]);
-    const numbers = links.map(number).filter((value) => Number.isSafeInteger(value) && value > 0);
+    if (selected.length !== 1) return null;
+    const current = Number(selected[0].getAttribute("index") ||
+      selected[0].getAttribute("data-page") || selected[0].textContent?.trim());
+    if (!Number.isSafeInteger(current)) return null;
+    const numbers = links.map((element) => Number(element.getAttribute("index") ||
+      element.getAttribute("data-page") || element.textContent?.trim()))
+      .filter((value) => Number.isSafeInteger(value) && value > 0);
     const next = node.querySelector('.w2pageList_control_next, [rel="next"], [aria-label="다음 페이지"]');
     const pageCount = Number((window as any).$w?.getComponentById?.((node as HTMLElement).id)?.pageCount);
     return { current, numbers, hasNext: Boolean(next && !node.classList.contains("w2pageList_next_last") &&
