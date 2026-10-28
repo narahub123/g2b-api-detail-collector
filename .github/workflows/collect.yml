@@ -11,8 +11,6 @@ on:
         description: "검증용 조회 종료 시각 (UTC ISO, 선택)"
         required: false
         type: string
-  schedule:
-    - cron: "*/5 * * * *"
 
 permissions:
   contents: read
