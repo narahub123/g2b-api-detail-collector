@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { readFile, mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import pg from "pg";
 import { expect, it } from "vitest";
 import { startCollection, startRefresh, getCollectionJob } from "./collection-job";
-import { getNoticeRecord, listNotices } from "./notices";
+import { getNoticeRecord } from "./notices";
+import { countStoredNotices } from "./postgres-store";
 import { runIncrementalCollection } from "./incremental-collection";
 
 const runtime = globalThis as typeof globalThis & { __g2bPgPool?: pg.Pool };
@@ -43,10 +43,10 @@ it.skipIf(!process.env.LIVE_DB_TEST || !process.env.DATABASE_URL)(
     }
   }, 30_000);
 
-/** 완료된 파일 작업 상태를 제한된 시간 동안 기다립니다. */
-async function finished(id: string, dir: string) {
+/** 완료된 DB 작업 상태를 제한된 시간 동안 기다립니다. */
+async function finished(id: string) {
   for (let attempt = 0; attempt < 600; attempt++) {
-    const job = await getCollectionJob(id, dir);
+    const job = await getCollectionJob(id);
     if (job?.status !== "running") return job;
     await new Promise((resolve) => setTimeout(resolve, 30));
   }
@@ -104,7 +104,6 @@ it.skipIf(!process.env.LIVE_DB_TEST || !process.env.DATABASE_URL)(
     const directUrl = new URL(process.env.DATABASE_URL!);
     directUrl.hostname = directUrl.hostname.replace("-pooler.", ".");
     const admin = new pg.Client({ connectionString: directUrl.toString() });
-    const dir = await mkdtemp(join(tmpdir(), "g2b-postgres-flow-"));
     const originalKey = process.env.G2B_SERVICE_KEY;
     const originalSchema = process.env.G2B_DB_SCHEMA;
     await admin.connect();
@@ -125,10 +124,10 @@ it.skipIf(!process.env.LIVE_DB_TEST || !process.env.DATABASE_URL)(
           modal: { title: "계획", fields: [{ label: "내용", value: [{ text: "예산", visible: true }] }], tables: [] }
         }] : [] }, relatedNoticeKeys: url.includes("R26BK1") ? ["R26BK2--000"] : [] });
       const job = await startCollection({ start: "2026-10-25", end: "2026-10-25" },
-        { storage: "postgres", dataDir: dir, fetcher: fetcher as typeof fetch, scrape });
-      const collectionState = await finished(job.id, dir);
+        { fetcher: fetcher as typeof fetch, scrape });
+      const collectionState = await finished(job.id);
       expect(collectionState?.status, JSON.stringify(collectionState?.errors)).toBe("completed");
-      expect(await listNotices()).toHaveLength(2);
+      expect(await countStoredNotices({})).toBe(2);
       const record = await getNoticeRecord("R26BK1--000");
       expect(record?.relatedNoticeKeys).toContain("R26BK2--000");
       expect(record?.orderPlans[0].detail?.sections?.[0].fields[0].value).toEqual([{ text: "예산", visible: true }]);
@@ -141,23 +140,23 @@ it.skipIf(!process.env.LIVE_DB_TEST || !process.env.DATABASE_URL)(
       const summary = await runtime.__g2bPgPool!.query(`SELECT title, amount, posted_at FROM ${schema}.notices WHERE key=$1`, ["R26BK1--000"]);
       expect(summary.rows[0].title).toBe("연구 용역");
       expect(summary.rows[0].amount).toBe("1200");
-      const refresh = await startRefresh(["R26BK1--000"], { storage: "postgres", dataDir: dir,
+      const refresh = await startRefresh(["R26BK1--000"], {
         scrape: async (url) => ({ detail: { sourceUrl: url,
           sections: [{ title: "공고일반", fields: [{ label: "공고명", value: [{ text: "갱신된 용역", visible: true }] }], tables: [] }],
           attachments: [], links: [], modalCaptures: [{
             trigger: { index: 0, tag: "a", label: "발주계획", value: "R26DD12345678", html: "<a>계획</a>" },
             modal: { title: "계획", fields: [{ label: "내용", value: [{ text: "변경된 예산", visible: true }] }], tables: [] }
           }] }, relatedNoticeKeys: [] }) });
-      const refreshed = await finished(refresh.id, dir);
+      const refreshed = await finished(refresh.id);
       expect(refreshed?.results, JSON.stringify(refreshed?.errors)).toEqual([{ key: "R26BK1--000", status: "succeeded" }]);
       expect((await getNoticeRecord("R26BK1--000"))?.normalized.title.value).toBe("갱신된 용역");
       const refreshedRefs = await runtime.__g2bPgPool!.query(`SELECT detail_key,category FROM ${schema}.notice_independent_refs WHERE notice_key=$1`, ["R26BK1--000"]);
       expect(refreshedRefs.rows, JSON.stringify(refreshed?.errors)).toHaveLength(1);
       expect((await getNoticeRecord("R26BK1--000"))?.orderPlans[0].detail?.sections?.[0].fields[0].value)
         .toEqual([{ text: "예산", visible: true }]);
-      const failedRefresh = await startRefresh(["R26BK1--000"], { storage: "postgres", dataDir: dir,
+      const failedRefresh = await startRefresh(["R26BK1--000"], {
         scrape: async () => { throw new Error("상세 접근 실패"); } });
-      expect((await finished(failedRefresh.id, dir))?.detailFailed).toBe(1);
+      expect((await finished(failedRefresh.id))?.detailFailed).toBe(1);
       expect((await getNoticeRecord("R26BK1--000"))?.normalized.title.value).toBe("갱신된 용역");
     } finally {
       process.env.G2B_SERVICE_KEY = originalKey;
@@ -167,6 +166,5 @@ it.skipIf(!process.env.LIVE_DB_TEST || !process.env.DATABASE_URL)(
       delete runtime.__g2bPgPool;
       await admin.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
       await admin.end();
-      await rm(dir, { recursive: true, force: true });
     }
   }, 60_000);

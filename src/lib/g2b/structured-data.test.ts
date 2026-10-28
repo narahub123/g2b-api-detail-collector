@@ -1,8 +1,5 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
-import { saveIndependentDetails, structureNoticeDetail } from "./structured-data";
+import { describe, expect, it } from "vitest";
+import { structureNoticeDetail } from "./structured-data";
 import type { ModalCapture, ScrapedDetail, StructuredField, StructuredTable } from "./detail-page";
 
 const simpleTable = (columnName: string, value: string): StructuredTable => ({
@@ -25,8 +22,6 @@ const detail = (captures: ModalCapture[]): ScrapedDetail => ({
   ],
   text: "전체 본문", attachments: [], links: [], modalCaptures: captures
 });
-const dirs: string[] = [];
-afterEach(async () => { await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))); });
 
 describe("structureNoticeDetail", () => {
   it("개찰결과와 하위 모달을 재입찰번호별 독립 상세로 묶습니다", () => {
@@ -165,36 +160,6 @@ describe("structureNoticeDetail", () => {
       tableCount: 1, tableRowCount: 1 });
   });
 
-  it("writes a new generic detail but reuses an already stored notice number", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "g2b-independent-")); dirs.push(dir);
-    await mkdir(join(dir, "notices"));
-    await writeFile(join(dir, "notices", "R26BK12345678--000.json"), JSON.stringify({
-      key: "R26BK12345678--000", detail: { sourceUrl: "existing" }
-    }));
-    const contract = capture("계약 상세", [{ label: "금액", value: [{ text: "100", visible: true }] }], null, "R26TA12345678");
-    const existing = capture("다른 공고", [{ label: "공고명", value: [{ text: "기존", visible: true }] }], null, "R26BK12345678-000");
-    const result = structureNoticeDetail("R26BK01774553--000", detail([contract, existing]));
-    await saveIndependentDetails(dir, result);
-    expect(result.otherDetailNumbers).toEqual(["R26TA12345678", "R26BK12345678-000"]);
-    expect(JSON.parse(await readFile(join(dir, "independent-details", "R26TA12345678.json"), "utf8")).number)
-      .toBe("R26TA12345678");
-    await expect(readFile(join(dir, "independent-details", "R26BK12345678-000.json"), "utf8"))
-      .rejects.toMatchObject({ code: "ENOENT" });
-  });
-  it("이전 독립 상세는 첨부 URL 형식으로 갱신하고 버전 5는 유지한다", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "g2b-upgrade-")); dirs.push(dir);
-    await mkdir(join(dir, "order-plans"));
-    const path = join(dir, "order-plans", "R26DD20897516.json");
-    await writeFile(path, JSON.stringify({ schemaVersion: 3, sections: [] }));
-    const source = capture("발주계획", [{ label: "사업명", value: [{ text: "신규 사업", visible: true }] }], null, "R26DD20897516");
-    const structured = structureNoticeDetail("R26BK1--000", detail([source]));
-    await saveIndependentDetails(dir, structured);
-    const upgraded = JSON.parse(await readFile(path, "utf8"));
-    expect(upgraded).toMatchObject({ schemaVersion: 5, sections: [{ fields: [{ label: "사업명" }] }], attachments: [] });
-    source.modal.fields![0].value = [{ text: "다른 사업", visible: true }];
-    await saveIndependentDetails(dir, structureNoticeDetail("R26BK1--000", detail([source])));
-    expect(JSON.parse(await readFile(path, "utf8"))).toEqual(upgraded);
-  });
   it("classifies numbered triggers without relying on modal titles", () => {
     const numbered = capture("임의 제목", [{ label: "내용", value: [{ text: "계획", visible: true }] }], "공고일반");
     numbered.trigger.value = " R26DD20897516 ";

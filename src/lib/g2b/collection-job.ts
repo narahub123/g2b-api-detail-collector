@@ -1,16 +1,13 @@
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
-import { readdir, unlink } from "node:fs/promises";
 import { fetchNoticeByKey, prepareServiceNotices } from "./api-client";
 import { parsePostedDateRange } from "./date-range";
 import { scrapeDetailPage, serviceDetailUrl, type ScrapeResult } from "./detail-page";
 import { noticeKey, noticeKeyFromParts } from "./identity";
-import { readJson, writeJsonAtomic } from "./json-store";
 import { normalizeNotice, type NormalizedNotice } from "./normalize";
 import type { StoredNotice } from "./notices";
 import { getNoticeRecord } from "./notices";
 import type { ApiNotice, PostedDateRange } from "./types";
-import { saveIndependentDetails, structureNoticeDetail } from "./structured-data";
+import { structureNoticeDetail } from "./structured-data";
 import type { StructuredNoticeDetail } from "./structured-data";
 import { getPool, getStoredNotice, saveNoticeRelation, saveStoredNotice } from "./postgres-store";
 import { acquireDbJob, getDbJob, getLatestDbJob, releaseDbLease, renewDbLease, saveDbJob } from "./collection-job-store";
@@ -41,22 +38,14 @@ export type CollectionJob = {
 
 type CollectionDependencies = {
   fetcher?: typeof fetch;
-  dataDir?: string;
-  storage?: "postgres" | "json";
   scrape?: (url: string) => Promise<ScrapeResult>;
 };
 
 const jobRuntime = globalThis as typeof globalThis & { __g2bActiveJobId?: string | null };
-const defaultDataDir = () => join(process.cwd(), "data");
-const jobPath = (dir: string, id: string) => join(dir, "jobs", `${id}.json`);
-const usesPostgres = (deps: CollectionDependencies) => deps.storage === "postgres" || (!deps.dataDir && deps.storage !== "json");
 
-/** 운영 작업은 DB에, 파일 기반 테스트 작업은 JSON에 상태를 저장합니다. */
-async function saveJob(job: CollectionJob, deps: CollectionDependencies, leaseToken?: string): Promise<void> {
-  if (usesPostgres(deps)) {
-    if (!leaseToken) throw new Error("수집 작업 잠금이 없습니다.");
-    await saveDbJob(job, leaseToken);
-  } else await writeJsonAtomic(jobPath(deps.dataDir || defaultDataDir(), job.id), job);
+/** 수집 작업 상태를 현재 잠금 소유권으로 DB에 저장합니다. */
+async function saveJob(job: CollectionJob, leaseToken: string): Promise<void> {
+  await saveDbJob(job, leaseToken);
 }
 
 /** 작업 중 임대를 갱신하고 소유권을 잃은 실행자가 다음 저장을 멈추게 합니다. */
@@ -90,14 +79,12 @@ async function findMissingApi(key: string, record: StoredNotice, job: Collection
 }
 
 /** 날짜 범위 API 조회와 상세 수집을 순서대로 실행하고 작업 상태를 기록합니다. */
-async function runCollection(job: CollectionJob, deps: CollectionDependencies, leaseToken?: string): Promise<void> {
-  const dir = deps.dataDir || defaultDataDir();
-  const dbMode = usesPostgres(deps);
+async function runCollection(job: CollectionJob, deps: CollectionDependencies, leaseToken: string): Promise<void> {
   const heartbeat = startLeaseHeartbeat(job.id, leaseToken);
-  const persist = async () => { heartbeat.assert(); await saveJob(job, deps, leaseToken); };
+  const persist = async () => { heartbeat.assert(); await saveJob(job, leaseToken); };
   const ensureLease = async () => {
     heartbeat.assert();
-    if (leaseToken && !await renewDbLease(job.id, leaseToken)) throw new Error("수집 작업 잠금을 잃었습니다.");
+    if (!await renewDbLease(job.id, leaseToken)) throw new Error("수집 작업 잠금을 잃었습니다.");
   };
   const scrape = deps.scrape || scrapeDetailPage;
   const seenApi = new Set<string>();
@@ -109,51 +96,27 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies, l
     if (noticeKeyFromParts(number, order) !== key) throw new Error(`잘못된 공고 키: ${key}`);
     return { number, order };
   };
-  const pathFor = (key: string) => join(dir, "notices", `${key}.json`);
-  const intentDir = join(dir, "relation-intents");
-  const intentPath = (source: string, related: string) =>
-    join(intentDir, `${[source, related].sort().join("__")}.json`);
-  const readRecord = async (key: string): Promise<StoredNotice | null> => {
-    if (dbMode) return getStoredNotice(key);
-    try { return await readJson<StoredNotice>(pathFor(key)); }
-    catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-      throw error;
-    }
-  };
   const saveRecord = async (key: string, record: StoredNotice, structured?: StructuredNoticeDetail) => {
     const identity = parts(key);
     record.key = key;
     record.relatedNoticeKeys = [...new Set(record.relatedNoticeKeys || [])];
     record.normalized = normalizeNotice(record.api, record.detail, identity);
-    if (dbMode) { await ensureLease(); await saveStoredNotice(key, record, structured); }
-    else await writeJsonAtomic(pathFor(key), record);
+    await ensureLease();
+    await saveStoredNotice(key, record, structured);
   };
   /** 기존 공고의 API와 관계를 보존하면서 필요한 저장 레코드를 확보합니다. */
   const ensureRecord = async (key: string, api: ApiNotice | null = null): Promise<StoredNotice> => {
     const identity = parts(key);
-    const record = await readRecord(key) || { key, api: null, detail: null, relatedNoticeKeys: [],
+    const record = await getStoredNotice(key) || { key, api: null, detail: null, relatedNoticeKeys: [],
       detailUrl: serviceDetailUrl(identity.number, identity.order), detailError: null, collectedAt: new Date().toISOString() };
     if (api && !record.api) record.api = api;
     await saveRecord(key, record);
     return record;
   };
-  const writeReciprocalRelation = async (source: string, related: string) => {
-    if (source === related) return;
-    const sourceRecord = await ensureRecord(source);
-    const relatedRecord = await ensureRecord(related);
-    sourceRecord.relatedNoticeKeys = [...new Set([...(sourceRecord.relatedNoticeKeys || []), related])];
-    relatedRecord.relatedNoticeKeys = [...new Set([...(relatedRecord.relatedNoticeKeys || []), source])];
-    await saveRecord(source, sourceRecord);
-    await saveRecord(related, relatedRecord);
-  };
   const addRelation = async (source: string, related: string) => {
     if (source === related) return;
-    if (dbMode) { await ensureLease(); await saveNoticeRelation(source, related); return; }
-    const path = intentPath(source, related);
-    await writeJsonAtomic(path, { source, related });
-    await writeReciprocalRelation(source, related);
-    await unlink(path);
+    await ensureLease();
+    await saveNoticeRelation(source, related);
   };
   /** 누락된 API를 보완하고 상세를 수집한 뒤 새로 발견한 관련 공고 키를 반환합니다. */
   const processRecord = async (key: string, api: ApiNotice | null = null): Promise<string[]> => {
@@ -195,7 +158,6 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies, l
       await persist();
       return result.relatedNoticeKeys;
     }
-    if (!dbMode) await saveIndependentDetails(dir, structured);
     record.detail = structured.detail;
     record.orderPlanNumbers = structured.orderPlanNumbers;
     record.preSpecificationNumbers = structured.preSpecificationNumbers;
@@ -221,7 +183,7 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies, l
           else job.errors.push(`${related}: 관련 공고 탐색 한도(200건)로 상세 수집 보류`);
         }
       } catch (error) {
-        if (dbMode && error instanceof Error && !error.message.startsWith("잘못된 공고 키")) throw error;
+        if (error instanceof Error && !error.message.startsWith("잘못된 공고 키")) throw error;
         job.errors.push(`${source} → ${related}: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
@@ -233,36 +195,11 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies, l
       await enqueueRelated(key, discovered);
     }
   };
-  const recoverRelationIntents = async () => {
-    if (dbMode) return;
-    let files: string[];
-    try { files = await readdir(intentDir); }
-    catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
-      throw error;
-    }
-    for (const file of files.filter((name) => name.endsWith(".json"))) {
-      const { source, related } = await readJson<{ source: string; related: string }>(join(intentDir, file));
-      parts(source);
-      parts(related);
-      if (source === related || file !== `${[source, related].sort().join("__")}.json`) {
-        throw new Error(`잘못된 관련 공고 복구 기록: ${file}`);
-      }
-      await writeReciprocalRelation(source, related);
-      await unlink(join(intentDir, file));
-      for (const key of [source, related]) {
-        if ((await readRecord(key))?.detail || queued.has(key)) continue;
-        if (queued.size < 200) { queued.add(key); queue.push(key); }
-        else job.errors.push(`${key}: 관련 공고 탐색 한도(200건)로 상세 수집 보류`);
-      }
-    }
-  };
   try {
     // 상세 수집 전에 날짜별 API 건수를 확정하고 첫 페이지를 재사용합니다.
     const prepared = await prepareServiceNotices(job.range!, deps.fetcher);
     job.apiTotal = prepared.total;
     await persist();
-    await recoverRelationIntents();
     await drainRelated();
     for await (const page of prepared.pages) {
       for (const item of page.items) {
@@ -288,7 +225,7 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies, l
     try { await persist(); }
     finally {
       await heartbeat.stop();
-      try { if (leaseToken) await releaseDbLease(job.id, leaseToken); }
+      try { await releaseDbLease(job.id, leaseToken); }
       finally { jobRuntime.__g2bActiveJobId = null; }
     }
   }
@@ -298,7 +235,7 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies, l
 export async function startCollection(range: PostedDateRange, deps: CollectionDependencies = {}): Promise<CollectionJob> {
   parsePostedDateRange(range.start, range.end);
   if (!process.env.G2B_SERVICE_KEY) throw new Error("G2B_SERVICE_KEY 환경변수를 설정하세요.");
-  if (usesPostgres(deps)) getPool();
+  getPool();
   if (jobRuntime.__g2bActiveJobId) throw new Error("이미 수집 작업이 진행 중입니다.");
   const job: CollectionJob = {
     id: randomUUID(), mode: "collection", status: "running", phase: "api", range,
@@ -307,8 +244,7 @@ export async function startCollection(range: PostedDateRange, deps: CollectionDe
   };
   jobRuntime.__g2bActiveJobId = job.id;
   try {
-    const leaseToken = usesPostgres(deps) ? await acquireDbJob(job) : undefined;
-    if (!leaseToken) await saveJob(job, deps);
+    const leaseToken = await acquireDbJob(job);
     void runCollection(job, deps, leaseToken).catch((error) => console.error("수집 작업 상태 저장 실패:", error));
     return job;
   } catch (error) {
@@ -318,28 +254,25 @@ export async function startCollection(range: PostedDateRange, deps: CollectionDe
 }
 
 /** 선택한 공고의 상세만 다시 수집하며 성공한 결과만 교체합니다. */
-async function runRefresh(job: CollectionJob, deps: CollectionDependencies, leaseToken?: string): Promise<void> {
-  const dir = deps.dataDir || defaultDataDir();
-  const dbMode = usesPostgres(deps);
+async function runRefresh(job: CollectionJob, deps: CollectionDependencies, leaseToken: string): Promise<void> {
   const heartbeat = startLeaseHeartbeat(job.id, leaseToken);
-  const persist = async () => { heartbeat.assert(); await saveJob(job, deps, leaseToken); };
+  const persist = async () => { heartbeat.assert(); await saveJob(job, leaseToken); };
   const ensureLease = async () => {
     heartbeat.assert();
-    if (leaseToken && !await renewDbLease(job.id, leaseToken)) throw new Error("수집 작업 잠금을 잃었습니다.");
+    if (!await renewDbLease(job.id, leaseToken)) throw new Error("수집 작업 잠금을 잃었습니다.");
   };
   const scrape = deps.scrape || scrapeDetailPage;
   try {
     for (const result of job.results || []) {
-      const record = dbMode ? await getStoredNotice(result.key) :
-        await readJson<StoredNotice>(join(dir, "notices", `${result.key}.json`));
+      const record = await getStoredNotice(result.key);
       if (!record) throw new Error(`저장된 공고를 찾을 수 없습니다: ${result.key}`);
       const [number, order] = result.key.split("--");
       const found = await findMissingApi(result.key, record, job, deps.fetcher);
       if (found) {
         record.api = found;
         record.normalized = normalizeNotice(record.api, record.detail, { number, order });
-        if (dbMode) { await ensureLease(); await saveStoredNotice(result.key, record); }
-        else await writeJsonAtomic(join(dir, "notices", `${result.key}.json`), record);
+        await ensureLease();
+        await saveStoredNotice(result.key, record);
       }
       let scraped: ScrapeResult;
       try {
@@ -360,7 +293,6 @@ async function runRefresh(job: CollectionJob, deps: CollectionDependencies, leas
         await persist();
         continue;
       }
-      if (!dbMode) await saveIndependentDetails(dir, structured);
       const updated: StoredNotice = { ...record, key: result.key, detail: structured.detail,
         orderPlanNumbers: structured.orderPlanNumbers, preSpecificationNumbers: structured.preSpecificationNumbers,
         otherDetailNumbers: structured.otherDetailNumbers,
@@ -368,8 +300,8 @@ async function runRefresh(job: CollectionJob, deps: CollectionDependencies, leas
         independentTriggers: structured.independentTriggers,
         detailError: null };
       updated.normalized = normalizeNotice(updated.api, updated.detail, { number, order });
-      if (dbMode) { await ensureLease(); await saveStoredNotice(result.key, updated, structured); }
-      else await writeJsonAtomic(join(dir, "notices", `${result.key}.json`), updated);
+      await ensureLease();
+      await saveStoredNotice(result.key, updated, structured);
       result.status = "succeeded";
       job.detailSucceeded++;
       job.errors.push(...structured.warnings);
@@ -385,7 +317,7 @@ async function runRefresh(job: CollectionJob, deps: CollectionDependencies, leas
     try { await persist(); }
     finally {
       await heartbeat.stop();
-      try { if (leaseToken) await releaseDbLease(job.id, leaseToken); }
+      try { await releaseDbLease(job.id, leaseToken); }
       finally { jobRuntime.__g2bActiveJobId = null; }
     }
   }
@@ -393,7 +325,7 @@ async function runRefresh(job: CollectionJob, deps: CollectionDependencies, leas
 
 /** 저장된 공고 키를 검증한 뒤 선택 재수집 작업을 시작합니다. */
 export async function startRefresh(keys: string[], deps: CollectionDependencies = {}): Promise<CollectionJob> {
-  if (usesPostgres(deps)) getPool();
+  getPool();
   if (jobRuntime.__g2bActiveJobId) throw new Error("이미 수집 작업이 진행 중입니다.");
   if (!Array.isArray(keys) || keys.length === 0) throw new Error("재수집할 공고를 선택하세요.");
   const unique = [...new Set(keys)];
@@ -401,7 +333,7 @@ export async function startRefresh(keys: string[], deps: CollectionDependencies 
     if (typeof key !== "string" || !/^[A-Za-z0-9_.%~-]+--[A-Za-z0-9_.%~-]+$/.test(key) || key.includes("..")) {
       throw new Error(`잘못된 공고 키: ${key}`);
     }
-    if (!await getNoticeRecord(key, deps.storage === "postgres" ? undefined : deps.dataDir))
+    if (!await getNoticeRecord(key))
       throw new Error(`저장된 공고를 찾을 수 없습니다: ${key}`);
   }
   if (jobRuntime.__g2bActiveJobId) throw new Error("이미 수집 작업이 진행 중입니다.");
@@ -411,8 +343,7 @@ export async function startRefresh(keys: string[], deps: CollectionDependencies 
     detailSucceeded: 0, detailFailed: 0, errors: [], startedAt: new Date().toISOString() };
   jobRuntime.__g2bActiveJobId = job.id;
   try {
-    const leaseToken = usesPostgres(deps) ? await acquireDbJob(job) : undefined;
-    if (!leaseToken) await saveJob(job, deps);
+    const leaseToken = await acquireDbJob(job);
     void runRefresh(job, deps, leaseToken).catch((error) => console.error("재수집 작업 상태 저장 실패:", error));
     return job;
   } catch (error) {
@@ -421,35 +352,13 @@ export async function startRefresh(keys: string[], deps: CollectionDependencies 
   }
 }
 
-/** 운영 작업은 DB에서, 지정한 테스트 디렉터리의 작업은 JSON에서 읽습니다. */
-export async function getCollectionJob(jobId: string, dataDir?: string): Promise<CollectionJob | null> {
+/** 작업 ID로 DB에 저장된 수집 상태를 조회합니다. */
+export async function getCollectionJob(jobId: string): Promise<CollectionJob | null> {
   if (!/^[a-f0-9-]{36}$/.test(jobId)) return null;
-  if (dataDir) {
-    try {
-      const job = await readJson<CollectionJob>(jobPath(dataDir, jobId));
-      if (job.status === "running" && jobRuntime.__g2bActiveJobId !== jobId) {
-        job.status = "interrupted";
-        job.phase = "done";
-        await saveJob(job, { dataDir, storage: "json" });
-      }
-      return job;
-    } catch {
-      if (!process.env.DATABASE_URL) return null;
-    }
-  }
   return getDbJob(jobId);
 }
 
-/** 최신 수집 작업을 DB에서 반환하고 파일 기반 테스트에서는 JSON을 사용합니다. */
-export async function getLatestCollectionJob(dataDir?: string): Promise<CollectionJob | null> {
-  if (!dataDir) return getLatestDbJob();
-  if (jobRuntime.__g2bActiveJobId) return getCollectionJob(jobRuntime.__g2bActiveJobId, dataDir);
-  let files: string[];
-  try { files = await readdir(join(dataDir, "jobs")); }
-  catch { return process.env.DATABASE_URL ? getLatestDbJob() : null; }
-  const jobs = await Promise.all(files.filter((file) => file.endsWith(".json"))
-    .map((file) => getCollectionJob(file.slice(0, -5), dataDir)));
-  const latest = jobs.filter((job): job is CollectionJob => job !== null)
-    .sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0];
-  return latest || (process.env.DATABASE_URL ? getLatestDbJob() : null);
+/** 가장 최근 수집 작업 상태를 DB에서 조회합니다. */
+export async function getLatestCollectionJob(): Promise<CollectionJob | null> {
+  return getLatestDbJob();
 }
