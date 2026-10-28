@@ -104,9 +104,11 @@ it("상세 실패는 전체 순회 뒤 한 번, 다음 작업에서 한 번 재�
   const first = await runIncrementalCollection(options);
   expect(calls).toEqual(["R26BK1", "R26BK2", "R26BK1"]);
   expect(first).toMatchObject({ status: "completed", detailSucceeded: 1, detailFailed: 1 });
+  expect(first.diagnostics?.events.filter((event) => event.stage === "detail" && event.severity === "failure")).toHaveLength(2);
   expect(memory.attempts.get("R26BK1--000")).toMatchObject({ attempts: 2, status: "failed" });
   const second = await runIncrementalCollection(options);
   expect(second).toMatchObject({ status: "completed", detailSucceeded: 1, detailFailed: 0 });
+  expect(second.diagnostics?.events).toContainEqual(expect.objectContaining({ severity: "retry", stage: "detail", outcome: "recovered" }));
   expect(memory.attempts.get("R26BK1--000")).toMatchObject({ attempts: 3, status: "succeeded" });
   expect(calls).toEqual(["R26BK1", "R26BK2", "R26BK1", "R26BK1"]);
   delete process.env.G2B_SERVICE_KEY;

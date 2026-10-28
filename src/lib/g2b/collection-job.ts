@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { fetchNoticeByKey, prepareServiceNotices } from "./api-client";
+import { ApiPageError, fetchNoticeByKey, prepareServiceNotices } from "./api-client";
+import { addDiagnostic, redactDiagnostic, type DiagnosticState } from "./collection-diagnostics";
 import { parsePostedDateRange } from "./date-range";
 import { scrapeDetailPage, serviceDetailUrl, type ScrapeResult } from "./detail-page";
 import { noticeKey, noticeKeyFromParts } from "./identity";
@@ -13,7 +14,7 @@ import { getPool, getStoredNotice, saveNoticeRelation, saveStoredNotice } from "
 import { acquireDbJob, getDbJob, getLatestDbJob, releaseDbLease, renewDbLease, saveDbJob } from "./collection-job-store";
 import { shouldReplacePaginatedDetail } from "./pagination-coverage";
 
-export type CollectionJob = {
+export type CollectionJob = DiagnosticState & {
   id: string;
   mode?: "collection" | "refresh" | "incremental";
   status: "running" | "completed" | "failed" | "interrupted";
@@ -74,6 +75,7 @@ async function findMissingApi(key: string, record: StoredNotice, job: Collection
   try { return await fetchNoticeByKey(key, fetcher); }
   catch (error) {
     job.errors.push(`${key}: API 보완 조회 실패: ${error instanceof Error ? error.message : String(error)}`);
+    addDiagnostic(job, { severity: "warning", stage: "api", operation: "fetch-notice-by-key", target: { key }, error });
     return null;
   }
 }
@@ -81,10 +83,12 @@ async function findMissingApi(key: string, record: StoredNotice, job: Collection
 /** 날짜 범위 API 조회와 상세 수집을 순서대로 실행하고 작업 상태를 기록합니다. */
 async function runCollection(job: CollectionJob, deps: CollectionDependencies, leaseToken: string): Promise<void> {
   const heartbeat = startLeaseHeartbeat(job.id, leaseToken);
-  const persist = async () => { heartbeat.assert(); await saveJob(job, leaseToken); };
+  const persist = async () => { try { heartbeat.assert(); await saveJob(job, leaseToken); }
+    catch (error) { addDiagnostic(job, { severity: "failure", stage: "database", operation: "save-job", error }); throw error; } };
   const ensureLease = async () => {
-    heartbeat.assert();
-    if (!await renewDbLease(job.id, leaseToken)) throw new Error("수집 작업 잠금을 잃었습니다.");
+    try { heartbeat.assert();
+      if (!await renewDbLease(job.id, leaseToken)) throw new Error("수집 작업 잠금을 잃었습니다."); }
+    catch (error) { addDiagnostic(job, { severity: "failure", stage: "lease", operation: "renew-lease", error }); throw error; }
   };
   const scrape = deps.scrape || scrapeDetailPage;
   const seenApi = new Set<string>();
@@ -102,7 +106,8 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies, l
     record.relatedNoticeKeys = [...new Set(record.relatedNoticeKeys || [])];
     record.normalized = normalizeNotice(record.api, record.detail, identity);
     await ensureLease();
-    await saveStoredNotice(key, record, structured);
+    try { await saveStoredNotice(key, record, structured); }
+    catch (error) { addDiagnostic(job, { severity: "failure", stage: "database", operation: "save-notice", target: { key }, error }); throw error; }
   };
   /** 기존 공고의 API와 관계를 보존하면서 필요한 저장 레코드를 확보합니다. */
   const ensureRecord = async (key: string, api: ApiNotice | null = null): Promise<StoredNotice> => {
@@ -140,20 +145,26 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies, l
     let result: ScrapeResult;
     try { result = await scrape(serviceDetailUrl(identity.number, identity.order)); }
     catch (error) {
-      record.detailError = error instanceof Error ? error.message : "상세 수집 오류";
+      record.detailError = redactDiagnostic(error instanceof Error ? error.message : "상세 수집 오류");
       noticeResult.status = "failed";
       noticeResult.error = record.detailError;
       job.detailFailed++;
       job.errors.push(`${key}: ${record.detailError}`);
+      addDiagnostic(job, { severity: "failure", stage: "detail", operation: "scrape-detail", target: { key }, error });
       await saveRecord(key, record);
       await persist();
       return [];
     }
     const structured = structureNoticeDetail(key, result.detail);
+    for (const warning of result.warnings || [])
+      addDiagnostic(job, { severity: "warning", stage: warning.stage, operation: warning.operation, target: { key }, error: warning.message });
+    for (const warning of result.detail.modalDiscovery?.failures || [])
+      addDiagnostic(job, { severity: "warning", stage: "modal", operation: "collect-modal", target: { key }, error: warning });
     if (record.detail && !shouldReplacePaginatedDetail(record.detail, structured.detail)) {
       noticeResult.status = "failed";
       noticeResult.error = "불완전한 재수집 결과를 저장하지 않아 기존 상세를 유지했습니다.";
       job.errors.push(`${key}: ${noticeResult.error}`);
+      addDiagnostic(job, { severity: "warning", stage: "transform", operation: "preserve-existing-detail", target: { key }, error: noticeResult.error });
       job.detailFailed++;
       await persist();
       return result.relatedNoticeKeys;
@@ -167,6 +178,8 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies, l
     record.detailError = null;
     await saveRecord(key, record, structured);
     job.errors.push(...structured.warnings);
+    for (const warning of structured.warnings)
+      addDiagnostic(job, { severity: "warning", stage: "transform", operation: "structure-detail", target: { key }, error: warning });
     noticeResult.status = "succeeded";
     job.detailSucceeded++;
     await persist();
@@ -180,11 +193,13 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies, l
         await addRelation(source, related);
         if (!queued.has(related)) {
           if (queued.size < 200) { queued.add(related); queue.push(related); }
-          else job.errors.push(`${related}: 관련 공고 탐색 한도(200건)로 상세 수집 보류`);
+          else { job.errors.push(`${related}: 관련 공고 탐색 한도(200건)로 상세 수집 보류`);
+            addDiagnostic(job, { severity: "warning", stage: "detail", operation: "related-notice-limit", target: { key: related }, error: "관련 공고 탐색 한도(200건)" }); }
         }
       } catch (error) {
         if (error instanceof Error && !error.message.startsWith("잘못된 공고 키")) throw error;
         job.errors.push(`${source} → ${related}: ${error instanceof Error ? error.message : String(error)}`);
+        addDiagnostic(job, { severity: "warning", stage: "detail", operation: "related-notice-key", target: { key: source }, error });
       }
     }
   };
@@ -206,7 +221,8 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies, l
         job.apiProcessed = (job.apiProcessed || 0) + 1;
         let key: string;
         try { key = noticeKey(item); }
-        catch (error) { job.errors.push(error instanceof Error ? error.message : "공고 식별 오류"); continue; }
+        catch (error) { job.errors.push(error instanceof Error ? error.message : "공고 식별 오류");
+          addDiagnostic(job, { severity: "warning", stage: "transform", operation: "notice-key", error }); continue; }
         if (seenApi.has(key)) continue;
         seenApi.add(key);
         job.apiCount++;
@@ -219,6 +235,9 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies, l
   } catch (error) {
     job.status = "failed";
     job.errors.push(error instanceof Error ? error.message : "수집 오류");
+    addDiagnostic(job, { severity: "failure", stage: error instanceof ApiPageError ? "api" : job.phase === "detail" ? "detail" : "collection",
+      operation: error instanceof ApiPageError ? "fetch-page" : "run-collection",
+      target: error instanceof ApiPageError ? { date: error.date, pageNo: error.pageNo } : undefined, error });
   } finally {
     job.phase = "done";
     job.finishedAt = new Date().toISOString();
@@ -256,10 +275,12 @@ export async function startCollection(range: PostedDateRange, deps: CollectionDe
 /** 선택한 공고의 상세만 다시 수집하며 성공한 결과만 교체합니다. */
 async function runRefresh(job: CollectionJob, deps: CollectionDependencies, leaseToken: string): Promise<void> {
   const heartbeat = startLeaseHeartbeat(job.id, leaseToken);
-  const persist = async () => { heartbeat.assert(); await saveJob(job, leaseToken); };
+  const persist = async () => { try { heartbeat.assert(); await saveJob(job, leaseToken); }
+    catch (error) { addDiagnostic(job, { severity: "failure", stage: "database", operation: "save-job", error }); throw error; } };
   const ensureLease = async () => {
-    heartbeat.assert();
-    if (!await renewDbLease(job.id, leaseToken)) throw new Error("수집 작업 잠금을 잃었습니다.");
+    try { heartbeat.assert();
+      if (!await renewDbLease(job.id, leaseToken)) throw new Error("수집 작업 잠금을 잃었습니다."); }
+    catch (error) { addDiagnostic(job, { severity: "failure", stage: "lease", operation: "renew-lease", error }); throw error; }
   };
   const scrape = deps.scrape || scrapeDetailPage;
   try {
@@ -279,17 +300,23 @@ async function runRefresh(job: CollectionJob, deps: CollectionDependencies, leas
         scraped = await scrape(serviceDetailUrl(number, order));
       } catch (error) {
         result.status = "failed";
-        result.error = error instanceof Error ? error.message : "상세 수집 오류";
+        result.error = redactDiagnostic(error instanceof Error ? error.message : "상세 수집 오류");
         job.detailFailed++;
         job.errors.push(`${result.key}: ${result.error}`);
+        addDiagnostic(job, { severity: "failure", stage: "detail", operation: "scrape-detail", target: { key: result.key }, error });
         await persist();
         continue;
       }
       const structured = structureNoticeDetail(result.key, scraped.detail);
+      for (const warning of scraped.warnings || [])
+        addDiagnostic(job, { severity: "warning", stage: warning.stage, operation: warning.operation, target: { key: result.key }, error: warning.message });
+      for (const warning of scraped.detail.modalDiscovery?.failures || [])
+        addDiagnostic(job, { severity: "warning", stage: "modal", operation: "collect-modal", target: { key: result.key }, error: warning });
       if (record.detail && !shouldReplacePaginatedDetail(record.detail, structured.detail)) {
         result.status = "succeeded";
         job.detailSucceeded++;
         job.errors.push(`${result.key}: 불완전한 재수집 결과를 저장하지 않아 기존 상세를 유지했습니다.`);
+        addDiagnostic(job, { severity: "warning", stage: "transform", operation: "preserve-existing-detail", target: { key: result.key }, error: "불완전한 재수집 결과" });
         await persist();
         continue;
       }
@@ -305,12 +332,15 @@ async function runRefresh(job: CollectionJob, deps: CollectionDependencies, leas
       result.status = "succeeded";
       job.detailSucceeded++;
       job.errors.push(...structured.warnings);
+      for (const warning of structured.warnings)
+        addDiagnostic(job, { severity: "warning", stage: "transform", operation: "structure-detail", target: { key: result.key }, error: warning });
       await persist();
     }
     job.status = "completed";
   } catch (error) {
     job.status = "failed";
     job.errors.push(error instanceof Error ? error.message : "재수집 오류");
+    addDiagnostic(job, { severity: "failure", stage: "collection", operation: "run-refresh", error });
   } finally {
     job.phase = "done";
     job.finishedAt = new Date().toISOString();

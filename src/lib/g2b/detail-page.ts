@@ -119,22 +119,29 @@ export function extractDetailPage(html: string, pageUrl: string, fileMetadata: A
   };
 }
 
-export type ScrapeResult = { detail: ScrapedDetail; relatedNoticeKeys: string[] };
+export type ScrapeResult = { detail: ScrapedDetail; relatedNoticeKeys: string[];
+  warnings?: { stage: "attachment" | "detail"; operation: string; message: string }[] };
 
 export async function scrapeDetailPage(url: string): Promise<ScrapeResult> {
   assertG2bUrl(url);
   const browser = await chromium.launch({ channel: "chrome", executablePath: process.env.G2B_CHROME_PATH || undefined, headless: true });
   try {
     const page = await browser.newPage({ locale: "ko-KR", acceptDownloads: false });
+    const warnings: NonNullable<ScrapeResult["warnings"]> = [];
     const responses: Promise<AttachmentMetadata[]>[] = [];
     page.on("response", (response) => {
       if (!response.url().includes("/selectUntyAtchFileList.do")) return;
-      responses.push(response.json().then((body: { dlUntyAtchFileL?: AttachmentMetadata[] }) => body.dlUntyAtchFileL || []).catch(() => []));
+      responses.push(response.json().then((body: { dlUntyAtchFileL?: AttachmentMetadata[] }) => body.dlUntyAtchFileL || []).catch((error) => {
+        warnings.push({ stage: "attachment", operation: "read-attachment-metadata", message: error instanceof Error ? error.message : String(error) });
+        return [];
+      }));
     });
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45_000 });
     await page.locator('td[data-title="공고명"]').first().waitFor({ timeout: 45_000 });
     await page.locator('table[id$="_grdFile_body_table"]').first().waitFor({ timeout: 20_000 });
-    await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => undefined);
+    await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch((error) => {
+      warnings.push({ stage: "detail", operation: "wait-network-idle", message: error instanceof Error ? error.message : String(error) });
+    });
     const metadata = (await Promise.all(responses)).flat();
     const clickDownloads = await collectClickDownloads(page);
     const html = await page.evaluate(() => {
@@ -164,6 +171,6 @@ export async function scrapeDetailPage(url: string): Promise<ScrapeResult> {
       detail.modalDiscovery = { candidates: 0, attempted: 0, captured: 0, skipped: 0,
         failures: [error instanceof Error ? error.message : String(error)] };
     }
-    return { detail, relatedNoticeKeys };
+    return { detail, relatedNoticeKeys, warnings };
   } finally { await browser.close(); }
 }
