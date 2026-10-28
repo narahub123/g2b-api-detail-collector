@@ -1,11 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { FormAccordion } from "./FormAccordion";
 import { useRouter } from "next/navigation";
 import type { CollectionJob } from "@/lib/g2b/collection-job";
+import { CollectionJobProgress } from "./CollectionJobProgress";
 
-/** 최신 수집 작업을 복원하고 목표 대비 진행 상태를 관리자에게 보여줍니다. */
-export function CollectionForm({ fetcher = fetch }: { fetcher?: typeof fetch }) {
+/** 수동 수집을 실행하고 최신 수집 작업 상태를 조회합니다. */
+export function CollectionForm({ fetcher = fetch, onJobChange, showProgress = true }: {
+  fetcher?: typeof fetch;
+  onJobChange?: (job: CollectionJob | null) => void;
+  showProgress?: boolean;
+}) {
   const router = useRouter();
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
@@ -21,6 +27,8 @@ export function CollectionForm({ fetcher = fetch }: { fetcher?: typeof fetch }) 
         if (saved?.id) { setJob(saved); setBusy(saved.status === "running"); }
       }).catch(() => undefined);
   }, [fetcher]);
+
+  useEffect(() => { onJobChange?.(job); }, [job, onJobChange]);
 
   useEffect(() => {
     if (!job || job.status !== "running") return;
@@ -57,34 +65,17 @@ export function CollectionForm({ fetcher = fetch }: { fetcher?: typeof fetch }) 
     }
   }
 
-  return <section className="collect-panel" aria-labelledby="collect-heading">
-    <div className="panel-copy">
-      <span className="eyebrow">DATA COLLECTION</span>
-      <h2 id="collect-heading">공고 수집</h2>
-      <p>공고 게시일 범위를 지정하면 용역 공고와 공개 상세 정보를 DB에 저장합니다.</p>
-    </div>
-    <form onSubmit={submit} className="collect-form">
-      <label>시작일<input type="date" value={start} onChange={(event) => setStart(event.target.value)} /></label>
-      <span className="date-separator" aria-hidden="true">—</span>
-      <label>종료일<input type="date" value={end} onChange={(event) => setEnd(event.target.value)} /></label>
-      <button type="submit" disabled={busy}>{busy ? "수집 중…" : "공고 수집 시작"}</button>
-    </form>
-    {error && <p role="alert" className="error-message">{error}</p>}
-    {job && job.mode !== "refresh" && <div className="job-progress" aria-live="polite">
-      <strong>{job.status === "running" ? "수집 진행 중" : job.status === "completed" ? "수집 완료" :
-        job.status === "failed" ? "수집 실패" : "수집 중단"}</strong>
-      <span>{job.mode === "incremental" ? "자동 수집" : "수동 수집"}</span>
-      <span>{job.apiTotal === undefined
-        ? job.status === "running" ? "API 목표 확인 중" : job.apiProcessed !== undefined ? "API 목표 확인 실패" : `API ${job.apiCount}건`
-        : `API ${job.apiProcessed ?? 0}/${job.apiTotal}건`}</span>
-      {job.apiTotal !== undefined && <span>고유 공고 {job.apiCount}건</span>}
-      {job.detailTotal !== undefined && <span>상세 {job.detailSucceeded + job.detailFailed}/{job.detailTotal}건</span>}
-      <span>상세 성공 {job.detailSucceeded}건</span><span>상세 실패 {job.detailFailed}건</span>
-      {job.errors.length > 0 && <small>{job.errors.at(-1)}</small>}
-      {job.results && job.results.length > 0 && <details className="job-results"><summary>공고별 결과 {job.results.length}건</summary>
-        <ul>{job.results.map((result) => <li key={result.key}>{result.key}: {result.status === "succeeded" ? "수집 완료" :
-          result.status === "failed" ? "수집 실패" : "수집 전"}</li>)}</ul>
-      </details>}
-    </div>}
-  </section>;
+  return <FormAccordion title="수동 공고 수집">
+      <p style={{ color: "#637784", fontSize: 14, lineHeight: 1.7, margin: "10px 0 20px" }}>
+        공고 게시일 범위를 지정하면 용역 공고와 공개 상세 정보를 DB에 저장합니다.
+      </p>
+      <form onSubmit={submit} className="collect-form">
+        <label>시작일<input type="date" value={start} onChange={(event) => setStart(event.target.value)} /></label>
+        <span className="date-separator" aria-hidden="true">—</span>
+        <label>종료일<input type="date" value={end} onChange={(event) => setEnd(event.target.value)} /></label>
+        <button type="submit" disabled={busy}>{busy ? "수집 중…" : "공고 수집 시작"}</button>
+      </form>
+      {error && <p role="alert" className="error-message">{error}</p>}
+      {showProgress && <CollectionJobProgress job={job} />}
+  </FormAccordion>;
 }

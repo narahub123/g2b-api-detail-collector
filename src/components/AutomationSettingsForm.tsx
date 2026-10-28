@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { FormAccordion } from "./FormAccordion";
 import type { AutomationSettings } from "@/lib/g2b/automation-schedule";
 
 type DisplaySettings = AutomationSettings & { schedulerDelayed?: boolean };
@@ -60,40 +61,40 @@ export function AutomationSettingsForm({ fetcher = fetch }: { fetcher?: typeof f
     } finally { setBusy(false); }
   }
 
-  return <section className="collect-panel automation-panel" aria-labelledby="automation-heading">
-    <div className="panel-copy"><span className="eyebrow">AUTOMATION</span>
-      <h2 id="automation-heading">자동 수집 설정</h2>
-      <p>예약 시각은 서울 시각을 사용합니다. 진행 중인 작업은 설정을 꺼도 완료될 때까지 계속됩니다.</p></div>
-    <p className="automation-summary">공개 저장소는 60일간 활동이 없으면 GitHub Actions 예약이 중지될 수 있습니다. <a
-      href="https://github.com/narahub123/g2b-api-detail-collector/actions/workflows/collect.yml">예약 실행 기록 확인</a></p>
-    {settings?.schedulerDelayed && <p role="alert" className="error-message">예정 시각 이후 15분이 지나도록 예약 실행 기록이 없습니다. GitHub Actions 상태를 확인하세요.</p>}
-    {settings && <p className="automation-summary">현재 {settings.enabled ? "활성화" : "비활성화"} · 조회 시작 {seoulText(settings.startAt)}
-      {settings.lastDueAt && <> · 마지막 예약 {seoulText(settings.lastDueAt)}</>}</p>}
-    {settings && <form className="automation-form" onSubmit={submit}>
-      <label className="automation-switch"><input type="checkbox" checked={enabled}
-        onChange={(event) => setEnabled(event.target.checked)} />자동 수집 사용</label>
-      {enabled && !settings.enabled && <label>조회 시작 (서울 시각)
-        <input type="datetime-local" value={startAt} required onChange={(event) => setStartAt(event.target.value)} /></label>}
-      <label>실행 방식<select value={schedule} onChange={(event) => {
-        const next = event.target.value as "interval" | "times";
-        setSchedule(next);
-        if (next === "times" && times.length === 0) setTimes(["09:00"]);
-      }}><option value="interval">주기</option><option value="times">지정 시각</option></select></label>
-      {schedule === "interval" ? <label>수집 주기<select value={intervalMinutes}
-        onChange={(event) => setIntervalMinutes(Number(event.target.value) as 30 | 60 | 120 | 180)}>
-        <option value={30}>30분</option><option value={60}>1시간</option><option value={120}>2시간</option><option value={180}>3시간</option>
-      </select></label> : <div className="automation-times"><span>하루 예약 시각</span>
-        {times.map((time, index) => <div className="automation-time-row" key={index}>
-          <label>예약 시각 {index + 1}<input type="time" value={time} required
-            onChange={(event) => setTimes((current) => current.map((item, position) => position === index ? event.target.value : item))} /></label>
-          <button type="button" onClick={() => setTimes((current) => current.filter((_, position) => position !== index))}
-            disabled={times.length === 1}>삭제</button>
-        </div>)}
-        <button type="button" onClick={() => setTimes((current) => [...current, "09:00"])} disabled={times.length >= 24}>시각 추가</button>
-      </div>}
-      <button className="automation-save" type="submit" disabled={busy}>{busy ? "저장 중…" : "설정 저장"}</button>
-    </form>}
-    {error && <p role="alert" className="error-message">{error}</p>}
-    {message && <p role="status" className="automation-success">{message}</p>}
-  </section>;
+  return <FormAccordion title="자동 수집 설정">
+      <p style={{ color: "#637784", fontSize: 14, lineHeight: 1.7, margin: "10px 0 20px" }}>
+        예약 시각은 서울 시각을 사용합니다. 진행 중인 작업은 설정을 꺼도 완료될 때까지 계속됩니다.
+      </p>
+      <p className="automation-summary">공개 저장소는 60일간 활동이 없으면 GitHub Actions 예약이 중지될 수 있습니다. <a
+        href="https://github.com/narahub123/g2b-api-detail-collector/actions/workflows/collect.yml">예약 실행 기록 확인</a></p>
+      {settings?.schedulerDelayed && <p role="alert" className="error-message">예정 시각 이후 15분이 지나도록 예약 실행 기록이 없습니다. GitHub Actions 상태를 확인하세요.</p>}
+      {settings && <p className="automation-summary">현재 {settings.enabled ? "활성화" : "비활성화"} · 조회 시작 {seoulText(settings.startAt)}
+        {settings.lastDueAt && <> · 마지막 예약 {seoulText(settings.lastDueAt)}</>}</p>}
+      {settings && <form className="automation-form" onSubmit={submit}>
+        <label className="automation-switch"><input type="checkbox" checked={enabled}
+          onChange={(event) => setEnabled(event.target.checked)} />자동 수집 사용</label>
+        {enabled && !settings.enabled && <label>조회 시작 (서울 시각)
+          <input type="datetime-local" value={startAt} required onChange={(event) => setStartAt(event.target.value)} /></label>}
+        <label>실행 방식<select value={schedule} onChange={(event) => {
+          const next = event.target.value as "interval" | "times";
+          setSchedule(next);
+          if (next === "times" && times.length === 0) setTimes(["09:00"]);
+        }}><option value="interval">주기</option><option value="times">지정 시각</option></select></label>
+        {schedule === "interval" ? <label>수집 주기<select value={intervalMinutes}
+          onChange={(event) => setIntervalMinutes(Number(event.target.value) as 30 | 60 | 120 | 180)}>
+          <option value={30}>30분</option><option value={60}>1시간</option><option value={120}>2시간</option><option value={180}>3시간</option>
+        </select></label> : <div className="automation-times"><span>하루 예약 시각</span>
+          {times.map((time, index) => <div className="automation-time-row" key={index}>
+            <label>예약 시각 {index + 1}<input type="time" value={time} required
+              onChange={(event) => setTimes((current) => current.map((item, position) => position === index ? event.target.value : item))} /></label>
+            <button type="button" onClick={() => setTimes((current) => current.filter((_, position) => position !== index))}
+              disabled={times.length === 1}>삭제</button>
+          </div>)}
+          <button type="button" onClick={() => setTimes((current) => [...current, "09:00"])} disabled={times.length >= 24}>시각 추가</button>
+        </div>}
+        <button className="automation-save" type="submit" disabled={busy}>{busy ? "저장 중…" : "설정 저장"}</button>
+      </form>}
+      {error && <p role="alert" className="error-message">{error}</p>}
+      {message && <p role="status" className="automation-success">{message}</p>}
+  </FormAccordion>;
 }

@@ -10,6 +10,7 @@ import { fieldText } from "@/lib/g2b/field-value";
 import { contentSections } from "@/lib/g2b/content-sections";
 import { openingTargetForCell, splitNavigationValue, type NavigationTarget } from "@/lib/g2b/notice-navigation";
 import { useNoticeNavigation } from "./NoticeNavigationContext";
+import { FormAccordion } from "./FormAccordion";
 
 /** 화면 문자열과 수집된 첨부파일명을 같은 기준으로 비교합니다. */
 function fileNameKey(value: string): string {
@@ -151,15 +152,12 @@ export function NoticeUserView({ detail }: { detail: ScrapedDetail | null }) {
   // 표시 가능한 값이 없는 섹션은 빈 카드로 남기지 않습니다.
   const sections = (detail.sections || []).filter(hasVisibleSectionContent);
   if (!sections.length) return <p className="muted user-empty">표시할 상세 정보가 없습니다.</p>;
-  return <div className="user-sections">{sections.map((section, index) => <details
-    className="user-section" key={`${section.title}-${index}`} open>
-    <summary><span>{section.title}</span><span className="user-section-toggle" aria-hidden="true">⌄</span></summary>
-    <div className="user-section-content">
+  return <div className="user-sections">{sections.map((section, index) => <FormAccordion
+    title={section.title} key={`${section.title}-${index}`} defaultOpen>
       <UserFields fields={section.fields} links={links} />
       {section.tables.map((table, tableIndex) => <UserTable table={table}
         label={`${section.title} 표 ${tableIndex + 1}`} links={links} section={section.title} key={tableIndex} />)}
       {section.details?.filter(hasVisibleDetailContent).map((item, detailIndex) =>
         <UserLinkedDetail item={item} sectionTitle={section.title} key={detailIndex} />)}
-    </div>
-  </details>)}</div>;
+  </FormAccordion>)}</div>;
 }

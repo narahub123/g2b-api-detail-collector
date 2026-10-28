@@ -12,7 +12,7 @@ it("비활성 상태에서 시작 시각과 하루 여러 예약 시각을 받�
     new Response(JSON.stringify(init?.method === "PUT" ? { ...saved, enabled: true, schedule: "times",
       times: ["09:00", "18:30"] } : saved), { status: 200 }));
   render(<AutomationSettingsForm fetcher={fetcher as typeof fetch} />);
-  expect(await screen.findByRole("heading", { name: "자동 수집 설정" })).toBeTruthy();
+  expect(await screen.findByText("자동 수집 설정")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("checkbox", { name: "자동 수집 사용" }));
   fireEvent.change(screen.getByLabelText("조회 시작 (서울 시각)"), { target: { value: "2026-10-27T09:00" } });
   fireEvent.change(screen.getByLabelText("실행 방식"), { target: { value: "times" } });
