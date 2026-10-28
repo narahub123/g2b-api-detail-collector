@@ -102,6 +102,10 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
         await ensureLease();
         await store.saveAttempt({ key, attempts: Math.min(3, (previous?.attempts || 0) +
           (pendingInThisRun ? 1 : 0)) || 1, status: "succeeded", error: null });
+        // 기존 상세와 성공 시도 기록이 모두 확인된 뒤에만 복구를 확정합니다.
+        if (previous?.status === "failed") addDiagnostic(job, { severity: "retry", stage: "detail",
+          operation: "scrape-detail", target: { key }, attempt: (previous.attempts || 0) + (pendingInThisRun ? 1 : 0),
+          outcome: "recovered", error: previous.error || "이전 상세 수집 실패 후 복구" });
         if (pendingInThisRun) {
           results.set(key, "succeeded");
           recount();
@@ -149,9 +153,6 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
       addDiagnostic(job, { severity: "warning", stage: "modal", operation: "collect-modal", target: { key }, error: warning });
     for (const warning of extracted.structured.warnings)
       addDiagnostic(job, { severity: "warning", stage: "transform", operation: "structure-detail", target: { key }, error: warning });
-    if (previous?.status === "failed" || retry)
-      addDiagnostic(job, { severity: "retry", stage: "detail", operation: "scrape-detail", target: { key },
-        attempt: (previous?.attempts || 0) + 1, outcome: "recovered", error: previous?.error || "이전 상세 수집 실패 후 복구" });
     record.detailError = null;
     record.orderPlanNumbers = extracted.structured.orderPlanNumbers;
     record.preSpecificationNumbers = extracted.structured.preSpecificationNumbers;
@@ -161,6 +162,10 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
     await ensureLease();
     await store.saveNotice(key, record, extracted.structured);
     await store.saveAttempt({ key, attempts: (previous?.attempts || 0) + 1, status: "succeeded", error: null });
+    // 상세와 시도 기록 저장이 끝난 후 복구 성공을 작업 진단에 반영합니다.
+    if (previous?.status === "failed" || retry)
+      addDiagnostic(job, { severity: "retry", stage: "detail", operation: "scrape-detail", target: { key },
+        attempt: (previous?.attempts || 0) + 1, outcome: "recovered", error: previous?.error || "이전 상세 수집 실패 후 복구" });
     results.set(key, "succeeded");
     recount();
     await persist();
