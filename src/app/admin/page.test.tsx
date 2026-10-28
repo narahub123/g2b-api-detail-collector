@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 const { listNoticePage } = vi.hoisted(() => ({ listNoticePage: vi.fn(async () => ({ notices: [], totalCount: 21, page: 2, totalPages: 3 })) }));
 vi.mock("@/lib/g2b/notices", () => ({ listNoticePage }));
-vi.mock("@/components/CollectionForm", () => ({ CollectionForm: () => <div>수집 양식</div> }));
+vi.mock("@/components/CollectionManager", () => ({ CollectionManager: () => <div>수집 양식</div> }));
 vi.mock("@/components/NoticeList", () => ({ NoticeList: () => <div>관리자 목록</div> }));
 import AdminPage from "./page";
 
