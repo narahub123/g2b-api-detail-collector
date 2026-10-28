@@ -77,12 +77,14 @@ export function NoticeList({ notices, fetcher = fetch }: { notices: NoticeListIt
       <div className="notice-topline"><label className="notice-select"><input type="checkbox" checked={selected.includes(notice.key)}
         onChange={() => toggle(notice.key)} disabled={busy} /><span className="notice-id">{notice.number} · {notice.order}차</span></label>
         <span className={notice.scrapeStatus === "succeeded" ? "status-pill" : "status-pill warning"}>
-          {notice.scrapeStatus === "succeeded" ? "상세 수집 완료" : "상세 수집 실패"}
+          {notice.scrapeStatus === "succeeded" ? "상세 수집 완료" :
+            notice.scrapeStatus === "failed" ? "상세 수집 실패" : "상세 수집 전"}
         </span></div>
       <h3><a href={`/admin/bids/${encodeURIComponent(notice.key)}`}>{notice.title || "제목 정보 없음"}</a></h3>
       <p className="agency"><span>수요기관: {notice.demandAgency || "정보 없음"}</span><br />
         <span>공고기관: {notice.noticeAgency || "정보 없음"}</span></p>
-      <a className="notice-user-link" href={`/bids/${encodeURIComponent(notice.key)}`}>사용자 화면 보기</a>
+      {notice.scrapeStatus === "succeeded" &&
+        <a className="notice-user-link" href={`/bids/${encodeURIComponent(notice.key)}`}>사용자 화면 보기</a>}
       <div className="notice-facts">
         <span><small>게시</small>{notice.postedAt || "정보 없음"}</span>
         <span><small>마감</small>{notice.deadline || "정보 없음"}</span>

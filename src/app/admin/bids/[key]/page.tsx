@@ -17,7 +17,9 @@ export default async function AdminBidPage({ params }: { params: Promise<{ key: 
   return <main className="site-shell detail-page">
     <header className="site-header"><a className="brand-link" href="/admin"><div className="brand-mark">N</div><div><strong>나라장터 용역 공고 관리</strong><span>LOCAL BID EXPLORER</span></div></a></header>
     <a href="/admin" className="back-link">← 관리자 목록으로 돌아가기</a>
-    <NoticeDetail notice={record.normalized} relatedNoticeKeys={record.relatedNoticeKeys} relatedNoticeStates={relatedNoticeStates} />
+    <NoticeDetail notice={record.normalized} relatedNoticeKeys={record.relatedNoticeKeys}
+      relatedNoticeStates={relatedNoticeStates}
+      collectionStatus={record.detail ? "succeeded" : record.detailError ? "failed" : "pending"} />
     <footer>데이터 출처: 조달청 나라장터 입찰공고정보서비스 · 상세 정보는 원문을 함께 확인하세요.</footer>
   </main>;
 }

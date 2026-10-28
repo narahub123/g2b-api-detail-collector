@@ -10,10 +10,12 @@ function Info({ label, field, wide = false, money = false }: { label: string; fi
 }
 
 /** 정규화된 공고 요약과 관리자용 확인 링크를 표시합니다. */
-export function NoticeDetail({ notice, relatedNoticeKeys = [], relatedNoticeStates = {} }: {
+export function NoticeDetail({ notice, relatedNoticeKeys = [], relatedNoticeStates = {},
+  collectionStatus = notice.scrapeStatus }: {
   notice: NormalizedNotice;
   relatedNoticeKeys?: string[];
   relatedNoticeStates?: Record<string, "failed" | "unavailable" | "succeeded">;
+  collectionStatus?: "pending" | "succeeded" | "failed";
 }) {
   return <>
     <section className="detail-hero">
@@ -24,7 +26,8 @@ export function NoticeDetail({ notice, relatedNoticeKeys = [], relatedNoticeStat
       <div className="detail-id">공고번호 {notice.number} <span>차수 {notice.order}</span></div>
     </section>
 
-    {notice.scrapeStatus === "failed" && <div className="notice-warning">상세 페이지 수집에 실패했습니다. API에서 확인된 정보만 표시합니다.</div>}
+    {collectionStatus === "pending" && <div className="notice-warning">상세 페이지 수집 전입니다.</div>}
+    {collectionStatus === "failed" && <div className="notice-warning">상세 페이지 수집에 실패했습니다. API에서 확인된 정보만 표시합니다.</div>}
 
     <section className="detail-section">
       <div className="section-heading"><span className="eyebrow">OVERVIEW</span><h2>주요 항목 요약</h2></div>
@@ -59,7 +62,8 @@ export function NoticeDetail({ notice, relatedNoticeKeys = [], relatedNoticeStat
     </section>}
 
     <div className="detail-actions">
-      <a className="source-link" href={`/bids/${encodeURIComponent(notice.key)}`}>사용자 화면 보기</a>
+      {collectionStatus === "succeeded" &&
+        <a className="source-link" href={`/bids/${encodeURIComponent(notice.key)}`}>사용자 화면 보기</a>}
       <a className="source-link" href={`/admin/bids/${encodeURIComponent(notice.key)}/compare`}>수집 정보 비교</a>
       <a className="source-link" href={notice.originalUrl} target="_blank" rel="noopener noreferrer">나라장터 원문 보기 <span aria-hidden="true">↗</span></a>
     </div>

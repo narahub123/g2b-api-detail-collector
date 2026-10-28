@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { countStoredNotices, getStoredIndependentDetail, listStoredNoticeKeys, listStoredNoticeRows, noticeSummary, saveNoticeRelation, saveStoredNotice } from "./postgres-store";
+import { countStoredNotices, getStoredIndependentDetail, listPublicNoticeKeys, listStoredNoticeKeys, listStoredNoticeRows, noticeSummary, saveNoticeRelation, saveStoredNotice } from "./postgres-store";
 
 const runtime = globalThis as typeof globalThis & { __g2bPgPool?: unknown };
 const originalUrl = process.env.DATABASE_URL;
@@ -132,6 +132,18 @@ describe("noticeSummary", () => {
     expect(count.sql.match(/WHERE (.*)/)?.[1]).toBe(page.sql.match(/WHERE (.*) ORDER BY/)?.[1]);
     expect(count.values).toEqual(["용역", "2026-10-31", "1000"]);
     expect(page.values).toEqual(["용역", "2026-10-31", "1000", 10, 10]);
+  });
+
+  it("사용자 건수·목록·관련 공고 조회에 상세 성공 조건을 적용합니다", async () => {
+    const statements = fakePool();
+    runtime.__g2bPgPool = { query: async (sql: string, values?: unknown[]) => {
+      statements.push({ sql, values }); return { rows: sql.includes("COUNT(*)") ? [{ total: "1" }] : [] };
+    } };
+    await countStoredNotices({}, "public");
+    await listStoredNoticeRows({}, { limit: 10, offset: 0 }, "public");
+    await listPublicNoticeKeys(["R26BK1--000", "R26BK2--000"]);
+    expect(statements.every(({ sql }) => sql.includes("detail IS NOT NULL"))).toBe(true);
+    expect(statements[2].values).toEqual([["R26BK1--000", "R26BK2--000"]]);
   });
 
   it("광역·기초 지역을 하나의 정규식 조건으로 건수와 목록 조회에 함께 적용합니다", async () => {

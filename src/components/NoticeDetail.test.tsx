@@ -35,6 +35,16 @@ describe("NoticeDetail", () => {
     expect(screen.queryByRole("heading", { name: "수집 데이터 비교" })).not.toBeInTheDocument();
   });
 
+  it("상세 수집 전과 실패를 관리자에게 구분해 보여주고 사용자 링크는 숨깁니다", () => {
+    const unfinished = { ...notice, scrapeStatus: "failed" as const };
+    const { rerender } = render(<NoticeDetail notice={unfinished} collectionStatus="pending" />);
+    expect(screen.getByText("상세 페이지 수집 전입니다.")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "사용자 화면 보기" })).not.toBeInTheDocument();
+    rerender(<NoticeDetail notice={unfinished} collectionStatus="failed" />);
+    expect(screen.getByText(/상세 페이지 수집에 실패했습니다/)).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "사용자 화면 보기" })).not.toBeInTheDocument();
+  });
+
   it("links only directly related notices from the current notice", () => {
     render(<NoticeDetail notice={notice} relatedNoticeKeys={["R26BK2--001", "R26BK3--000"]} />);
     const related = screen.getByRole("region", { name: "관련 공고" });

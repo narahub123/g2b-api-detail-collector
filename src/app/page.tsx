@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 export default async function Home({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const params = await searchParams;
   const { values, filters, error } = parseNoticeFilters(params);
-  const result = error ? null : await listNoticePage(filters, parseNoticePage(params.page));
+  const result = error ? null : await listNoticePage(filters, parseNoticePage(params.page), "public");
   return <main className="site-shell">
     <header className="site-header"><div className="brand-mark">N</div><div><strong>나라장터 용역 공고</strong><span>LOCAL BID EXPLORER</span></div></header>
     <section className="page-intro"><span className="eyebrow">PROCUREMENT OVERVIEW</span>

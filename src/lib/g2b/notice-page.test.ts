@@ -19,8 +19,8 @@ describe("listNoticePage", () => {
     const filters = { query: "용역", searchField: "title" as const };
     const result = await listNoticePage(filters, requested);
     expect(result).toMatchObject({ notices: [], totalCount: total, page, totalPages });
-    expect(countStoredNotices).toHaveBeenCalledWith(filters);
-    if (query) expect(listStoredNoticeRows).toHaveBeenCalledWith(filters, { limit: 10, offset: (page - 1) * 10 });
+    expect(countStoredNotices).toHaveBeenCalledWith(filters, "admin");
+    if (query) expect(listStoredNoticeRows).toHaveBeenCalledWith(filters, { limit: 10, offset: (page - 1) * 10 }, "admin");
     else expect(listStoredNoticeRows).not.toHaveBeenCalled();
   });
 
@@ -35,5 +35,26 @@ describe("listNoticePage", () => {
     expect(result.notices).toEqual([{ key: "R26BK1--000", number: "R26BK1", order: "000", title: "조사 용역",
       demandAgency: null, noticeAgency: "조달청", postedAt: "2026-10-25 09:30:00", deadline: null,
       amount: "1200", region: null, scrapeStatus: "succeeded" }]);
+  });
+
+  it("관리자 목록에서 상세 수집 전과 실패를 구분합니다", async () => {
+    countStoredNotices.mockResolvedValue(2);
+    listStoredNoticeRows.mockResolvedValueOnce([
+      { key: "R26BK1--000", notice_number: "R26BK1", notice_order: "000", title: "대기",
+        demand_agency: null, notice_agency: null, posted_at: null, deadline_at: null, amount: null,
+        region: null, has_detail: false, detail_error: null },
+      { key: "R26BK2--000", notice_number: "R26BK2", notice_order: "000", title: "실패",
+        demand_agency: null, notice_agency: null, posted_at: null, deadline_at: null, amount: null,
+        region: null, has_detail: false, detail_error: "접근 오류" }
+    ]);
+    const result = await listNoticePage({}, 1);
+    expect(result.notices.map((notice) => notice.scrapeStatus)).toEqual(["pending", "failed"]);
+  });
+
+  it("사용자 목록 조회에는 공개 조건을 건수와 페이지에 함께 적용합니다", async () => {
+    countStoredNotices.mockResolvedValue(1);
+    await listNoticePage({}, 1, "public");
+    expect(countStoredNotices).toHaveBeenCalledWith({}, "public");
+    expect(listStoredNoticeRows).toHaveBeenCalledWith({}, { limit: 10, offset: 0 }, "public");
   });
 });

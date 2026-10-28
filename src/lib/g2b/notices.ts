@@ -6,7 +6,8 @@ import { normalizeNotice, type NormalizedNotice } from "./normalize";
 import type { ModalCapture, ScrapedDetail } from "./detail-page";
 import type { ApiNotice } from "./types";
 import type { IndependentDetail } from "./structured-data";
-import { countStoredNotices, getStoredIndependentDetail, getStoredNotice, listStoredNoticeKeys, listStoredNoticeRows } from "./postgres-store";
+import { countStoredNotices, getStoredIndependentDetail, getStoredNotice, listPublicNoticeKeys as listStoredPublicNoticeKeys,
+  listStoredNoticeKeys, listStoredNoticeRows, type NoticeAudience } from "./postgres-store";
 import type { NoticeFilters } from "./notice-filters";
 
 export type StoredNotice = { key?: string; api: ApiNotice | null; detail: ScrapedDetail | null; relatedNoticeKeys?: string[]; detailError?: string | null; normalized?: NormalizedNotice;
@@ -22,26 +23,32 @@ const pageSize = 10;
 export type NoticeListItem = { key: string; number: string; order: string; title: string | null;
   demandAgency: string | null; noticeAgency: string | null; postedAt: string | null;
   deadline: string | null; amount: string | null; region: string | null;
-  scrapeStatus: "succeeded" | "failed" };
+  scrapeStatus: "pending" | "succeeded" | "failed" };
 
 /** 검색 조건에 맞는 전체 건수와 현재 페이지 공고만 DB에서 조회합니다. */
-export async function listNoticePage(filters: NoticeFilters, requestedPage: number): Promise<{
+export async function listNoticePage(filters: NoticeFilters, requestedPage: number,
+  audience: NoticeAudience = "admin"): Promise<{
   notices: NoticeListItem[]; totalCount: number; page: number; totalPages: number;
 }> {
-  const totalCount = await countStoredNotices(filters);
+  const totalCount = await countStoredNotices(filters, audience);
   const totalPages = Math.ceil(totalCount / pageSize);
   const page = totalPages ? Math.min(requestedPage, totalPages) : 1;
   if (!totalCount) return { notices: [], totalCount, page, totalPages };
 
   // 목록에는 이미 저장된 요약 컬럼만 사용해 공고별 원본·참조 조회를 피합니다.
-  const rows = await listStoredNoticeRows(filters, { limit: pageSize, offset: (page - 1) * pageSize });
+  const rows = await listStoredNoticeRows(filters, { limit: pageSize, offset: (page - 1) * pageSize }, audience);
   const notices: NoticeListItem[] = rows.map((row) => ({
     key: row.key, number: row.notice_number, order: row.notice_order, title: row.title,
     demandAgency: row.demand_agency, noticeAgency: row.notice_agency,
     postedAt: row.posted_at, deadline: row.deadline_at, amount: row.amount, region: row.region,
-    scrapeStatus: row.has_detail ? "succeeded" : "failed"
+    scrapeStatus: row.has_detail ? "succeeded" : row.detail_error ? "failed" : "pending"
   }));
   return { notices, totalCount, page, totalPages };
+}
+
+/** 사용자 상세 화면에서 연결 가능한 관련 공고 키만 골라냅니다. */
+export async function listPublicNoticeKeys(keys: string[]): Promise<string[]> {
+  return listStoredPublicNoticeKeys(keys);
 }
 
 /** 저장된 공고를 목록 화면의 게시일 역순으로 반환합니다. */

@@ -28,6 +28,12 @@ describe("NoticeList", () => {
     expect(screen.getByText("공고기관: 정보 없음")).toBeInTheDocument();
   });
 
+  it("아직 상세 수집을 시도하지 않은 공고를 수집 전으로 표시합니다", () => {
+    render(<NoticeList notices={[{ ...base, scrapeStatus: "pending" }]} />);
+    expect(screen.getByText("상세 수집 전")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "사용자 화면 보기" })).not.toBeInTheDocument();
+  });
+
   it("links different orders of one announcement to different detail pages", () => {
     render(<NoticeList notices={[base, { ...base, key: "R26BK1--001", order: "001" }]} />);
     expect(screen.getAllByRole("link", { name: "조사 용역" }).map((link) => link.getAttribute("href")))

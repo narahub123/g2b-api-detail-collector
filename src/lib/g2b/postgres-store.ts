@@ -15,7 +15,8 @@ type StoredRow = { key: string; api: StoredNotice["api"]; detail: StoredNotice["
 export type StoredNoticeListRow = { key: string; notice_number: string; notice_order: string;
   title: string | null; demand_agency: string | null; notice_agency: string | null;
   posted_at: string | null; deadline_at: string | null; amount: string | null;
-  region: string | null; has_detail: boolean };
+  region: string | null; has_detail: boolean; detail_error?: string | null };
+export type NoticeAudience = "admin" | "public";
 type ReferenceRow = { detail_key: string; category: Category; triggers: ModalCapture["trigger"][] };
 
 const runtime = globalThis as typeof globalThis & { __g2bPgPool?: pg.Pool };
@@ -188,9 +189,11 @@ function regionPattern(filters: NoticeFilters): string | undefined {
 }
 
 /** 건수와 목록 조회에 공통으로 적용할 검색·필터 SQL을 구성합니다. */
-function noticeWhere(filters: NoticeFilters): { where: string; values: string[] } {
+function noticeWhere(filters: NoticeFilters, audience: NoticeAudience = "admin"): { where: string; values: string[] } {
   const clauses: string[] = [];
   const values: string[] = [];
+  // 사용자에게는 상세 수집이 끝난 공고만 노출합니다.
+  if (audience === "public") clauses.push("detail IS NOT NULL");
   const add = (sql: (index: number) => string, value: string | undefined) => {
     if (value === undefined) return;
     values.push(value);
@@ -213,8 +216,8 @@ function noticeWhere(filters: NoticeFilters): { where: string; values: string[] 
 }
 
 /** 검색·필터 조건에 맞는 전체 공고 수를 DB에서 조회합니다. */
-export async function countStoredNotices(filters: NoticeFilters = {}): Promise<number> {
-  const { where, values } = noticeWhere(filters);
+export async function countStoredNotices(filters: NoticeFilters = {}, audience: NoticeAudience = "admin"): Promise<number> {
+  const { where, values } = noticeWhere(filters, audience);
   const result = await getPool().query<{ total: string }>(`SELECT COUNT(*) AS total FROM ${table("notices")}${where}`, values);
   return Number(result.rows[0]?.total || 0);
 }
@@ -229,16 +232,25 @@ export async function listStoredNoticeKeys(filters: NoticeFilters = {}, paginati
 }
 
 /** 검색 조건에 맞는 현재 페이지의 표시 컬럼과 상세 존재 여부를 한 번에 조회합니다. */
-export async function listStoredNoticeRows(filters: NoticeFilters, pagination: { limit: number; offset: number }): Promise<StoredNoticeListRow[]> {
-  const { where, values } = noticeWhere(filters);
+export async function listStoredNoticeRows(filters: NoticeFilters, pagination: { limit: number; offset: number },
+  audience: NoticeAudience = "admin"): Promise<StoredNoticeListRow[]> {
+  const { where, values } = noticeWhere(filters, audience);
   const params = [...values, pagination.limit, pagination.offset];
   // timestamp의 현지 시각을 문자열로 받아 서버 시간대에 따른 표시 차이를 막습니다.
   const result = await getPool().query<StoredNoticeListRow>(`SELECT key, notice_number, notice_order, title,
     demand_agency, notice_agency, to_char(posted_at, 'YYYY-MM-DD HH24:MI:SS') AS posted_at,
     to_char(deadline_at, 'YYYY-MM-DD HH24:MI:SS') AS deadline_at, amount::text AS amount,
-    region, detail IS NOT NULL AS has_detail
+    region, detail IS NOT NULL AS has_detail, detail_error
     FROM ${table("notices")}${where} ORDER BY posted_at DESC NULLS LAST, key LIMIT $${values.length + 1} OFFSET $${values.length + 2}`, params);
   return result.rows;
+}
+
+/** 관련 공고 중 상세 수집을 마쳐 사용자에게 공개할 수 있는 키만 반환합니다. */
+export async function listPublicNoticeKeys(keys: string[]): Promise<string[]> {
+  if (!keys.length) return [];
+  const result = await getPool().query<{ key: string }>(
+    `SELECT key FROM ${table("notices")} WHERE key = ANY($1::text[]) AND detail IS NOT NULL`, [keys]);
+  return result.rows.map((row) => row.key);
 }
 
 /** 번호별 독립 상세를 반환합니다. */
