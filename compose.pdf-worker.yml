@@ -2,7 +2,7 @@ services:
   pdf-worker:
     build:
       context: .
-      dockerfile: Dockerfile.pdf-poc
+      dockerfile: Dockerfile.pdf-worker
     command: ["node", "--import", "tsx", "scripts/document-worker.ts"]
     init: true
     ports:

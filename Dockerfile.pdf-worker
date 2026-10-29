@@ -7,5 +7,5 @@ COPY --chown=node:node tsconfig.json ./
 COPY --chown=node:node src ./src
 COPY --chown=node:node scripts ./scripts
 USER node
-EXPOSE 8787
-CMD ["node", "--import", "tsx", "scripts/pdf-poc-server.ts"]
+EXPOSE 8788
+CMD ["node", "--import", "tsx", "scripts/document-worker.ts"]

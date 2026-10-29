@@ -31,7 +31,7 @@ export async function extractPdf(bytes: Uint8Array, maxPages = 500): Promise<Pdf
     return { pages, pageCount: pages.length, characterCount: pages.reduce((sum, page) => sum + page.text.length, 0),
       extractorVersion: `${pdfjs.version} / ${READING_ORDER_VERSION}`, fileHash: createHash("sha256").update(bytes).digest("hex") };
   } catch (error) {
-    if (error instanceof Error && error.name === "PasswordException") throw new Error("암호화된 PDF는 현재 PoC에서 처리하지 않습니다.");
+    if (error instanceof Error && error.name === "PasswordException") throw new Error("암호화된 PDF는 처리하지 않습니다.");
     if (error instanceof Error && error.name === "InvalidPDFException") throw new Error("PDF가 손상되었거나 읽을 수 없는 형식입니다.");
     throw error;
   } finally { await loading.destroy(); }
