@@ -21,7 +21,7 @@
    PDF_WORKER_TOKEN=<32자 이상의 임의 토큰>
    ```
 
-2. 최초 운영 스키마 준비는 `npm run db:migrate`를 사용합니다. 기존 PoC 자료가 있으면 PoC 작업기를 중지하고 `npm run db:migrate:documents`로 이관합니다. 기존 실행 UUID·본문·통계·마지막 성공을 보존하며 원본 테이블은 변경하지 않습니다. 활성 운영 요청이 있으면 이관은 거부합니다.
+2. 운영 스키마는 `npm run db:migrate`로 준비합니다. 이 명령은 종료된 PoC 원본 테이블도 제거하며, 운영 테이블의 이력·본문은 유지합니다.
 3. `docker compose --env-file .env.local -f compose.pdf-worker.yml up -d --build`로 로컬 작업기를 시작합니다.
 4. `npm run dev -- --hostname 127.0.0.1`로 웹 앱을 실행합니다. 기존 개발 서버는 환경변수 변경을 반영했는지 확인합니다.
 5. `/admin/bids/<공고 키>`의 **PDF 텍스트 추출**에서 파일을 펼쳐 **추출 요청 / 다시 추출 / 재추출**을 누릅니다.
@@ -34,9 +34,9 @@ Docker가 꺼져 있어도 요청은 DB 대기열에 남습니다. 시작 또는
 
 추출은 50MiB·500페이지·5분, 컨테이너는 CPU 2개·메모리 4GiB로 제한합니다. 좌우 두 면은 왼쪽 이후 오른쪽 순서로, 별도 PDF 페이지는 원래 순서로 처리합니다. 테두리가 없거나 복잡한 표·세로쓰기 등은 정확도를 보증하지 않습니다. 참가 자격·제출 서류·기한은 원본과 대조하세요.
 
-PoC 웹 API와 화면은 운영 경로로 교체했습니다. `pdf_extraction_poc_runs`, 이관 스크립트와 이전 작업기 코드는 대조·복구용으로 보존합니다. PoC 작업기와 운영 작업기를 동시에 실행하는 것은 권장하지 않습니다.
+PoC 실행 코드와 원본 테이블은 제거했습니다. 기존 이관 이력은 운영 테이블에 `source=poc_import`로 유지합니다. 원본 테이블만 제거할 때는 `npm run db:retire:pdf-poc`를 사용합니다. 이 명령은 추가 이관 검증이나 백업 없이 삭제 SQL만 실행하며, 종속성이 있으면 CASCADE 없이 실패합니다. 기존 SQL 마이그레이션 파일은 변경 이력으로 보존합니다.
 
-검증: `npx vitest run src/lib/documents src/components/DocumentPanel.test.tsx src/components/FormAccordion.test.tsx --pool=threads`. 실제 DB 검사는 `LIVE_DB_TEST=1`과 DB 환경변수를 설정해 `store.live.test.ts`, `queue.live.test.ts`, `migration.live.test.ts`를 실행합니다. 검사 전용 스키마·자료는 종료 시 정리합니다.
+검증: `npx vitest run src/lib/documents src/components/DocumentPanel.test.tsx src/components/FormAccordion.test.tsx --pool=threads`. 실제 DB 검사는 `LIVE_DB_TEST=1`과 DB 환경변수를 설정해 `store.live.test.ts`, `queue.live.test.ts`, `retirement.live.test.ts`를 실행합니다. 검사 전용 스키마·자료는 종료 시 정리합니다.
 
 ## 기본 앱 시작
 
@@ -127,11 +127,11 @@ npm test -- --run src/lib/g2b/api-client.live.test.ts src/lib/g2b/detail-page.li
 
 로컬은 `127.0.0.1:8788`만 공개합니다. 토큰 인증을 사용한 `GET /health`, `POST /wake`만 제공하며 첨부 URL이나 요청 생성은 받지 않습니다. 요청은 검증된 서버 코드에서 `DocumentQueue.enqueue`로 먼저 저장해야 합니다. 시작/깨우기마다 manual 요청만 최대 3건·20분 실행하며, 실행 중 깨우기는 같은 회차로 합칩니다. 연기된 재시도는 기다리지 않습니다. PDF 전용 외부 보완 작업을 활성화하기 전에는 다음 명시적 깨우기 또는 배치 실행이 필요합니다.
 
-CLI는 한 회차 최대 20건·50분이며 마지막 6분에는 새 파일을 시작하지 않습니다. 작업기는 DB 행 임대(120초, 30초 갱신)를 공유하고, 갱신 실패·시간 초과 시 자식을 중단합니다. 문서 작업기 전용 연결 풀은 연결 대기 10초·쿼리 응답 15초를 제한합니다. 기존 PoC의 직접 연결 설정이나 수집용 연결 풀은 바꾸지 않습니다.
+CLI는 한 회차 최대 20건·50분이며 마지막 6분에는 새 파일을 시작하지 않습니다. 작업기는 DB 행 임대(120초, 30초 갱신)를 공유하고, 갱신 실패·시간 초과 시 자식을 중단합니다. 문서 작업기 전용 연결 풀은 연결 대기 10초·쿼리 응답 15초를 제한합니다. 수집용 연결 풀은 바꾸지 않습니다.
 
 재시도는 일시 오류만 최초 포함 3회, 1분·5분 지연입니다. 실패·후속 시도·현재 요청 포인터는 한 트랜잭션으로 저장합니다. 임대 만료 복구는 현재 체인만 확인하며, 성공 본문과 포인터는 실패/텍스트 없음으로 덮어쓰지 않습니다. 이미 성공한 동일 버전 문서는 자동 발견에서 재사용하고, 수동 요청은 새 체인을 만듭니다.
 
-검증: `npx vitest run src/lib/documents --pool=threads`. 실제 DB 검사는 `LIVE_DB_TEST=1`과 DB 환경변수를 설정하여 `queue.live.test.ts`를 실행합니다. 검사 자료는 임의 이름의 전용 스키마에서 만들고 종료 시 정리합니다. 실제 공고·PoC 이력은 수정하지 않습니다.
+검증: `npx vitest run src/lib/documents --pool=threads`. 실제 DB 검사는 `LIVE_DB_TEST=1`과 DB 환경변수를 설정하여 `queue.live.test.ts`를 실행합니다. 검사 자료는 임의 이름의 전용 스키마에서 만들고 종료 시 정리합니다. 실제 공고·운영 이력은 수정하지 않습니다.
 
 ## PDF 자동화: GitHub Actions와 독립 보완 실행
 
