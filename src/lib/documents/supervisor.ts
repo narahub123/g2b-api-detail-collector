@@ -20,10 +20,10 @@ async function directoryBytes(path: string): Promise<number> {
 
 /** 파서가 멈춰도 브라우저 자식 프로세스까지 강제 종료하고 임시 자료를 정리합니다. */
 export async function superviseExtraction(id: string, key: string, signal: AbortSignal,
-  options: { timeoutMs?: number; script?: string; maxBytes?: number } = {}): Promise<{ result: PdfResult; peakMemory: number | null }> {
+  options: { timeoutMs?: number; script?: string; maxBytes?: number; ownerToken?: string } = {}): Promise<{ result: PdfResult; peakMemory: number | null }> {
   const directory = await mkdtemp(join(tmpdir(), "g2b-pdf-poc-"));
   const child = spawn(process.execPath, ["--import", "tsx", options.script ?? resolve("scripts/pdf-poc-extract.ts"), id, key, directory],
-    { detached: process.platform !== "win32", stdio: "ignore", env: { ...process.env, TMPDIR: directory, TEMP: directory, TMP: directory } });
+    { detached: process.platform !== "win32", stdio: "ignore", env: { ...process.env, PDF_EXTRACTION_OWNER_TOKEN: options.ownerToken, TMPDIR: directory, TEMP: directory, TMP: directory } });
   let failure: string | null = null;
   let peakMemory: number | null = null;
   let inspecting = false;

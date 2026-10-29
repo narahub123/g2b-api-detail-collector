@@ -131,3 +131,20 @@ npm test -- --run src/lib/g2b/api-client.live.test.ts src/lib/g2b/detail-page.li
 
 용역 공고만 수집합니다. 첨부 문서 본문 분석과 개인별 입찰 적합성 판정은 포함하지 않습니다. 화면의 `정보 없음`은 수집한 API와 공개 상세 페이지에서 해당 값을 확인하지 못했다는 뜻입니다. 최종 참가 조건과 제출 내용은 나라장터 원문 및 첨부파일을 확인하세요.
 # g2b-api-detail-collector
+
+## 운영 PDF 작업기 2단계
+
+대기열 실행 코어는 `src/lib/documents/queue.ts`, `worker.ts`를 공유합니다. 관리자 화면은 아직 기존 PoC를 사용하며, 운영 API 연결과 파일별 화면은 3단계에서 전환합니다. 기존 수집과 Actions는 변경하지 않았습니다.
+
+- 자동 발견 포함 배치: `npm run pdf:extract -- --limit=20 --budget-minutes=50`
+- 기존 대기열과 복구만: `npm run pdf:extract -- --queue-only --limit=20 --budget-minutes=50`
+- 공고 범위 제한: 위 명령에 `--notice-key=공고키` 추가
+- 로컬 작업기: `.env.local`에 `PDF_WORKER_ENABLED=true`, 32자 이상 `PDF_WORKER_TOKEN`을 설정하고 `docker compose --env-file .env.local -f compose.pdf-worker.yml up -d --build`
+
+로컬은 `127.0.0.1:8788`만 공개합니다. 토큰 인증을 사용한 `GET /health`, `POST /wake`만 제공하며 첨부 URL이나 요청 생성은 받지 않습니다. 요청은 검증된 서버 코드에서 `DocumentQueue.enqueue`로 먼저 저장해야 합니다. 시작/깨우기마다 manual 요청만 최대 3건·20분 실행하며, 실행 중 깨우기는 같은 회차로 합칩니다. 연기된 재시도는 기다리지 않습니다. 자동 재실행 경로는 4단계에서 연결하므로 지금은 다음 명시적 깨우기 또는 배치 실행이 필요합니다.
+
+CLI는 한 회차 최대 20건·50분이며 마지막 6분에는 새 파일을 시작하지 않습니다. 작업기는 DB 행 임대(120초, 30초 갱신)를 공유하고, 갱신 실패·시간 초과 시 자식을 중단합니다. 문서 작업기 전용 연결 풀은 연결 대기 10초·쿼리 응답 15초를 제한합니다. 기존 PoC의 직접 연결 설정이나 수집용 연결 풀은 바꾸지 않습니다.
+
+재시도는 일시 오류만 최초 포함 3회, 1분·5분 지연입니다. 실패·후속 시도·현재 요청 포인터는 한 트랜잭션으로 저장합니다. 임대 만료 복구는 현재 체인만 확인하며, 성공 본문과 포인터는 실패/텍스트 없음으로 덮어쓰지 않습니다. 이미 성공한 동일 버전 문서는 자동 발견에서 재사용하고, 수동 요청은 새 체인을 만듭니다.
+
+검증: `npx vitest run src/lib/documents --pool=threads`. 실제 DB 검사는 `LIVE_DB_TEST=1`과 DB 환경변수를 설정하여 `queue.live.test.ts`를 실행합니다. 검사 자료는 임의 이름의 전용 스키마에서 만들고 종료 시 정리합니다. 실제 공고·PoC 이력은 수정하지 않습니다.

@@ -12,6 +12,8 @@
     "db:migrate:pdf-poc": "node --env-file=.env.local scripts/migrate-pdf-poc.mjs",
     "db:migrate:documents": "node --env-file=.env.local --import tsx scripts/migrate-document-extraction.ts",
     "pdf:poc:worker": "node --env-file=.env.local --import tsx scripts/pdf-poc-server.ts",
+    "pdf:extract": "node --env-file-if-exists=.env.local --import tsx scripts/document-batch.ts",
+    "pdf:worker": "node --env-file-if-exists=.env.local --import tsx scripts/document-worker.ts",
     "collect:incremental": "node --env-file-if-exists=.env.local --import tsx scripts/collect-incremental.ts"
   },
   "dependencies": {

@@ -1,0 +1,24 @@
+services:
+  pdf-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.pdf-poc
+    command: ["node", "--import", "tsx", "scripts/document-worker.ts"]
+    init: true
+    ports:
+      - "127.0.0.1:8788:8788"
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      G2B_DB_SCHEMA: ${G2B_DB_SCHEMA:-public}
+      PDF_WORKER_ENABLED: ${PDF_WORKER_ENABLED:-false}
+      PDF_WORKER_HOST: 0.0.0.0
+      PDF_WORKER_TOKEN: ${PDF_WORKER_TOKEN:?PDF_WORKER_TOKEN is required}
+    cpus: 2
+    mem_limit: 4g
+    shm_size: 256mb
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8788/health',{headers:{authorization:'Bearer '+process.env.PDF_WORKER_TOKEN}}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
