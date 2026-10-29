@@ -1,0 +1,100 @@
+name: G2B PDF extraction
+
+on:
+  workflow_run:
+    workflows: [G2B collection]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "전체 발견 또는 기존 대기열만 처리"
+        type: choice
+        options: [discover-and-drain, queue-only]
+        default: discover-and-drain
+      invocation:
+        description: "수동 검증 또는 PDF 전용 보완 호출"
+        type: choice
+        options: [manual, watchdog]
+        default: manual
+      limit:
+        description: "수동 검증 시 최대 파일 수 (1~20)"
+        type: string
+        default: "20"
+      notice_key:
+        description: "수동 검증용 공고 키 (비우면 전체 범위)"
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: g2b-pdf-extraction
+  cancel-in-progress: false
+
+jobs:
+  extract:
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_run')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      # 원본 수집의 커밋·산출물을 실행하지 않고 기본 브랜치 코드만 사용합니다.
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Authorize PDF event
+        id: gate
+        env:
+          PDF_AUTOMATION_ENABLED: ${{ vars.G2B_PDF_EXTRACTION_ENABLED }}
+        run: node scripts/pdf-workflow-gate.mjs
+      - name: Install preflight dependencies
+        if: steps.gate.outputs.allowed == 'true'
+        run: npm ci --ignore-scripts
+      - name: Read-only PDF preflight
+        if: steps.gate.outputs.allowed == 'true'
+        id: probe
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          G2B_DB_SCHEMA: ${{ vars.G2B_DB_SCHEMA || 'public' }}
+          PDF_BATCH_MODE: ${{ steps.gate.outputs.mode }}
+          PDF_NOTICE_KEY: ${{ steps.gate.outputs.notice_key }}
+        run: node --import tsx scripts/pdf-preflight.ts
+      - name: Build PDF image
+        if: steps.probe.outputs.needed == 'true'
+        run: docker build -f Dockerfile.pdf-poc -t g2b-pdf-extraction:local .
+      - name: Run isolated PDF batch
+        if: steps.probe.outputs.needed == 'true'
+        shell: bash
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          G2B_DB_SCHEMA: ${{ vars.G2B_DB_SCHEMA || 'public' }}
+          PDF_BATCH_MODE: ${{ steps.gate.outputs.mode }}
+          PDF_BATCH_LIMIT: ${{ steps.gate.outputs.limit }}
+          PDF_NOTICE_KEY: ${{ steps.gate.outputs.notice_key }}
+        run: |
+          set -euo pipefail
+          args=("--limit=$PDF_BATCH_LIMIT" "--budget-minutes=50")
+          if [[ "$PDF_BATCH_MODE" == "queue-only" ]]; then args+=("--queue-only"); fi
+          if [[ -n "$PDF_NOTICE_KEY" ]]; then args+=("--notice-key=$PDF_NOTICE_KEY"); fi
+          docker run --rm --init --cpus=2 --memory=4g --shm-size=256m --stop-timeout=30 \
+            --name "g2b-pdf-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --env DATABASE_URL --env G2B_DB_SCHEMA \
+            g2b-pdf-extraction:local node --import tsx scripts/document-batch.ts "${args[@]}"
+      - name: Clean up PDF process
+        if: always()
+        shell: bash
+        run: docker rm -f "g2b-pdf-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >/dev/null 2>&1 || true
+      - name: Record PDF decision
+        if: always()
+        shell: bash
+        env:
+          PDF_ALLOWED: ${{ steps.gate.outputs.allowed }}
+          PDF_REASON: ${{ steps.gate.outputs.reason }}
+          PDF_NEEDED: ${{ steps.probe.outputs.needed }}
+        run: |
+          printf 'PDF authorized: %s\nDecision: %s\nWork required: %s\n' "$PDF_ALLOWED" "$PDF_REASON" "$PDF_NEEDED" >> "$GITHUB_STEP_SUMMARY"

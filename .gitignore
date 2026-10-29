@@ -12,3 +12,4 @@ docs
 *.tsbuildinfo
 AGENTS.md
 /benchmarks/results/
+/output/pdf-poc/

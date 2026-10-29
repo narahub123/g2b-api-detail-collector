@@ -9,11 +9,18 @@
     "start": "next start",
     "test": "vitest run",
     "db:migrate": "node --env-file=.env.local scripts/migrate-db.mjs",
+    "db:migrate:pdf-poc": "node --env-file=.env.local scripts/migrate-pdf-poc.mjs",
+    "db:migrate:documents": "node --env-file=.env.local --import tsx scripts/migrate-document-extraction.ts",
+    "pdf:poc:worker": "node --env-file=.env.local --import tsx scripts/pdf-poc-server.ts",
+    "pdf:extract": "node --env-file-if-exists=.env.local --import tsx scripts/document-batch.ts",
+    "pdf:worker": "node --env-file-if-exists=.env.local --import tsx scripts/document-worker.ts",
     "collect:incremental": "node --env-file-if-exists=.env.local --import tsx scripts/collect-incremental.ts"
   },
   "dependencies": {
     "cheerio": "^1.1.2",
+    "lucide-react": "^1.63.0",
     "next": "^16.4.2",
+    "pdfjs-dist": "6.4.299",
     "pg": "^8.23.1",
     "playwright-core": "^1.64.1",
     "react": "^19.1.0",

@@ -1,0 +1,44 @@
+{
+  "job": {
+    "title": "G2B PDF queue watchdog",
+    "enabled": false,
+    "saveResponses": false,
+    "url": "https://api.github.com/repos/narahub123/g2b-api-detail-collector/actions/workflows/pdf-extract.yml/dispatches",
+    "requestMethod": 1,
+    "requestTimeout": 30,
+    "redirectSuccess": false,
+    "schedule": {
+      "timezone": "Asia/Seoul",
+      "expiresAt": 0,
+      "hours": [
+        -1
+      ],
+      "mdays": [
+        -1
+      ],
+      "months": [
+        -1
+      ],
+      "wdays": [
+        -1
+      ],
+      "minutes": [
+        0,
+        10,
+        20,
+        30,
+        40,
+        50
+      ]
+    },
+    "extendedData": {
+      "headers": {
+        "Authorization": "Bearer <PDF_GITHUB_TOKEN>",
+        "Accept": "application/vnd.github+json",
+        "Content-Type": "application/json",
+        "X-GitHub-Api-Version": "2026-03-10"
+      },
+      "body": "{\"ref\":\"main\",\"inputs\":{\"mode\":\"queue-only\",\"invocation\":\"watchdog\"}}"
+    }
+  }
+}
