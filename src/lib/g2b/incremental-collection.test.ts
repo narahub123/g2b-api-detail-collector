@@ -3,6 +3,54 @@ import { runIncrementalCollection, type IncrementalStore } from "./incremental-c
 import type { StoredNotice } from "./notices";
 import type { CollectionJob } from "./collection-job";
 
+it("구간 건수 부족이 반복되면 완료 지점을 유지하고 같은 구간을 다시 수집합니다", async () => {
+  const oldKey = process.env.G2B_SERVICE_KEY;
+  process.env.G2B_SERVICE_KEY = "test-key";
+  try {
+    const memory = memoryStore();
+    let requests = 0;
+    let complete = false;
+    const options = { start: "2026-10-27T00:00:00Z", end: "2026-10-27T01:00:00Z", store: memory.store,
+      fetcher: async () => {
+        requests++;
+        return Response.json({ response: { body: { totalCount: 2, numOfRows: 100, pageNo: 1,
+          items: Array.from({ length: complete ? 2 : 1 }, () => ({ bidNtceNo: "R26BK1", bidNtceOrd: "000" })) } } });
+      },
+      scrape: async (url: string) => ({ detail: { sourceUrl: url, sections: [], attachments: [], links: [] }, relatedNoticeKeys: [] }) };
+    const failed = await runIncrementalCollection(options);
+    expect(failed).toMatchObject({ status: "failed", apiTotal: 2, apiProcessed: 1 });
+    expect(requests).toBe(2);
+    expect(await memory.store.getCheckpoint()).toBeNull();
+    complete = true;
+    const recovered = await runIncrementalCollection(options);
+    expect(recovered).toMatchObject({ status: "completed", windowStart: failed.windowStart, apiTotal: 2, apiProcessed: 2 });
+    expect(await memory.store.getCheckpoint()).toBe(recovered.windowEnd);
+  } finally {
+    if (oldKey === undefined) delete process.env.G2B_SERVICE_KEY;
+    else process.env.G2B_SERVICE_KEY = oldKey;
+  }
+});
+
+it("검증 실패 후 구간 재시도 성공 시 처리 건수를 중복 집계하지 않습니다", async () => {
+  const oldKey = process.env.G2B_SERVICE_KEY;
+  process.env.G2B_SERVICE_KEY = "test-key";
+  try {
+    const memory = memoryStore();
+    let requests = 0;
+    const job = await runIncrementalCollection({ start: "2026-10-27T00:00:00Z", end: "2026-10-27T01:00:00Z",
+      store: memory.store,
+      fetcher: async () => Response.json({ response: { body: { totalCount: 2, numOfRows: 100, pageNo: 1,
+        items: Array.from({ length: ++requests === 1 ? 1 : 2 }, () => ({ bidNtceNo: "R26BK1", bidNtceOrd: "000" })) } } }),
+      scrape: async (url) => ({ detail: { sourceUrl: url, sections: [], attachments: [], links: [] }, relatedNoticeKeys: [] }) });
+    expect(job).toMatchObject({ status: "completed", apiTotal: 2, apiProcessed: 2, apiCount: 1, detailTotal: 1 });
+    expect(requests).toBe(2);
+  } finally {
+    if (oldKey === undefined) delete process.env.G2B_SERVICE_KEY;
+    else process.env.G2B_SERVICE_KEY = oldKey;
+  }
+});
+
+/** 완료 지점과 저장 결과를 운영 DB 없이 검증할 메모리 저장소를 만듭니다. */
 function memoryStore() {
   const notices = new Map<string, StoredNotice>();
   const attempts = new Map<string, { key: string; attempts: number; status: "failed" | "succeeded"; error: string | null }>();
@@ -30,7 +78,7 @@ it("자동 수집은 API 응답 건수와 고유 공고를 분리하고 관련 �
     const url = new URL(String(input));
     const byNumber = url.searchParams.get("inqryDiv") === "2";
     return new Response(JSON.stringify({ response: { header: { resultCode: "00" }, body: {
-      totalCount: byNumber ? 1 : 2, items: byNumber
+      numOfRows: 100, pageNo: 1, totalCount: byNumber ? 1 : 2, items: byNumber
         ? [{ bidNtceNo: "R26BK2", bidNtceOrd: "000" }]
         : [{ bidNtceNo: "R26BK1", bidNtceOrd: "000" }, { bidNtceNo: "R26BK1", bidNtceOrd: "000" }]
     } } }));
@@ -55,22 +103,22 @@ it("자동 수집이 API 페이지를 재시도해도 관련 공고 목표는 �
     if (url.searchParams.get("inqryDiv") === "2") {
       relatedCalls++;
       return new Response(JSON.stringify({ response: { header: { resultCode: "00" }, body: {
-        totalCount: 1, items: [{ bidNtceNo: "R26BK2", bidNtceOrd: "000" }]
+        numOfRows: 100, pageNo: 1, totalCount: 1, items: [{ bidNtceNo: "R26BK2", bidNtceOrd: "000" }]
       } } }));
     }
     const secondPage = url.searchParams.get("pageNo") === "2";
     if (secondPage && ++secondPageCalls === 1) throw new Error("일시적인 페이지 오류");
     const items = secondPage ? [{ bidNtceNo: "R26BK3", bidNtceOrd: "000" }]
-      : Array.from({ length: 1000 }, () => ({ bidNtceNo: "R26BK1", bidNtceOrd: "000" }));
+      : Array.from({ length: 100 }, () => ({ bidNtceNo: "R26BK1", bidNtceOrd: "000" }));
     return new Response(JSON.stringify({ response: { header: { resultCode: "00" }, body: {
-      totalCount: 1001, items
+      numOfRows: 100, pageNo: secondPage ? 2 : 1, totalCount: 101, items
     } } }));
   };
   const job = await runIncrementalCollection({ start: "2026-10-27T00:00:00.000Z",
     end: "2026-10-27T01:00:00.000Z", store: memory.store, fetcher: fetcher as typeof fetch,
     scrape: async (url) => ({ detail: { sourceUrl: url, sections: [], text: "완료", attachments: [], links: [] },
       relatedNoticeKeys: url.includes("R26BK1") ? ["R26BK2--000"] : [] }) });
-  expect(job).toMatchObject({ status: "completed", apiTotal: 1002, apiProcessed: 1002,
+  expect(job).toMatchObject({ status: "completed", apiTotal: 102, apiProcessed: 102,
     apiCount: 2, detailTotal: 3 });
   expect(relatedCalls).toBe(1);
   delete process.env.G2B_SERVICE_KEY;
@@ -89,7 +137,7 @@ it("관련 공고의 API가 이미 저장되어 있으면 추가 API 대상으�
       throw new Error("저장된 API를 재조회하면 안 됩니다.");
     }
     return new Response(JSON.stringify({ response: { header: { resultCode: "00" }, body: {
-      totalCount: 1, items: [{ bidNtceNo: "R26BK1", bidNtceOrd: "000" }]
+      numOfRows: 100, pageNo: 1, totalCount: 1, items: [{ bidNtceNo: "R26BK1", bidNtceOrd: "000" }]
     } } }));
   };
   const job = await runIncrementalCollection({ start: "2026-10-27T00:00:00.000Z",
@@ -111,7 +159,7 @@ it("이미 저장된 상세로 이전 실패 기록만 복구할 때 이번 작�
   memory.attempts.set("R26BK1--000", { key: "R26BK1--000", attempts: 1,
     status: "failed", error: "이전 오류" });
   const fetcher = async () => new Response(JSON.stringify({ response: { header: { resultCode: "00" }, body: {
-    totalCount: 1, items: [{ bidNtceNo: "R26BK1", bidNtceOrd: "000" }]
+    numOfRows: 100, pageNo: 1, totalCount: 1, items: [{ bidNtceNo: "R26BK1", bidNtceOrd: "000" }]
   } } }));
   const job = await runIncrementalCollection({ start: "2026-10-27T00:00:00.000Z",
     end: "2026-10-27T01:00:00.000Z", store: memory.store, fetcher: fetcher as typeof fetch,
@@ -128,7 +176,7 @@ it("4시간 구간을 이어받고 성공한 상세를 중복 추출하지 않�
   const memory = memoryStore();
   let scrapes = 0;
   const fetcher = async () => new Response(JSON.stringify({ response: { header: { resultCode: "00" }, body: {
-    totalCount: 2, items: [{ bidNtceNo: "R26BK1", bidNtceOrd: "000" }, { bidNtceNo: "R26BK1", bidNtceOrd: "000" }]
+    numOfRows: 100, pageNo: 1, totalCount: 2, items: [{ bidNtceNo: "R26BK1", bidNtceOrd: "000" }, { bidNtceNo: "R26BK1", bidNtceOrd: "000" }]
   } } }));
   const options = { start: "2026-10-27T00:00:00.000Z", end: "2026-10-27T05:00:00.000Z",
     store: memory.store, fetcher: fetcher as typeof fetch,
@@ -149,7 +197,7 @@ it("상세 실패는 전체 순회 뒤 한 번, 다음 작업에서 한 번 재�
   const memory = memoryStore();
   const calls: string[] = [];
   const fetcher = async () => new Response(JSON.stringify({ response: { header: { resultCode: "00" }, body: {
-    totalCount: 2, items: [{ bidNtceNo: "R26BK1", bidNtceOrd: "000" }, { bidNtceNo: "R26BK2", bidNtceOrd: "000" }]
+    numOfRows: 100, pageNo: 1, totalCount: 2, items: [{ bidNtceNo: "R26BK1", bidNtceOrd: "000" }, { bidNtceNo: "R26BK2", bidNtceOrd: "000" }]
   } } }));
   const options = { start: "2026-10-27T00:00:00.000Z", end: "2026-10-27T05:00:00.000Z",
     store: memory.store, fetcher: fetcher as typeof fetch,
@@ -179,7 +227,7 @@ it("전체 조회가 두 번 실패하면 다음 작업이 같은 구간을 다�
   const fetcher = async () => {
     calls++;
     if (calls <= 2) throw new Error("API 장애");
-    return new Response(JSON.stringify({ response: { header: { resultCode: "00" }, body: { totalCount: 0, items: [] } } }));
+    return new Response(JSON.stringify({ response: { header: { resultCode: "00" }, body: { numOfRows: 100, pageNo: 1, totalCount: 0, items: [] } } }));
   };
   const options = { start: "2026-10-27T00:00:00.000Z", end: "2026-10-27T01:00:00.000Z",
     store: memory.store, fetcher: fetcher as typeof fetch };
@@ -197,7 +245,7 @@ it("상세가 세 번 실패하면 이후 자동 작업에서 더 이상 시도�
   const memory = memoryStore();
   let scrapes = 0;
   const fetcher = async () => new Response(JSON.stringify({ response: { header: { resultCode: "00" }, body: {
-    totalCount: 1, items: [{ bidNtceNo: "R26BK3", bidNtceOrd: "000" }]
+    numOfRows: 100, pageNo: 1, totalCount: 1, items: [{ bidNtceNo: "R26BK3", bidNtceOrd: "000" }]
   } } }));
   const options = { start: "2026-10-27T00:00:00.000Z", end: "2026-10-27T05:00:00.000Z",
     store: memory.store, fetcher: fetcher as typeof fetch,
@@ -221,7 +269,7 @@ it("상세 저장 직후 시도 기록 오류가 나도 같은 구간 재조회�
     await saveAttempt(attempt);
   };
   const fetcher = async () => new Response(JSON.stringify({ response: { header: { resultCode: "00" }, body: {
-    totalCount: 1, items: [{ bidNtceNo: "R26BK4", bidNtceOrd: "000" }]
+    numOfRows: 100, pageNo: 1, totalCount: 1, items: [{ bidNtceNo: "R26BK4", bidNtceOrd: "000" }]
   } } }));
   const job = await runIncrementalCollection({ start: "2026-10-27T00:00:00.000Z", end: "2026-10-27T01:00:00.000Z",
     store: memory.store, fetcher: fetcher as typeof fetch,
@@ -247,7 +295,7 @@ it.each(["상세 저장", "시도 기록"])("%s 실패 전에는 복구 성공�
     await saveAttempt(attempt);
   };
   const fetcher = async () => new Response(JSON.stringify({ response: { header: { resultCode: "00" }, body: {
-    totalCount: 1, items: [{ bidNtceNo: "R26BK5", bidNtceOrd: "000" }]
+    numOfRows: 100, pageNo: 1, totalCount: 1, items: [{ bidNtceNo: "R26BK5", bidNtceOrd: "000" }]
   } } }));
   const job = await runIncrementalCollection({ start: "2026-10-27T00:00:00.000Z", end: "2026-10-27T01:00:00.000Z",
     store: memory.store, fetcher: fetcher as typeof fetch,
@@ -267,7 +315,7 @@ it("이전 실패 공고 조회의 일시 오류도 전체 작업 재시도에 �
     if (attempts === 1) throw new Error("DB 일시 오류");
     return [];
   };
-  const fetcher = async () => new Response(JSON.stringify({ response: { header: { resultCode: "00" }, body: { totalCount: 0, items: [] } } }));
+  const fetcher = async () => new Response(JSON.stringify({ response: { header: { resultCode: "00" }, body: { numOfRows: 100, pageNo: 1, totalCount: 0, items: [] } } }));
   const job = await runIncrementalCollection({ start: "2026-10-27T00:00:00.000Z", end: "2026-10-27T01:00:00.000Z",
     store: memory.store, fetcher: fetcher as typeof fetch });
   expect(job.status).toBe("completed");

@@ -5,7 +5,9 @@ import type { ApiNotice, ApiPage, PostedDateRange } from "./types";
 export type PostedTimeRange = { start: string; end: string };
 
 const SERVICE_URL = "https://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoServc";
-const PAGE_SIZE = 1000;
+const PAGE_SIZE = 100;
+
+type ApiBody = { items: ApiNotice[]; total: number; numOfRows: number; pageNo: number; raw: unknown };
 
 /** 조회 실패를 날짜와 페이지에 연결해 작업 진단에서 원인을 찾게 합니다. */
 export class ApiPageError extends Error {
@@ -13,6 +15,7 @@ export class ApiPageError extends Error {
     public override readonly cause: unknown) { super(message); this.name = "ApiPageError"; }
 }
 
+/** 배열과 단일 항목 응답을 같은 순회 형식으로 변환합니다. */
 function asItems(value: unknown): ApiNotice[] {
   if (Array.isArray(value)) return value as ApiNotice[];
   if (value && typeof value === "object" && "item" in value) {
@@ -23,7 +26,7 @@ function asItems(value: unknown): ApiNotice[] {
 }
 
 /** 공통 인증값과 응답 형식을 적용해 나라장터 API 본문을 가져옵니다. */
-async function fetchBody(url: URL, fetcher: typeof fetch): Promise<{ items: ApiNotice[]; total: number; raw: unknown }> {
+async function fetchBody(url: URL, fetcher: typeof fetch): Promise<ApiBody> {
   const key = process.env.G2B_SERVICE_KEY;
   if (!key) throw new Error("G2B_SERVICE_KEY 환경변수를 설정하세요.");
   let decodedKey = key;
@@ -36,30 +39,59 @@ async function fetchBody(url: URL, fetcher: typeof fetch): Promise<{ items: ApiN
   let raw: unknown;
   try { raw = await response.json(); }
   catch { throw new Error("나라장터 API가 JSON 응답을 반환하지 않았습니다."); }
-  const envelope = raw as { response?: { header?: { resultCode?: string }; body?: { items?: unknown; totalCount?: number | string } } };
+  const envelope = raw as { response?: { header?: { resultCode?: string }; body?: {
+    items?: unknown; totalCount?: number | string; numOfRows?: number | string; pageNo?: number | string
+  } } };
   const code = envelope.response?.header?.resultCode;
   if (code && code !== "00") throw new Error(`나라장터 API 오류: ${code}`);
   const body = envelope.response?.body;
   if (!body) throw new Error("나라장터 API 응답에 본문이 없습니다.");
   const items = asItems(body.items);
-  return { items, total: Number(body.totalCount ?? items.length), raw };
+  return { items, total: responseInteger(body.totalCount, "전체 건수", 0),
+    numOfRows: responseInteger(body.numOfRows, "페이지 크기", 1),
+    pageNo: responseInteger(body.pageNo, "페이지 번호", 1), raw };
+}
+
+/** 누락되거나 비정상인 페이지 정보를 정상 응답으로 오인하지 않게 합니다. */
+function responseInteger(value: unknown, label: string, minimum: number): number {
+  const number = typeof value === "number" || (typeof value === "string" && /^\d+$/.test(value))
+    ? Number(value) : NaN;
+  if (!Number.isSafeInteger(number) || number < minimum) throw new Error(`나라장터 API의 ${label}가 올바르지 않습니다.`);
+  return number;
+}
+
+/** 요청과 다른 페이지나 도중에 바뀐 조회 기준으로 인한 누락을 차단합니다. */
+function validatePage(response: ApiBody, pageNo: number, first: ApiBody): void {
+  if (response.pageNo !== pageNo) throw new Error("응답 페이지 번호가 요청과 다릅니다.");
+  if (response.numOfRows !== first.numOfRows) throw new Error("응답 페이지 크기가 변경되었습니다.");
+  if (response.total !== first.total) throw new Error("응답 전체 건수가 변경되었습니다.");
+  if (response.items.length > response.numOfRows) throw new Error("응답 항목 수가 페이지 크기를 초과했습니다.");
 }
 
 /** 공고번호로 조회한 결과에서 공고번호와 차수가 모두 일치하는 API 항목을 찾습니다. */
 export async function fetchNoticeByKey(key: string, fetcher: typeof fetch = fetch): Promise<ApiNotice | null> {
   const [encodedNumber] = key.split("--");
   const number = decodeURIComponent(encodedNumber);
+  let first: ApiBody | undefined;
+  let received = 0;
   for (let pageNo = 1; ; pageNo++) {
     const url = new URL(SERVICE_URL);
     url.searchParams.set("pageNo", String(pageNo));
     url.searchParams.set("inqryDiv", "2");
     url.searchParams.set("bidNtceNo", number);
-    const { items, total } = await fetchBody(url, fetcher);
+    const response = await fetchBody(url, fetcher);
+    first ??= response;
+    validatePage(response, pageNo, first);
+    const { items, total, numOfRows } = response;
+    received += items.length;
     const match = items.find((item) => {
       try { return noticeKey(item) === key; } catch { return false; }
     });
     if (match) return match;
-    if (!Number.isFinite(total) || pageNo * PAGE_SIZE >= total || items.length === 0) return null;
+    if (pageNo * numOfRows >= total || items.length === 0) {
+      if (received !== total) throw new Error(`공고번호 조회 건수 불일치: 예상 ${total}건, 수신 ${received}건`);
+      return null;
+    }
   }
 }
 
@@ -68,23 +100,24 @@ type PreparedPages = { total: number; pages: AsyncGenerator<ApiPage> };
 
 /** 날짜별 첫 응답을 합산한 뒤 같은 응답을 실제 페이지 순회에 재사용합니다. */
 async function preparePages(windows: QueryWindow[], fetcher: typeof fetch): Promise<PreparedPages> {
+  /** 조회 조건과 건수를 함께 남겨 실패한 구간을 다시 찾을 수 있게 합니다. */
+  const pageError = (window: QueryWindow, pageNo: number, error: unknown, expected?: number, received = 0) =>
+    new ApiPageError(`${window.start}~${window.end} · 페이지 ${pageNo} · 예상 ${expected ?? "미확인"}건 · 수신 ${received}건: ${
+      error instanceof Error ? error.message : String(error)}`, window.date, pageNo, error);
   /** 선조회와 실제 순회가 동일한 요청 조건을 사용하도록 페이지를 가져옵니다. */
-  const fetchPage = async (window: QueryWindow, pageNo: number) => {
+  const fetchPage = async (window: QueryWindow, pageNo: number, expected?: number, received = 0) => {
     const url = new URL(SERVICE_URL);
     url.searchParams.set("pageNo", String(pageNo));
     url.searchParams.set("inqryDiv", "1");
     url.searchParams.set("inqryBgnDt", window.start);
     url.searchParams.set("inqryEndDt", window.end);
     try { return await fetchBody(url, fetcher); }
-    catch (error) { throw new ApiPageError(error instanceof Error ? error.message : String(error), window.date, pageNo, error); }
+    catch (error) { throw pageError(window, pageNo, error, expected, received); }
   };
   const firstPages: Awaited<ReturnType<typeof fetchBody>>[] = [];
   let total = 0;
   for (const window of windows) {
     const first = await fetchPage(window, 1);
-    if (!Number.isSafeInteger(first.total) || first.total < 0) {
-      throw new Error("나라장터 API의 전체 건수가 올바르지 않습니다.");
-    }
     firstPages.push(first);
     total += first.total;
   }
@@ -92,10 +125,20 @@ async function preparePages(windows: QueryWindow[], fetcher: typeof fetch): Prom
   async function* pages(): AsyncGenerator<ApiPage> {
     for (const [index, window] of windows.entries()) {
       let response = firstPages[index];
+      const first = response;
+      let received = 0;
       for (let pageNo = 1; ; pageNo++) {
+        try { validatePage(response, pageNo, first); }
+        catch (error) { throw pageError(window, pageNo, error, first.total, received + response.items.length); }
+        received += response.items.length;
         yield { date: window.date, pageNo, items: response.items, raw: response.raw };
-        if (pageNo * PAGE_SIZE >= response.total || response.items.length === 0) break;
-        response = await fetchPage(window, pageNo + 1);
+        // 소비자가 마지막 페이지를 처리한 뒤에 검증해야 미완료 구간이 완료로 저장되지 않습니다.
+        if (pageNo * response.numOfRows >= first.total || response.items.length === 0) {
+          if (received !== first.total) throw pageError(window, pageNo,
+            new Error("API 수신 건수가 전체 건수와 다릅니다."), first.total, received);
+          break;
+        }
+        response = await fetchPage(window, pageNo + 1, first.total, received);
       }
     }
   }
