@@ -36,7 +36,23 @@
 
 텍스트는 표시 좌표를 기준으로 단을 구분하고, 닫힌 셀 경로가 확인되는 표는 한 블록으로 묶어 읽는 순서를 보정합니다. 좌우 두 면은 왼쪽 면 이후 오른쪽 면 순서이며 PDF의 별도 페이지는 원래 페이지 순서를 유지합니다. 보정 방식은 실행의 추출기 버전에 `reading-order-v1`로 표시합니다. 기존 실행 기록은 자동 변경하지 않으므로 이전 결과를 보정하려면 해당 PDF의 **추출·저장**을 다시 누릅니다. 테두리가 없거나 복잡하게 겹친 표·세로쓰기 등은 추가 검증이 필요합니다.
 
-검증: `npx vitest run src/lib/pdf-poc src/components/PdfPocPanel.test.tsx`. 실제 DB 보존 검증은 `LIVE_DB_TEST=1`을 설정해 `node --env-file=.env.local node_modules/vitest/vitest.mjs run src/lib/pdf-poc/store.live.test.ts`를 실행합니다. 테스트에서 생성한 스키마와 자료는 트랜잭션을 롤백해 남기지 않습니다.
+검증: `npx vitest run src/lib/documents src/lib/pdf-poc src/components/PdfPocPanel.test.tsx`. 실제 DB 보존 검증은 `LIVE_DB_TEST=1`을 설정해 `node --env-file=.env.local node_modules/vitest/vitest.mjs run src/lib/pdf-poc/store.live.test.ts`를 실행합니다. 테스트에서 생성한 스키마와 자료는 트랜잭션을 롤백해 남기지 않습니다.
+
+### 운영 전환 1단계: 공통 모듈과 PoC 자료 이관
+
+PDF 추출·읽기 순서 보정·프로세스 감독과 다운로드 파이프라인은 `src/lib/documents`에서 공통으로 관리합니다. 기존 PoC 경로는 같은 구현으로 연결하므로 현재 관리자 수동 추출은 계속 사용할 수 있습니다. 자동 대기열·임대 실행·파일별 화면·Actions는 후속 단계입니다.
+
+운영 테이블은 `attachment_documents`, `attachment_extraction_runs`, `attachment_extraction_worker_lease`입니다. 기존 PoC 테이블은 삭제하거나 수정하지 않습니다. 각 실행의 UUID·본문·통계·시각을 보존하고, 미완료 PoC는 이관본에서만 중단으로 표시합니다. 문서의 최근 시도와 마지막 성공은 별도로 연결합니다.
+
+1. 현재 추출이 끝난 것을 확인하고 `docker compose --env-file .env.local -f compose.pdf-poc.yml stop`을 실행합니다.
+2. `npm run db:migrate:documents`를 실행합니다. 직접 DB 연결에서 트랜잭션으로 처리하며 원본·대상 실행 수·페이지 수·본문 체크섬을 검증합니다. 오류 시 이번 이관 전체를 롤백합니다.
+3. `docker compose --env-file .env.local -f compose.pdf-poc.yml up -d --build`로 공통 모듈을 사용하는 PoC를 다시 실행합니다.
+
+이관 명령은 실행 중인 PoC 서비스의 잠금이 있거나 운영 대기·진행 요청이 있으면 거부합니다. `DATABASE_URL_UNPOOLED`를 지정할 수 있으며 Neon 풀러 주소만 있다면 같은 프로젝트의 직접 호스트로 연결합니다. 일반 `db:migrate`는 운영 스키마만 준비하며 PoC 데이터 이관은 수행하지 않습니다.
+
+이관은 멱등하게 재실행할 수 있고 이미 생성된 운영 성공 결과를 과거 PoC 결과로 되돌리지 않습니다. 1단계 이후 PoC로 새로 생성한 이력은 운영 화면 전환 전에 서비스를 멈추고 같은 명령으로 다시 이관합니다. 이중 쓰기는 하지 않습니다.
+
+격리된 실제 DB의 이관 검증은 `LIVE_DB_TEST=1` 환경에서 `node --env-file=.env.local node_modules/vitest/vitest.mjs run src/lib/documents/migration.live.test.ts`로 실행합니다. 테스트 자료와 스키마는 트랜잭션 롤백으로 전부 정리합니다.
 
 ## 기본 앱 시작
 

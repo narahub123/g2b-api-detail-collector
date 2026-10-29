@@ -10,6 +10,7 @@
     "test": "vitest run",
     "db:migrate": "node --env-file=.env.local scripts/migrate-db.mjs",
     "db:migrate:pdf-poc": "node --env-file=.env.local scripts/migrate-pdf-poc.mjs",
+    "db:migrate:documents": "node --env-file=.env.local --import tsx scripts/migrate-document-extraction.ts",
     "pdf:poc:worker": "node --env-file=.env.local --import tsx scripts/pdf-poc-server.ts",
     "collect:incremental": "node --env-file-if-exists=.env.local --import tsx scripts/collect-incremental.ts"
   },
