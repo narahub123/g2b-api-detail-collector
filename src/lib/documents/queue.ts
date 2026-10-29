@@ -54,17 +54,17 @@ export class DocumentQueue {
         if(source==='manual' && active.status==='queued' && active.source==='automatic') {
           await db.query(`UPDATE ${this.schema}.attachment_extraction_runs SET source='manual' WHERE chain_id=$1`,[active.chain_id]); active.source='manual';
         }
-        return active as QueueRun;
+        return {...active,reused:true} as QueueRun & {reused:boolean};
       }
       if(source==='automatic') {
         const done=(await db.query(`SELECT * FROM ${this.schema}.attachment_extraction_runs WHERE document_id=$1 AND extractor_version=$2 ORDER BY requested_at DESC,id DESC LIMIT 1`,[d.id,EXTRACTOR_VERSION])).rows[0];
-        if(done) return done as QueueRun;
+        if(done) return {...done,reused:true} as QueueRun & {reused:boolean};
       }
       const id=randomUUID();
       const r=(await db.query(`INSERT INTO ${this.schema}.attachment_extraction_runs(id,document_id,chain_id,source,status,filename,attachment_url,extractor_version)
         VALUES($1,$2,$1,$3,'queued',$4,$5,$6) RETURNING *`,[id,d.id,source,file.name,file.url,EXTRACTOR_VERSION])).rows[0];
       await db.query(`UPDATE ${this.schema}.attachment_documents SET active_chain_id=$2,latest_run_id=$2,current_run_id=$2,updated_at=now() WHERE id=$1`,[d.id,id]);
-      return r as QueueRun;
+      return {...r,reused:false} as QueueRun & {reused:boolean};
     });
   }
   /** 직접 첨부만 작은 묶음으로 발견하고 사라진 첨부는 이력을 유지한 채 제외합니다. */

@@ -35,6 +35,7 @@ it.skipIf(!process.env.LIVE_DB_TEST || !process.env.DATABASE_URL)("운영 대기
     await pool.query(`INSERT INTO ${schema}.notices VALUES($1,$2)`,[key,JSON.stringify({attachments:[file(1),file(2)]})]);
     const requests = await Promise.all([q.enqueue(key,fileNo,1,"automatic"),q.enqueue(key,fileNo,1,"manual")]);
     expect(requests[0].id).toBe(requests[1].id);
+    expect(requests.map(run=>run.reused).sort()).toEqual([false,true]);
     const second = await q.enqueue(key,fileNo,2,"manual");
     const token = randomUUID(), rival = randomUUID();
     expect(await q.acquire(token)).toBe(true);

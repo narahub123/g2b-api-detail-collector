@@ -57,6 +57,12 @@ it("선점 대기로 6분 여유가 사라지면 추출 없이 대기로 반환�
  const summary=await runBatch({...store,deferClaim} as never,{mode:'local',now:()=>time,extract});
  expect(summary.reason).toBe('time_budget');expect(extract).not.toHaveBeenCalled();expect(deferClaim).toHaveBeenCalledOnce();
 });
+it('회차 요약에 재시도·텍스트 없음·관측 메모리·처리 시간을 집계합니다',async()=>{
+ const store=batchStore();store.claim.mockResolvedValue({id:'id',notice_key:'key',attempt_number:2} as never);
+ const result=await runBatch(store as never,{mode:'local',limit:1,extract:async()=>({result:{pages:[],pageCount:0,characterCount:0,extractorVersion:'test',fileHash:'hash'},peakMemory:12345})});
+ expect(result).toMatchObject({retries:1,noText:1,completed:0,failed:0,peakMemoryBytes:12345});
+ expect(result.elapsedMs).toBeGreaterThanOrEqual(0);
+});
 it("로컬 깨우기를 합치며 실행 중 추가 깨우기로 새 회차를 예약하지 않습니다",async()=>{
  let resolve!:()=>void, calls=0;
  const wake=new LocalWake(async()=>{calls++;await new Promise<void>(r=>{resolve=r;});});
