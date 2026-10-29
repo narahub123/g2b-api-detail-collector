@@ -1,6 +1,8 @@
 import { notFound } from "next/navigation";
 import { NoticeDetail } from "@/components/NoticeDetail";
 import { getNoticeRecord } from "@/lib/g2b/notices";
+import { PdfPocPanel } from "@/components/PdfPocPanel";
+import { pocEnabled } from "@/lib/pdf-poc/contract";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,6 +22,7 @@ export default async function AdminBidPage({ params }: { params: Promise<{ key: 
     <NoticeDetail notice={record.normalized} relatedNoticeKeys={record.relatedNoticeKeys}
       relatedNoticeStates={relatedNoticeStates}
       collectionStatus={record.detail ? "succeeded" : record.detailError ? "failed" : "pending"} />
+    {pocEnabled() && <PdfPocPanel noticeKey={key} attachments={record.detail?.attachments ?? []} />}
     <footer>데이터 출처: 조달청 나라장터 입찰공고정보서비스 · 상세 정보는 원문을 함께 확인하세요.</footer>
   </main>;
 }

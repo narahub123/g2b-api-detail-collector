@@ -1,0 +1,11 @@
+FROM node:24.10.0-bookworm-slim
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci && npx playwright-core install --with-deps chromium && chmod -R a+rX /ms-playwright
+COPY --chown=node:node tsconfig.json ./
+COPY --chown=node:node src ./src
+COPY --chown=node:node scripts ./scripts
+USER node
+EXPOSE 8787
+CMD ["node", "--import", "tsx", "scripts/pdf-poc-server.ts"]

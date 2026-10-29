@@ -8,7 +8,35 @@
 
 상세 페이지에서 정보를 보여 주는 클릭 요소와 열린 모달 안의 클릭 요소를 탐색합니다. 페이지 이동, 다운로드, 저장·제출 같은 상태 변경 요소는 탐색하지 않습니다. 공지사항 등 읽기 전용 모달은 현재 공고의 상세 수집 자료에 저장합니다.
 
-## 시작
+## 로컬 PDF 텍스트 추출 PoC
+
+관리자 공고 상세에서 **직접 첨부 PDF 한 개**를 선택해 Docker에서 다운로드·텍스트 추출 후 Neon에 저장합니다. PDF.js `6.4.299`를 사용하며 AI·OCR·HWP·HWPX·모달 첨부·GitHub Actions 자동 실행은 포함하지 않습니다. 원본 PDF는 처리 중에만 임시 저장하고 정리합니다.
+
+1. Docker Desktop의 Linux 엔진을 실행하고 `npm install`을 수행합니다.
+2. `.env.local`에 아래 설정을 추가합니다. 토큰은 임의의 32자 이상 값으로 웹 서버와 컨테이너가 공유합니다. DB 연결과 토큰을 Git에 커밋하지 마세요.
+
+   ```dotenv
+   PDF_POC_ENABLED=true
+   PDF_POC_WORKER_URL=http://127.0.0.1:8787
+   PDF_POC_WORKER_TOKEN=<32자 이상의 임의 토큰>
+   ```
+
+3. `npm run db:migrate:pdf-poc`로 PoC 전용 테이블만 추가합니다. 기존 `db:migrate`에도 신규 마이그레이션이 포함됩니다.
+4. `docker compose --env-file .env.local -f compose.pdf-poc.yml up -d --build`를 실행합니다.
+5. `npm run dev -- --hostname 127.0.0.1`로 앱을 실행합니다. 기존 서버가 있다면 환경변수 반영 여부를 확인합니다.
+6. `/admin/bids/<공고 키>`의 **PDF 텍스트 추출 PoC**에서 **추출·저장**을 누릅니다. 결과는 DB를 다시 읽어 표시하며, 페이지를 다시 열어도 실행 이력과 텍스트를 볼 수 있습니다.
+
+중지는 `docker compose --env-file .env.local -f compose.pdf-poc.yml stop`, 재시작은 같은 명령의 `start`입니다. 실행 중 요청은 대기열 없이 거절합니다. 중단되거나 실패한 추출은 버튼으로 다시 실행하며, 이전 성공 기록은 유지됩니다. 외부 다운로드 URL은 현재 PoC에서 지원하지 않습니다.
+
+기능은 기본 비활성화이며 **로컬 개발 환경에서만** 동작합니다. `next start` 등 production 모드에서는 활성화되지 않습니다. Docker 포트는 `127.0.0.1:8787`에만 공개합니다. 운영용 인증을 대신하는 기능이 아니므로 웹 개발 서버도 외부에 공개하지 마세요.
+
+컨테이너는 CPU 2개·메모리 4GiB, 추출은 50MiB·500페이지·5분으로 제한합니다. 시간·크기 제한 시 Chrome 자식 프로세스와 임시 프로필까지 정리합니다. 단일 서비스 잠금에는 Neon 직접 연결을 사용하며, Neon 풀러 주소는 동일 프로젝트의 직접 호스트로 변환합니다. 필요하면 `DATABASE_URL_UNPOOLED`로 직접 주소를 지정할 수 있습니다.
+
+추출 기록은 `pdf_extraction_poc_runs`에 시도별로 저장합니다. `completed`는 처리 성공이며 텍스트 누락·표 읽기 순서의 정확성을 보증하지 않습니다. 참가 자격·제출 서류·기한을 원본과 대조한 뒤 사용하세요. 최대 메모리는 200ms 간격으로 관측한 컨테이너 전체 메모리이며 파일별 정확한 최고치나 파서 단독 사용량이 아닙니다.
+
+검증: `npx vitest run src/lib/pdf-poc src/components/PdfPocPanel.test.tsx`. 실제 DB 보존 검증은 `LIVE_DB_TEST=1`을 설정해 `node --env-file=.env.local node_modules/vitest/vitest.mjs run src/lib/pdf-poc/store.live.test.ts`를 실행합니다. 테스트에서 생성한 스키마와 자료는 트랜잭션을 롤백해 남기지 않습니다.
+
+## 기본 앱 시작
 
 1. Node.js와 Google Chrome을 설치합니다.
 2. `npm install`을 실행합니다.
