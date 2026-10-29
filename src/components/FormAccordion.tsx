@@ -10,12 +10,14 @@ type Props = {
   defaultOpen?: boolean;
   children: ReactNode;
   className?: string;
+  onOpenChange?: (open: boolean) => void;
 };
 
 /** 공고 상세와 관리자 화면에서 공통으로 사용하는 아코디언. */
-export function FormAccordion({ title, description, defaultOpen = false, children, className = "" }: Props) {
+export function FormAccordion({ title, description, defaultOpen = false, children, className = "", onOpenChange }: Props) {
   return (
-    <details className={`user-section form-accordion ${className}`.trim()} open={defaultOpen}>
+    <details className={`user-section form-accordion ${className}`.trim()} open={defaultOpen}
+      onToggle={event => onOpenChange?.(event.currentTarget.open)}>
       <summary>
         <span>{title}</span>
         <ChevronRight className="form-accordion-chevron" size={20} aria-hidden="true" />
