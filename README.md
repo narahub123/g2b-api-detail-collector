@@ -34,6 +34,8 @@
 
 추출 기록은 `pdf_extraction_poc_runs`에 시도별로 저장합니다. `completed`는 처리 성공이며 텍스트 누락·표 읽기 순서의 정확성을 보증하지 않습니다. 참가 자격·제출 서류·기한을 원본과 대조한 뒤 사용하세요. 최대 메모리는 200ms 간격으로 관측한 컨테이너 전체 메모리이며 파일별 정확한 최고치나 파서 단독 사용량이 아닙니다.
 
+텍스트는 표시 좌표를 기준으로 단을 구분하고, 닫힌 셀 경로가 확인되는 표는 한 블록으로 묶어 읽는 순서를 보정합니다. 좌우 두 면은 왼쪽 면 이후 오른쪽 면 순서이며 PDF의 별도 페이지는 원래 페이지 순서를 유지합니다. 보정 방식은 실행의 추출기 버전에 `reading-order-v1`로 표시합니다. 기존 실행 기록은 자동 변경하지 않으므로 이전 결과를 보정하려면 해당 PDF의 **추출·저장**을 다시 누릅니다. 테두리가 없거나 복잡하게 겹친 표·세로쓰기 등은 추가 검증이 필요합니다.
+
 검증: `npx vitest run src/lib/pdf-poc src/components/PdfPocPanel.test.tsx`. 실제 DB 보존 검증은 `LIVE_DB_TEST=1`을 설정해 `node --env-file=.env.local node_modules/vitest/vitest.mjs run src/lib/pdf-poc/store.live.test.ts`를 실행합니다. 테스트에서 생성한 스키마와 자료는 트랜잭션을 롤백해 남기지 않습니다.
 
 ## 기본 앱 시작
