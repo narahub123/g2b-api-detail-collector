@@ -32,7 +32,7 @@ it("PostgreSQL 작업은 JSON 작업 파일 없이 DB 상태를 저장하고 잠
   runtime.__g2bPgPool = { query: async () => ({ rows: [] }) };
   const dir = await mkdtemp(join(process.cwd(), "data", "g2b-db-job-")); dirs.push(dir);
   const fetcher = async () => new Response(JSON.stringify({ response: { header: { resultCode: "00" },
-    body: { totalCount: 0, items: [] } } }));
+    body: { numOfRows: 100, pageNo: 1, totalCount: 0, items: [] } } }));
   const job = await startCollection({ start: "2026-10-28", end: "2026-10-28" },
     { fetcher: fetcher as typeof fetch });
   await vi.waitFor(() => expect(dbJobs.releaseDbLease).toHaveBeenCalledWith(job.id, "lease-token"));

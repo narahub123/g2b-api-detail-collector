@@ -10,13 +10,13 @@ it("여러 날짜의 첫 페이지로 전체 API 목표를 계산하고 수집�
     const date = url.searchParams.get("inqryBgnDt")?.slice(0, 8);
     const page = Number(url.searchParams.get("pageNo"));
     calls.push(`${date}-${page}`);
-    const totalCount = date === "20261001" ? 1001 : 1;
+    const totalCount = date === "20261001" ? 101 : 1;
     return new Response(JSON.stringify({ response: { header: { resultCode: "00" }, body: {
-      totalCount, items: [{ bidNtceNo: `${date}-${page}`, bidNtceOrd: "000" }]
+      numOfRows: 100, pageNo: page, totalCount, items: Array.from({ length: date === "20261001" && page === 1 ? 100 : 1 }, (_, index) => ({ bidNtceNo: `${date}-${page}-${index}`, bidNtceOrd: "000" }))
     } } }));
   };
   const prepared = await prepareServiceNotices({ start: "2026-10-01", end: "2026-10-02" }, fetcher as typeof fetch);
-  expect(prepared.total).toBe(1002);
+  expect(prepared.total).toBe(102);
   expect(calls).toEqual(["20261001-1", "20261002-1"]);
   const pages = [];
   for await (const page of prepared.pages) pages.push(page);
@@ -35,7 +35,7 @@ it("자동 수집도 서울 날짜별 첫 페이지로 목표를 계산합니다
     const date = url.searchParams.get("inqryBgnDt")?.slice(0, 8) || "";
     calls.push(date);
     return new Response(JSON.stringify({ response: { header: { resultCode: "00" }, body: {
-      totalCount: date === "20261027" ? 2 : 3, items: []
+      numOfRows: 100, pageNo: 1, totalCount: date === "20261027" ? 2 : 3, items: Array.from({ length: date === "20261027" ? 2 : 3 }, () => ({ bidNtceNo: "A", bidNtceOrd: "000" }))
     } } }));
   };
   const prepared = await prepareServiceNoticesByMinute({
@@ -53,7 +53,7 @@ it("분 단위 조회를 서울 시각으로 변환하고 자정에서 구간을
   const fetcher = async (input: RequestInfo | URL) => {
     const url = new URL(String(input));
     calls.push(`${url.searchParams.get("inqryBgnDt")}-${url.searchParams.get("inqryEndDt")}`);
-    return new Response(JSON.stringify({ response: { header: { resultCode: "00" }, body: { totalCount: 0, items: [] } } }));
+    return new Response(JSON.stringify({ response: { header: { resultCode: "00" }, body: { numOfRows: 100, pageNo: 1, totalCount: 0, items: [] } } }));
   };
   const pages = [];
   for await (const page of fetchServiceNoticesByMinute(
@@ -73,19 +73,19 @@ describe("fetchServiceNotices", () => {
       expect(url.searchParams.get("inqryEndDt")).toBe("202610012359");
       const page = Number(url.searchParams.get("pageNo"));
       return new Response(JSON.stringify({ response: { header: { resultCode: "00" }, body: {
-        totalCount: 1001, items: page === 1 ? [{ bidNtceNo: "A", bidNtceOrd: "00" }] : [{ bidNtceNo: "B", bidNtceOrd: "00" }]
+        numOfRows: 100, pageNo: page, totalCount: 101, items: Array.from({ length: page === 1 ? 100 : 1 }, () => ({ bidNtceNo: "A", bidNtceOrd: "00" }))
       } } }), { status: 200 });
     });
     const pages = [];
     for await (const page of fetchServiceNotices({ start: "2026-10-01", end: "2026-10-01" }, fetcher as typeof fetch)) pages.push(page);
-    expect(pages.flatMap((page) => page.items)).toHaveLength(2);
+    expect(pages.flatMap((page) => page.items)).toHaveLength(101);
     expect(fetcher).toHaveBeenCalledTimes(2);
     delete process.env.G2B_SERVICE_KEY;
   });
 
   it("accepts an empty response and rejects API errors without exposing the key", async () => {
     process.env.G2B_SERVICE_KEY = "secret-value";
-    const empty = async () => new Response(JSON.stringify({ response: { header: { resultCode: "00" }, body: { totalCount: 0, items: [] } } }));
+    const empty = async () => new Response(JSON.stringify({ response: { header: { resultCode: "00" }, body: { numOfRows: 100, pageNo: 1, totalCount: 0, items: [] } } }));
     const pages = [];
     for await (const page of fetchServiceNotices({ start: "2026-10-01", end: "2026-10-01" }, empty as typeof fetch)) pages.push(page);
     expect(pages).toHaveLength(1);
@@ -100,7 +100,7 @@ describe("fetchServiceNotices", () => {
     process.env.G2B_SERVICE_KEY = "abc%2Fdef%3D";
     const fetcher = vi.fn(async (input: RequestInfo | URL) => {
       expect(new URL(String(input)).searchParams.get("serviceKey")).toBe("abc/def=");
-      return new Response(JSON.stringify({ response: { header: { resultCode: "00" }, body: { totalCount: 0, items: [] } } }));
+      return new Response(JSON.stringify({ response: { header: { resultCode: "00" }, body: { numOfRows: 100, pageNo: 1, totalCount: 0, items: [] } } }));
     });
     for await (const page of fetchServiceNotices({ start: "2026-10-01", end: "2026-10-01" }, fetcher as typeof fetch)) void page;
     delete process.env.G2B_SERVICE_KEY;
@@ -115,7 +115,7 @@ describe("fetchNoticeByKey", () => {
       expect(url.searchParams.get("inqryDiv")).toBe("2");
       expect(url.searchParams.get("bidNtceNo")).toBe("R26BK1");
       return new Response(JSON.stringify({ response: { header: { resultCode: "00" }, body: {
-        totalCount: 3, items: [
+        numOfRows: 100, pageNo: 1, totalCount: 3, items: [
           { bidNtceNo: "R26BK1", bidNtceOrd: "000" },
           { bidNtceNo: "OTHER", bidNtceOrd: "001" },
           { bidNtceNo: "R26BK1", bidNtceOrd: "001", bidNtceNm: "대상" }
@@ -130,7 +130,7 @@ describe("fetchNoticeByKey", () => {
   it("returns no API when the number matches but the requested order does not", async () => {
     process.env.G2B_SERVICE_KEY = "test-key";
     const fetcher = async () => new Response(JSON.stringify({ response: { header: { resultCode: "00" }, body: {
-      totalCount: 1, items: [{ bidNtceNo: "R26BK1", bidNtceOrd: "000" }]
+      numOfRows: 100, pageNo: 1, totalCount: 1, items: [{ bidNtceNo: "R26BK1", bidNtceOrd: "000" }]
     } } }));
     expect(await fetchNoticeByKey("R26BK1--001", fetcher as typeof fetch)).toBeNull();
     delete process.env.G2B_SERVICE_KEY;

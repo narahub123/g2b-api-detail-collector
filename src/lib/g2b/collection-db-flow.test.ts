@@ -30,6 +30,21 @@ import { getCollectionJob, startCollection, startRefresh } from "./collection-jo
 const runtime = globalThis as typeof globalThis & { __g2bActiveJobId?: string | null };
 const oldKey = process.env.G2B_SERVICE_KEY;
 
+it("수동 구간 건수가 부족하면 상세 처리 후에도 정상 완료하지 않습니다", async () => {
+  process.env.G2B_SERVICE_KEY = "test-key";
+  const historical = { id: "historical", status: "completed", apiTotal: 9, apiProcessed: 2 };
+  db.jobs.set(historical.id, structuredClone(historical));
+  const job = await startCollection({ start: "2026-10-28", end: "2026-10-29" }, {
+    fetcher: async () => Response.json({ response: { body: { totalCount: 3, numOfRows: 100, pageNo: 1,
+      items: [{ bidNtceNo: "R26BK1", bidNtceOrd: "000" }] } } }),
+    scrape: async (url) => ({ detail: { sourceUrl: url, sections: [], attachments: [], links: [] }, relatedNoticeKeys: [] })
+  });
+  await vi.waitFor(() => expect(db.releaseDbLease).toHaveBeenCalled());
+  expect(await getCollectionJob(job.id)).toMatchObject({ status: "failed", apiTotal: 6, apiProcessed: 1, detailSucceeded: 1 });
+  expect((await getCollectionJob(job.id))?.errors.join()).toMatch(/202610280000.*예상 3건.*수신 1건/);
+  expect(db.jobs.get(historical.id)).toEqual(historical);
+});
+
 afterEach(() => {
   db.notices.clear();
   db.jobs.clear();
@@ -44,7 +59,7 @@ afterEach(() => {
 it("수집한 공고의 API와 상세를 DB 저장소에 기록합니다", async () => {
   process.env.G2B_SERVICE_KEY = "test-key";
   const fetcher = async () => new Response(JSON.stringify({ response: { header: { resultCode: "00" }, body: {
-    totalCount: 1, items: [{ bidNtceNo: "R26BK1", bidNtceOrd: "000", bidNtceNm: "연구 용역" }]
+    numOfRows: 100, pageNo: 1, totalCount: 1, items: [{ bidNtceNo: "R26BK1", bidNtceOrd: "000", bidNtceNm: "연구 용역" }]
   } } }));
   const scrape = async (url: string) => ({ detail: { sourceUrl: url, sections: [], attachments: [], links: [],
     modalCaptures: [] }, relatedNoticeKeys: [] });
@@ -67,7 +82,7 @@ it("수동 수집은 관련 공고 API 조회 전에 목표를 늘리고 완료 
     const byNumber = new URL(String(input)).searchParams.get("inqryDiv") === "2";
     if (byNumber) { relatedRequested(); await blocked; }
     return new Response(JSON.stringify({ response: { header: { resultCode: "00" }, body: {
-      totalCount: 1, items: [{ bidNtceNo: byNumber ? "R26BK2" : "R26BK1", bidNtceOrd: "000" }]
+      numOfRows: 100, pageNo: 1, totalCount: 1, items: [{ bidNtceNo: byNumber ? "R26BK2" : "R26BK1", bidNtceOrd: "000" }]
     } } }));
   };
   const job = await startCollection({ start: "2026-10-28", end: "2026-10-28" }, {
@@ -89,7 +104,7 @@ it("관련 공고 API 조회가 실패해도 대상과 처리 건수를 함께 �
   const fetcher = async (input: RequestInfo | URL) => {
     if (new URL(String(input)).searchParams.get("inqryDiv") === "2") throw new Error("번호 조회 오류");
     return new Response(JSON.stringify({ response: { header: { resultCode: "00" }, body: {
-      totalCount: 1, items: [{ bidNtceNo: "R26BK1", bidNtceOrd: "000" }]
+      numOfRows: 100, pageNo: 1, totalCount: 1, items: [{ bidNtceNo: "R26BK1", bidNtceOrd: "000" }]
     } } }));
   };
   const job = await startCollection({ start: "2026-10-28", end: "2026-10-28" }, {

@@ -71,7 +71,7 @@ it.skipIf(!process.env.LIVE_DB_TEST || !process.env.DATABASE_URL)(
       runtime.__g2bPgPool = new pg.Pool({ connectionString: directUrl.toString(), max: 2 });
       let attempts = 0;
       const fetcher = async () => new Response(JSON.stringify({ response: { header: { resultCode: "00" },
-        body: { totalCount: 1, items: [{ bidNtceNo: "R26BK7", bidNtceOrd: "000" }] } } }));
+        body: { numOfRows: 100, pageNo: 1, totalCount: 1, items: [{ bidNtceNo: "R26BK7", bidNtceOrd: "000" }] } } }));
       const options = { start: "2026-10-27T00:00:00.000Z", end: "2026-10-27T05:00:00.000Z",
         fetcher: fetcher as typeof fetch, scrape: async (url: string) => {
           attempts++;
@@ -115,7 +115,7 @@ it.skipIf(!process.env.LIVE_DB_TEST || !process.env.DATABASE_URL)(
       runtime.__g2bPgPool = new pg.Pool({ connectionString: directUrl.toString(), max: 2 });
       process.env.G2B_SERVICE_KEY = "test-key";
       const fetcher = async () => new Response(JSON.stringify({ response: { header: { resultCode: "00" },
-        body: { totalCount: 1, items: [{ bidNtceNo: "R26BK1", bidNtceOrd: "000", bidNtceNm: "연구 용역",
+        body: { numOfRows: 100, pageNo: 1, totalCount: 1, items: [{ bidNtceNo: "R26BK1", bidNtceOrd: "000", bidNtceNm: "연구 용역",
           bidNtceDt: "202610250930", presmptPrce: "1,200" }] } } }));
       const scrape = async (url: string) => ({ detail: {
         sourceUrl: url, sections: [{ title: "공고일반", fields: [{ label: "공고명", value: [{ text: "연구 용역", visible: true }] }], tables: [] }],
