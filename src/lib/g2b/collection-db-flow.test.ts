@@ -31,6 +31,23 @@ import type { CollectionJob } from "./collection-job";
 const runtime = globalThis as typeof globalThis & { __g2bActiveJobId?: string | null };
 const oldKey = process.env.G2B_SERVICE_KEY;
 
+it("수동 시분 구간을 서울 자정에서 분할해 실제 조회하고 저장합니다", async () => {
+  process.env.G2B_SERVICE_KEY = "test-key";
+  const calls: string[] = [];
+  const job = await startCollection({ start: "2026-10-30T23:50", end: "2026-10-31T00:10" }, {
+    fetcher: async (input) => {
+      const url = new URL(String(input));
+      calls.push(`${url.searchParams.get("inqryBgnDt")}-${url.searchParams.get("inqryEndDt")}`);
+      return Response.json({ response: { body: { totalCount: 0, numOfRows: 100, pageNo: 1, items: [] } } });
+    }
+  });
+  await vi.waitFor(() => expect(db.releaseDbLease).toHaveBeenCalled());
+  expect(calls).toEqual(["202610302350-202610302359", "202610310000-202610310010"]);
+  expect(await getCollectionJob(job.id)).toMatchObject({ status: "completed", range: {
+    start: "2026-10-30T23:50", end: "2026-10-31T00:10"
+  } });
+});
+
 it("수동 구간 건수가 부족하면 상세 처리 후에도 정상 완료하지 않습니다", async () => {
   process.env.G2B_SERVICE_KEY = "test-key";
   const historical = { id: "historical", status: "completed", apiTotal: 9, apiProcessed: 2 };

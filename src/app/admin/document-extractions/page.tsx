@@ -1,3 +1,4 @@
+import { normalizeSeoulMinute } from "@/lib/seoul-time";
 import {
   DocumentHistoryStore,
   parseHistoryFilters,
@@ -25,6 +26,12 @@ import { FormAccordion } from "@/components/FormAccordion";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+/** 날짜 형식의 기존 검색 링크도 시분 입력창에 표시하고 잘못된 값은 비웁니다. */
+function filterMinute(value: string, boundary: "start" | "end"): string {
+  if (!value) return "";
+  try { return normalizeSeoulMinute(value, boundary); } catch { return ""; }
+}
 
 /** 문서 등록 없이 누적 현황과 파일별 최신 상태 또는 추출 시도 이력을 보여줍니다. */
 export default async function ExtractionHistoryPage({
@@ -194,19 +201,21 @@ export default async function ExtractionHistoryPage({
             </div>
             <div className="extraction-filter-row">
               <label>
-                {documentView ? "등록·접수 시작일" : "접수 시작일"}
+                {documentView ? "등록·접수 시작 일시 (한국시간)" : "접수 시작 일시 (한국시간)"}
                 <input
-                  type="date"
+                  type="datetime-local"
+                  step={60}
                   name="from"
-                  defaultValue={params.get("from") || ""}
+                  defaultValue={filterMinute(params.get("from") || "", "start")}
                 />
               </label>
               <label>
-                {documentView ? "등록·접수 종료일" : "접수 종료일"}
+                {documentView ? "등록·접수 종료 일시 (한국시간)" : "접수 종료 일시 (한국시간)"}
                 <input
-                  type="date"
+                  type="datetime-local"
+                  step={60}
                   name="to"
-                  defaultValue={params.get("to") || ""}
+                  defaultValue={filterMinute(params.get("to") || "", "end")}
                 />
               </label>
             </div>

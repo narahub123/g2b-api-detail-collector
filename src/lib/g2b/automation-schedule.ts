@@ -1,3 +1,5 @@
+import { seoulInputToUtc } from "../seoul-time";
+export { seoulInputToUtc } from "../seoul-time";
 import { randomUUID } from "node:crypto";
 
 export type AutomationSettings = {
@@ -23,16 +25,6 @@ export const defaultAutomationSettings: AutomationSettings = {
   enabled: false, schedule: "interval", intervalMinutes: 60, times: [],
   startAt: null, activatedAt: null, activationId: null, lastDueAt: null
 };
-
-/** 관리자가 입력한 서울 현지 시각을 유효성 확인 후 UTC로 바꿉니다. */
-export function seoulInputToUtc(value: string): string {
-  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) throw new Error("조회 시작 날짜와 시각을 확인하세요.");
-  const local = new Date(`${value}:00.000Z`);
-  if (Number.isNaN(local.getTime()) || local.toISOString().slice(0, 16) !== value) {
-    throw new Error("조회 시작 날짜와 시각을 확인하세요.");
-  }
-  return new Date(local.getTime() - 9 * 60 * 60_000).toISOString();
-}
 
 /** 활성화 때마다 새 기준 시각을 부여하고 비활성화 시 저장된 설정을 보존합니다. */
 export function applyAutomationSettings(current: AutomationSettings, input: AutomationInput, now: Date): AutomationSettings {

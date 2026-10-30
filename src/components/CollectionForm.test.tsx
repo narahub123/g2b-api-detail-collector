@@ -7,6 +7,17 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 afterEach(cleanup);
 
 describe("CollectionForm", () => {
+  it("입력한 한국시간 시분을 수집 요청에 보존합니다", async () => {
+    const fetcher = vi.fn().mockResolvedValueOnce(Response.json(null))
+      .mockResolvedValueOnce(Response.json({ id: "job", status: "completed", phase: "done", errors: [] }));
+    render(<CollectionForm fetcher={fetcher as typeof fetch} showProgress={false} />);
+    fireEvent.change(screen.getByLabelText("시작 일시"), { target: { value: "2026-10-30T10:30" } });
+    fireEvent.change(screen.getByLabelText("종료 일시"), { target: { value: "2026-10-30T10:30" } });
+    fireEvent.click(screen.getByRole("button", { name: "공고 수집 시작" }));
+    expect(fetcher).toHaveBeenLastCalledWith("/api/collections", expect.objectContaining({
+      method: "POST", body: JSON.stringify({ start: "2026-10-30T10:30", end: "2026-10-30T10:30" })
+    }));
+  });
   it("저장된 수동 수집의 공고별 결과를 표시합니다", async () => {
     const fetcher = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: "job", mode: "collection",
       status: "completed", phase: "done", apiTotal: 2, apiProcessed: 2, apiCount: 2,
@@ -51,8 +62,8 @@ describe("CollectionForm", () => {
   it("rejects reversed posted dates before sending a request", () => {
     const fetcher = vi.fn().mockResolvedValue({ ok: true, json: async () => null });
     render(<CollectionForm fetcher={fetcher as typeof fetch} />);
-    fireEvent.change(screen.getByLabelText("시작일"), { target: { value: "2026-10-02" } });
-    fireEvent.change(screen.getByLabelText("종료일"), { target: { value: "2026-10-01" } });
+    fireEvent.change(screen.getByLabelText("시작 일시"), { target: { value: "2026-10-02T10:31" } });
+    fireEvent.change(screen.getByLabelText("종료 일시"), { target: { value: "2026-10-02T10:30" } });
     fireEvent.click(screen.getByRole("button", { name: "공고 수집 시작" }));
     expect(screen.getByRole("alert")).toHaveTextContent("날짜");
     expect(fetcher).toHaveBeenCalledOnce();
