@@ -4,9 +4,24 @@ export const MODAL_TIMING={maxWaitMs:8000,quietMs:1500,pollMs:125} as const;
 export const ATTACHMENT_NAME_SELECTOR='[col_id="orgnlAtchFileNm"]';
 const FILE_GRID_PATTERN=/_grdFile_body_table$/;
 const NOTICE_DIALOG_PATTERN=/_alert\d+$/;
+const COMPANY_PARENT_PATTERN=/(?:^|_)PBAB007_01$/;
+const COMPANY_PICKER_PATTERN=/(?:^|_)PBAB007_01_wframe_popupCnts_EtpsPL$/;
+const COMPANY_PARENT_ACTIONS:Readonly<Record<string,string>>={btnBzmnRegNoSrch:'검색',btnS0001:'검색'};
+const COMPANY_PICKER_ACTIONS:Readonly<Record<string,string>>={btnS0001:'검색',btnRecordCountPerPage:'적용'};
 type ResetControl={value:string;buttonLike:boolean};
 type PreviewControl={value:string;tableId:string;rowHasAttachmentName:boolean};
 type NoticeDialog={id:string;dataCellCount:number;inputCount:number;text:string};
+type CompanySearchControl={id:string;dialogId:string|null;value:string;buttonLike:boolean};
+
+/** 조건 입력·업체 선택을 수행하지 않는 수집에서 확인된 업체 검색 기능만 제외합니다. */
+export function isUnneededCompanySearch(control:CompanySearchControl):boolean{
+ if(!control.buttonLike||!control.dialogId)return false;
+ const actions=COMPANY_PARENT_PATTERN.test(control.dialogId)?COMPANY_PARENT_ACTIONS
+  :COMPANY_PICKER_PATTERN.test(control.dialogId)?COMPANY_PICKER_ACTIONS:null;
+ if(!actions)return false;
+ // 같은 문구의 일반 조회를 막지 않도록 소유 모달과 정확한 버튼 ID를 함께 검사합니다.
+ return Object.entries(actions).some(([suffix,label])=>control.id===`${control.dialogId}_wframe_popupCnts_${suffix}`&&control.value===label);
+}
 
 /** 입력 내용을 지우는 버튼만 제외하고 같은 문구의 조회 링크는 보존합니다. */
 export function isResetControl(control:ResetControl):boolean{

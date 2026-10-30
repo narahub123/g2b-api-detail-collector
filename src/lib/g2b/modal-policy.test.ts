@@ -1,5 +1,20 @@
 import {expect,it} from 'vitest';
-import {isResetControl,isAttachmentPreview,isNoticeDialog,MODAL_TIMING} from './modal-policy';
+import {isResetControl,isAttachmentPreview,isNoticeDialog,isUnneededCompanySearch,MODAL_TIMING} from './modal-policy';
+
+it('확인된 업체 검색 모달의 검색·건수 적용만 제외합니다',()=>{
+ const parent='mf_wfm_container_mainWframe_PBAB007_01';
+ const nested=parent+'_wframe_popupCnts_EtpsPL';
+ for(const [dialogId,suffix,value] of [[parent,'btnBzmnRegNoSrch','검색'],[parent,'btnS0001','검색'],[nested,'btnS0001','검색'],[nested,'btnRecordCountPerPage','적용']]){
+  expect(isUnneededCompanySearch({dialogId,id:dialogId+'_wframe_popupCnts_'+suffix,value,buttonLike:true})).toBe(true);
+ }
+ for(const input of [
+  {dialogId:parent,id:parent+'_wframe_popupCnts_btnS0001',value:'검색',buttonLike:false},
+  {dialogId:'other',id:'other_wframe_popupCnts_btnS0001',value:'검색',buttonLike:true},
+  {dialogId:parent,id:'other_btnS0001',value:'검색',buttonLike:true},
+  {dialogId:parent,id:parent+'_wframe_popupCnts_btnS0001',value:'상세조회',buttonLike:true},
+  {dialogId:parent,id:parent+'_wframe_popupCnts_btnRecordCountPerPage',value:'적용',buttonLike:true},
+ ])expect(isUnneededCompanySearch(input)).toBe(false);
+});
 
 it('초기화는 정확한 문구의 버튼형 요소만 제외합니다',()=>{
  expect(isResetControl({value:'초기화',buttonLike:true})).toBe(true);

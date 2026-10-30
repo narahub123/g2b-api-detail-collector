@@ -1,6 +1,6 @@
 import {measure, measureSync} from './collection-performance';
 import {redactDiagnostic} from './collection-diagnostics';
-import {ATTACHMENT_NAME_SELECTOR, MODAL_TIMING, isResetControl, isAttachmentPreview} from './modal-policy';
+import {ATTACHMENT_NAME_SELECTOR, MODAL_TIMING, isResetControl, isAttachmentPreview, isUnneededCompanySearch} from './modal-policy';
 import * as cheerio from "cheerio";
 import { extractCommonSections } from "./common-content-extractor";
 import { collectAttachments } from "./attachment-collector";
@@ -394,7 +394,8 @@ async function clickCandidates(
     { dialogId, modalSelector: MODAL_SELECTOR, attachmentNameSelector: ATTACHMENT_NAME_SELECTOR },
   );
   // 브라우저에서는 구조만 읽고 사이트별 제외 규칙은 정책 모듈에서 판정합니다.
-  return candidates.filter(candidate => !isResetControl(candidate) && !isAttachmentPreview(candidate));
+  return candidates.filter(candidate => !isResetControl(candidate) && !isAttachmentPreview(candidate)
+    && !isUnneededCompanySearch({...candidate, dialogId}));
 }
 
 /**
