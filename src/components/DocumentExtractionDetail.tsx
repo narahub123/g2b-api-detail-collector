@@ -5,10 +5,17 @@ import type {HistoryDetail} from '@/lib/documents/history-store';
 import {extractionStages} from '@/lib/documents/diagnostics';
 import {isActive,runStatuses} from '@/lib/documents/model';
 import {documentDuration,documentSource,documentTime} from '@/lib/documents/display';
+import {DocumentBodyViewer} from './DocumentBodyViewer';
 
 /** 진행 중에만 갱신하며 본문은 사용자가 요청한 한 페이지만 읽습니다. */
 export function DocumentExtractionDetail({initial}:{initial:HistoryDetail}){
- const [detail,setDetail]=useState(initial),[error,setError]=useState(''),[page,setPage]=useState(1),[text,setText]=useState<string|null>(null),[loading,setLoading]=useState(false);
+ const identity=JSON.stringify([initial.run.notice_key,initial.run.document_id,initial.run.id]);
+ return <ExtractionDetail key={identity} initial={initial}/>;
+}
+
+/** 실행이 바뀌면 진단 폴링과 본문 요청을 모두 새 수명으로 시작합니다. */
+function ExtractionDetail({initial}:{initial:HistoryDetail}){
+ const [detail,setDetail]=useState(initial),[error,setError]=useState('');
  const run=detail.run,active=isActive(run);
  useEffect(()=>{
   if(!active)return;
@@ -26,30 +33,6 @@ export function DocumentExtractionDetail({initial}:{initial:HistoryDetail}){
   }
   timer=setTimeout(poll,5000);return()=>{abort.abort();clearTimeout(timer);};
  },[run.id,active]);
- /** 파일 본문은 이력 메타데이터와 분리해 명시적으로 요청합니다. */
- useEffect(()=>{
-  if(!loading)return;
-  const abort=new AbortController();
-  fetch(`/api/admin/documents/${run.document_id}/extractions/${run.id}/pages/${page}?key=${encodeURIComponent(run.notice_key)}`,{cache:'no-store',signal:abort.signal})
-   .then(async response=>{if(!response.ok)throw new Error('저장된 본문을 조회하지 못했습니다.');return response.json() as Promise<{text:string}>;})
-   .then(value=>{if(!abort.signal.aborted){setText(value.text);setError('');}})
-   .catch(reason=>{if(!abort.signal.aborted)setError(reason instanceof Error?reason.message:'본문 조회 실패');})
-   .finally(()=>{if(!abort.signal.aborted)setLoading(false);});
-  return()=>abort.abort();
- },[loading,page,run.document_id,run.id,run.notice_key]);
- /** 페이지 전환 시 이전 페이지 본문을 즉시 지웁니다. */
- function readPage(number:number){setPage(number);setText(null);setLoading(true);}
- /** 위아래 탐색이 같은 페이지 상태와 경계 조건을 사용하도록 구성합니다. */
- function pageNavigation(showRead:boolean){
-  return <nav className={`extraction-nav extraction-page-nav${showRead?' extraction-page-nav-with-read':''}`} aria-label={showRead?'본문 위 페이지 이동':'본문 아래 페이지 이동'}>
-   <div className="extraction-page-controls">
-   <button className="extraction-button" disabled={loading||page<=1} onClick={()=>readPage(page-1)}>이전 페이지</button>
-   <span aria-live="polite">{page} / {run.page_count}</span>
-   <button className="extraction-button" disabled={loading||page>=run.page_count!} onClick={()=>readPage(page+1)}>다음 페이지</button>
-   </div>
-   {showRead&&<button className="extraction-button extraction-read-button" disabled={loading} onClick={()=>readPage(page)}>{loading?'조회 중…':'본문 조회'}</button>}
-  </nav>;
- }
  return <>
   <header className="extraction-header"><span className="eyebrow">EXTRACTION DIAGNOSTICS</span><h1>첨부파일 추출 진단</h1><p>{run.filename}</p><span className="extraction-status" data-status={run.status}>{runStatuses[run.status]}</span>{active&&<p>5초마다 처리 상태를 확인합니다.</p>}</header>
   {error&&<p role="alert" className="extraction-error">{error}</p>}
@@ -73,10 +56,6 @@ export function DocumentExtractionDetail({initial}:{initial:HistoryDetail}){
    {run.diagnostic_error?<details className="extraction-diagnostic"><summary>기술 정보 펼쳐보기</summary><pre>{JSON.stringify(run.diagnostic_error,null,2)}</pre></details>:<p className="extraction-meta">상세 진단 정보가 기록되지 않았습니다.</p>}
   </section>
   <section className="extraction-card" style={{marginTop:24}}><h2>재시도 흐름</h2><ol>{detail.chain.map(item=><li key={item.id}><a href={`/admin/document-extractions/${item.id}`} aria-current={item.id===run.id?'page':undefined}>{item.attempt_number}차 · {runStatuses[item.status]}</a> · {documentTime(item.requested_at)}{item.error_code&&` · ${item.error_code}`}</li>)}</ol></section>
-  {!!run.page_count&&<section className="extraction-card" style={{marginTop:24}}><h2>추출 본문</h2><p>필요한 페이지의 저장된 본문만 조회합니다.</p>
-   {pageNavigation(true)}
-   {text!==null&&<pre className="extraction-body">{text||'이 페이지에는 추출된 텍스트가 없습니다.'}</pre>}
-   {(text!==null||loading)&&pageNavigation(false)}
-  </section>}
+  {!!run.page_count&&<DocumentBodyViewer noticeKey={run.notice_key} documentId={run.document_id} runId={run.id} pageCount={run.page_count}/>}
  </>;
 }
