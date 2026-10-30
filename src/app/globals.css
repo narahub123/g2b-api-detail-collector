@@ -229,19 +229,19 @@ input {
   color: #287757;
   font-weight: 700;
 }
-/* 수집 전 */
+/* 상세 수집 전 */
 .status-pill.pending {
-  background: #eaf1f3;
-  color: #536b78;
+  background: #fff3e7;
+  color: #9d6932;
 }
 
-/* 수집 완료 */
+/* 상세 수집 완료 */
 .status-pill.succeeded {
   background: #e6f5ee;
   color: #287757;
 }
 
-/* 수집 실패 */
+/* 상세 수집 실패 */
 .status-pill.failed {
   background: #fff0ec;
   color: #99432e;
