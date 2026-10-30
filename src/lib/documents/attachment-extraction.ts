@@ -3,10 +3,12 @@ import { chromium } from "playwright-core";
 import { openG2bDownload } from "../g2b/attachment-download";
 import { MAX_BYTES } from "./contract";
 import { extractPdf } from "./extract";
+import type {ExtractionProgress} from './diagnostics';
 
 /** 저장소에서 검증한 첨부를 다운로드하고 브라우저를 정리한 뒤 공통 PDF 파서로 처리합니다. */
 export async function extractAttachmentPdf(file: { key: string; fileNo: string; seq: number }, downloads: string,
-  signal: AbortSignal, open: typeof openG2bDownload = openG2bDownload) {
+  signal: AbortSignal, open: typeof openG2bDownload = openG2bDownload, progress?: (value:ExtractionProgress)=>void) {
+  progress?.({stage:'download',at:new Date().toISOString()});
   await mkdir(downloads, { recursive: true });
   const opened = await open(file.key, file.fileNo, file.seq, signal,
     options => chromium.launch({ ...options, downloadsPath: downloads }));
@@ -20,5 +22,5 @@ export async function extractAttachmentPdf(file: { key: string; fileNo: string; 
     }
     bytes = Buffer.concat(chunks);
   } finally { opened.stream.destroy(); await opened.cleanup(); }
-  return extractPdf(bytes);
+  return extractPdf(bytes,500,progress);
 }

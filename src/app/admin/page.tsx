@@ -6,6 +6,8 @@ import { listNoticePage } from "@/lib/g2b/notices";
 import { parseNoticeFilters, parseNoticePage } from "@/lib/g2b/notice-filters";
 import "../notice-list-controls.css";
 import "../automation-settings.css";
+import "../admin-history.css";
+import {AdminHistoryCard} from '@/components/AdminHistoryCard';
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -46,9 +48,10 @@ export default async function AdminPage({
       </section>
 
       <CollectionManager />
-      <p>
-        <a href="/admin/collections">수집 작업 이력과 오류 진단 보기 →</a>
-      </p>
+      <nav className="admin-history-links" aria-label="작업 이력과 진단">
+        <AdminHistoryCard href="/admin/collections" title="수집 작업 이력" description="공고 수집 결과와 오류·경고·재시도를 확인합니다." icon="collection"/>
+        <AdminHistoryCard href="/admin/document-extractions" title="첨부파일 추출 이력" description="문서별 추출 결과와 처리 과정·오류 원인을 확인합니다." icon="document"/>
+      </nav>
 
       <section className="results-section">
         <div className="results-heading">

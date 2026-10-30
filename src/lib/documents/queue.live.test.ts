@@ -32,6 +32,7 @@ it.skipIf(!process.env.LIVE_DB_TEST || !process.env.DATABASE_URL)("운영 대기
     await pool.query(`CREATE SCHEMA ${schema}`);
     await pool.query(`CREATE TABLE ${schema}.notices(key text PRIMARY KEY,detail jsonb)`);
     await pool.query((await readFile("db/migrations/0006-document-extraction.sql", "utf8")).replaceAll("public.",`${schema}.`));
+    await pool.query((await readFile('db/migrations/0008-extraction-diagnostics.sql','utf8')).replaceAll('public.',`${schema}.`));
     await pool.query(`INSERT INTO ${schema}.notices VALUES($1,$2)`,[key,JSON.stringify({attachments:[file(1),file(2)]})]);
     const requests = await Promise.all([q.enqueue(key,fileNo,1,"automatic"),q.enqueue(key,fileNo,1,"manual")]);
     expect(requests[0].id).toBe(requests[1].id);
@@ -42,8 +43,14 @@ it.skipIf(!process.env.LIVE_DB_TEST || !process.env.DATABASE_URL)("운영 대기
     expect(await q.acquire(rival)).toBe(false);
     const run = await q.claim(token);
     expect(run?.id).toBe(requests[0].id);
+    const at=new Date().toISOString();
+    await q.progress(token,run!.id,{stage:'extracting',at,currentPage:2,completedPages:1,totalPages:3});
+    await q.progress(token,run!.id,{stage:'download',at:new Date(Date.parse(at)-1000).toISOString()});
+    expect((await pool.query(`SELECT stage,current_page,completed_pages FROM ${schema}.attachment_extraction_runs WHERE id=$1`,[run!.id])).rows[0]).toMatchObject({stage:'extracting',current_page:2,completed_pages:1});
+    await expect(q.progress(rival,run!.id,{stage:'saving',at})).rejects.toThrow();
     await expect(q.complete(rival,run!.id,{pages:[],pageCount:0,characterCount:0,extractorVersion:"test",fileHash:"hash"},null)).rejects.toThrow();
     await q.complete(token,run!.id,{pages:[{pageNumber:1,text:"원문"}],pageCount:1,characterCount:2,extractorVersion:"6.4.299 / reading-order-v1",fileHash:"hash"},null);
+    await expect(q.progress(token,run!.id,{stage:'saving',at})).rejects.toThrow();
     expect((await q.claim(token))?.id).toBe(second.id);
     await q.complete(token,second.id,{pages:[{pageNumber:1,text:"원문"}],pageCount:1,characterCount:2,extractorVersion:"6.4.299 / reading-order-v1",fileHash:"hash"},null);
     const fresh = await q.enqueue(key,fileNo,2,"manual");

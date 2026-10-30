@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtemp, writeFile, rm, readdir, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,6 +15,13 @@ async function script(body: string) {
 afterEach(async () => { await Promise.all(fixtures.splice(0).map(path => rm(path, { recursive: true, force: true }))); });
 
 describe("PDF 작업 프로세스 경계", () => {
+  it('진행 메시지와 정제된 원본 오류·종료 코드를 전달합니다',async()=>{
+    const path=await script(`process.send?.({type:'progress',progress:{stage:'extracting',at:new Date().toISOString(),currentPage:2,completedPages:1,totalPages:3}}); await writeFile(join(dir,'error.json'),JSON.stringify({error:'파서 실패',diagnostic:{name:'ParserError',message:'원본 오류',stack:'원본 스택'}})); process.exitCode=1;`);
+    const onProgress=vi.fn();
+    const error=await superviseExtraction('id','key',new AbortController().signal,{script:path,onProgress}).catch(e=>e);
+    expect(onProgress).toHaveBeenCalledWith(expect.objectContaining({stage:'extracting',currentPage:2}));
+    expect(error.diagnostic).toMatchObject({name:'ParserError',message:'원본 오류',exitCode:1});
+  });
   it("시간 초과로 멈춘 프로세스를 종료하고 임시 경로를 지웁니다", async () => {
     const before = (await readdir(tmpdir())).filter(name => name.startsWith("g2b-pdf-worker-"));
     const path = await script("setInterval(()=>{},1000);");

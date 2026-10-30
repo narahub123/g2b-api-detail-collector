@@ -3,11 +3,13 @@ import type { PdfResult } from "./contract";
 import type { DocumentQueue, QueueRun } from "./queue";
 import { classifyExtractionError } from "./errors";
 import { superviseExtraction } from "./supervisor";
+import {diagnosticError,ExtractionError,sanitizeStoredDiagnostic} from './diagnostics';
+import type {ExtractionProgress} from './diagnostics';
 
 export type BatchOptions = { mode: "local" | "cloud"; limit?:number; budgetMinutes?:number; noticeKey?:string;
   discover?:boolean;
   signal?:AbortSignal; heartbeatMs?:number; renewalTimeoutMs?:number; now?:()=>number;
-  extract?:(run:QueueRun,token:string,signal:AbortSignal)=>Promise<{result:PdfResult;peakMemory:number|null}> };
+  extract?:(run:QueueRun,token:string,signal:AbortSignal,progress?:(value:ExtractionProgress)=>void)=>Promise<{result:PdfResult;peakMemory:number|null}> };
 export type BatchSummary = { startedAt:string;finishedAt:string;attempts:number;remainingReady:number;checked:number;recovered:number;exhausted:number;
   elapsedMs:number;retries:number;completed:number;failed:number;noText:number;peakMemoryBytes:number|null;
   reason:"no_ready_request"|"count_limit"|"time_budget"|"lease_busy"|"lease_lost"|"shutdown" };
@@ -62,20 +64,53 @@ export async function runBatch(store:DocumentQueue,options:BatchOptions):Promise
       if(now()-start+360000>budget){await store.deferClaim(token,run.id);summary.reason='time_budget';break;}
       if(run.attempt_number>1)summary.retries++;
       let extracted: {result:PdfResult;peakMemory:number|null};
+      let pending:ExtractionProgress|undefined,lastStage='',lastWrite=0,progressError:unknown;
+      let writes:Promise<void>=Promise.resolve();
+      let diagnosticRecorded=false;
+      /** 진단 DB도 사용할 수 없으면 정제된 오류만 작업기 로그에 남깁니다. */
+      const recordStorageError=async(error:unknown)=>{
+        if(diagnosticRecorded)return;diagnosticRecorded=true;
+        const diagnostic=diagnosticError(error);
+        try{await store.recordDiagnostic?.(token,run.id,diagnostic);}
+        catch{console.error(JSON.stringify({operation:'document-storage',runId:run.id,diagnostic}));}
+      };
+      /** 단계 전환은 즉시, 페이지 진행은 두 초마다 합쳐 순서대로 저장합니다. */
+      const progress=(value:ExtractionProgress)=>{
+        pending=value;
+        if(value.stage===lastStage&&Date.now()-lastWrite<2000)return;
+        lastStage=value.stage;lastWrite=Date.now();pending=undefined;
+        writes=writes.then(async()=>{if(!progressError&&!abort.signal.aborted)await store.progress?.(token,run.id,value);}).catch(error=>{progressError=error;lose();});
+      };
+      /** 종료 직전의 마지막 페이지 진행도 완료 상태보다 먼저 반영합니다. */
+      const flush=async()=>{
+        try{await writes;if(pending&&!abort.signal.aborted)await store.progress?.(token,run.id,pending);pending=undefined;if(progressError)throw progressError;}
+        catch(error){await recordStorageError(error);throw error;}
+      };
       try {
-        const extract=options.extract??((r,t,signal)=>superviseExtraction(r.id,r.notice_key,signal,{script:"scripts/document-extract.ts",ownerToken:t}));
-        extracted=await extract(run,token,abort.signal);
+        progress({stage:'attachment',at:new Date().toISOString()});
+        const extract=options.extract??((r,t,signal,onProgress)=>superviseExtraction(r.id,r.notice_key,signal,{script:"scripts/document-extract.ts",ownerToken:t,onProgress}));
+        extracted=await extract(run,token,abort.signal,progress);
+        await flush();
       } catch(error) {
+        await flush();
         if(abort.signal.aborted)break;
         const failure=classifyExtractionError(error);
-        await store.fail(token,run.id,failure);
+        const diagnostic=error instanceof ExtractionError&&error.diagnostic?sanitizeStoredDiagnostic(error.diagnostic):diagnosticError(error);
+        await store.fail(token,run.id,{...failure,diagnostic});
         summary.failed++;
         if(failure.retry && run.attempt_number>=3)summary.exhausted++;
         continue;
       }
       if(abort.signal.aborted)break;
       // 저장 실패는 추출 오류로 바꾸지 않습니다. 롤백된 processing은 다음 임대 복구가 처리합니다.
-      await store.complete(token,run.id,extracted.result,extracted.peakMemory);
+      try{
+        await store.progress?.(token,run.id,{stage:'saving',at:new Date().toISOString()});
+        await store.complete(token,run.id,extracted.result,extracted.peakMemory);
+      }
+      catch(error){
+        await recordStorageError(error);
+        throw error;
+      }
       if(extracted.result.characterCount)summary.completed++;else summary.noText++;
       if(extracted.peakMemory!==null)summary.peakMemoryBytes=Math.max(summary.peakMemoryBytes??0,extracted.peakMemory);
     }
