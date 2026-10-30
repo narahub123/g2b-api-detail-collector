@@ -1,3 +1,4 @@
+import {measure} from './collection-performance';
 import * as cheerio from "cheerio";
 import { extractCommonSections } from "./common-content-extractor";
 import { collectAttachments } from "./attachment-collector";
@@ -442,9 +443,9 @@ export async function collectModalContents(
         // 조회용 후보 필터를 통과한 컨트롤에 대해서만 클릭 이벤트를 발생시킵니다.
         // WebSquare의 처리 오버레이가 조회용 컨트롤을 덮을 수 있으므로,
         // 필터 통과 후 이벤트를 직접 발생시켜 오버레이의 클릭 가로채기를 피합니다.
-        await control.dispatchEvent("click", undefined, { timeout: 2500 });
+        await measure("modal.open", () => control.dispatchEvent("click", undefined, { timeout: 2500 }));
         // 새로 열린 모달의 값을 읽기 전에 안정화될 때까지 기다립니다.
-        const settling = await waitForModalDataSettled(page, before);
+        const settling = await measure("modal.wait-settled", () => waitForModalDataSettled(page, before));
         if (page.url() !== beforeUrl)
           throw new Error("클릭 후 페이지가 이동했습니다.");
         // 클릭 전에는 없었던 새 모달을 식별합니다.
@@ -466,8 +467,8 @@ export async function collectModalContents(
           const modalIndex = captures.length;
           const clickDownloads = fresh.id
             ? await collectClickDownloads(page, page.locator(`[id=${JSON.stringify(fresh.id)}]`)) : [];
-          const pagedTables = await collectPaginatedTables(page,
-            fresh.id ? page.locator(`[id=${JSON.stringify(fresh.id)}]`) : page.locator(MODAL_SELECTOR).last());
+          const pagedTables = await measure("modal.table-collect", () => collectPaginatedTables(page,
+            fresh.id ? page.locator(`[id=${JSON.stringify(fresh.id)}]`) : page.locator(MODAL_SELECTOR).last()));
           const structured = extractModalStructure(fresh.html, page.url(),
             { noticeKey, clickDownloads, modalIndex });
           structured.sections = applyPaginatedTables(structured.sections, pagedTables);
@@ -543,9 +544,9 @@ export async function collectModalContents(
             .first();
           try {
             if (await close.isVisible().catch(() => false))
-              await close.dispatchEvent("click", undefined, { timeout: 2500 });
+              await measure("modal.close", () => close.dispatchEvent("click", undefined, { timeout: 2500 }));
             else await page.keyboard.press("Escape");
-            await dialog.waitFor({ state: "hidden", timeout: 2500 });
+            await measure("modal.wait-hidden", () => dialog.waitFor({ state: "hidden", timeout: 2500 }));
           } catch (error) {
             failures.push(
               `${candidate.label.slice(0, 60)} 모달 복귀 실패: ${error instanceof Error ? error.message.slice(0, 120) : String(error)}`,
@@ -584,7 +585,7 @@ export async function replayModalPath(page: import("playwright-core").Page,
     const before = await visibleDialogs(page);
     const root = dialogId ? page.locator(`[id=${JSON.stringify(dialogId)}]`) : page.locator("body");
     await root.locator(CLICK_SELECTOR).nth(step.index).dispatchEvent("click", undefined, { timeout: 2500 });
-    await waitForModalDataSettled(page, before);
+    await measure("modal.wait-settled", () => waitForModalDataSettled(page, before));
     const fresh = (await visibleDialogs(page)).find((item) => !before.some((old) => old.id === item.id));
     if (!fresh?.id) throw new Error("첨부파일 모달을 열 수 없습니다.");
     dialogId = fresh.id;

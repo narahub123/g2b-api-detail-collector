@@ -1,3 +1,4 @@
+import {measure, measureSync} from './collection-performance';
 import * as cheerio from "cheerio";
 import { chromium } from "playwright-core";
 import { noticeKeyFromParts } from "./identity";
@@ -122,36 +123,37 @@ export function extractDetailPage(html: string, pageUrl: string, fileMetadata: A
 export type ScrapeResult = { detail: ScrapedDetail; relatedNoticeKeys: string[];
   warnings?: { stage: "attachment" | "detail"; operation: string; message: string }[] };
 
+/** 기존 상세 수집 순서를 유지하면서 선택적으로 단계별 시간을 기록합니다. */
 export async function scrapeDetailPage(url: string): Promise<ScrapeResult> {
   assertG2bUrl(url);
-  const browser = await chromium.launch({ channel: "chrome", executablePath: process.env.G2B_CHROME_PATH || undefined, headless: true });
+  const browser = await measure("browser.launch", () => chromium.launch({ channel: "chrome", executablePath: process.env.G2B_CHROME_PATH || undefined, headless: true }));
   try {
-    const page = await browser.newPage({ locale: "ko-KR", acceptDownloads: false });
+    const page = await measure("browser.page", () => browser.newPage({ locale: "ko-KR", acceptDownloads: false }));
     const warnings: NonNullable<ScrapeResult["warnings"]> = [];
     const responses: Promise<AttachmentMetadata[]>[] = [];
     page.on("response", (response) => {
       if (!response.url().includes("/selectUntyAtchFileList.do")) return;
-      responses.push(response.json().then((body: { dlUntyAtchFileL?: AttachmentMetadata[] }) => body.dlUntyAtchFileL || []).catch((error) => {
+      responses.push(measure("attachment.response", () => response.json()).then((body: { dlUntyAtchFileL?: AttachmentMetadata[] }) => body.dlUntyAtchFileL || []).catch((error) => {
         warnings.push({ stage: "attachment", operation: "read-attachment-metadata", message: error instanceof Error ? error.message : String(error) });
         return [];
       }));
     });
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45_000 });
-    await page.locator('td[data-title="공고명"]').first().waitFor({ timeout: 45_000 });
-    await page.locator('table[id$="_grdFile_body_table"]').first().waitFor({ timeout: 20_000 });
-    await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch((error) => {
+    await measure("page.goto", () => page.goto(url, { waitUntil: "domcontentloaded", timeout: 45_000 }));
+    await measure("wait.notice", () => page.locator('td[data-title="공고명"]').first().waitFor({ timeout: 45_000 }));
+    await measure("wait.attachment-table", () => page.locator('table[id$="_grdFile_body_table"]').first().waitFor({ timeout: 20_000 }));
+    await measure("wait.network-idle", () => page.waitForLoadState("networkidle", { timeout: 15_000 })).catch((error) => {
       warnings.push({ stage: "detail", operation: "wait-network-idle", message: error instanceof Error ? error.message : String(error) });
     });
-    const metadata = (await Promise.all(responses)).flat();
-    const clickDownloads = await collectClickDownloads(page);
-    const html = await page.evaluate(() => {
+    const metadata = (await measure("attachment.join", () => Promise.all(responses))).flat();
+    const clickDownloads = await measure("attachment.click-metadata", () => collectClickDownloads(page));
+    const html = await measure("page.html", () => page.evaluate(() => {
       document.querySelectorAll("input,textarea,select").forEach((element) => {
         if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement) element.setAttribute("value", element.value);
       });
       return document.documentElement.outerHTML;
-    });
-    const detail = extractDetailPage(html, url, metadata, clickDownloads);
-    const pagedTables = await collectPaginatedTables(page, page.locator("body"));
+    }));
+    const detail = measureSync("detail.extract", () => extractDetailPage(html, url, metadata, clickDownloads));
+    const pagedTables = await measure("table.collect", () => collectPaginatedTables(page, page.locator("body")));
     detail.paginationAudit = true;
     if (detail.sections) detail.sections = applyPaginatedTables(detail.sections, pagedTables);
     if (detail.summary) detail.summary.tableRowCount = detail.sections?.reduce((count, section) =>
@@ -160,7 +162,7 @@ export async function scrapeDetailPage(url: string): Promise<ScrapeResult> {
     const relatedNoticeKeys = extractRelatedNoticeKeys(html);
     // Preserve the original extraction independently of modal exploration failures.
     try {
-      const { captures, discovery } = await collectModalContents(page, detail.noticeKey);
+      const { captures, discovery } = await measure("modal.collect", () => collectModalContents(page, detail.noticeKey));
       detail.modalCaptures = captures;
       detail.modalDiscovery = discovery;
       detail.modalAttachmentSources = captures.flatMap((capture) =>
@@ -172,5 +174,5 @@ export async function scrapeDetailPage(url: string): Promise<ScrapeResult> {
         failures: [error instanceof Error ? error.message : String(error)] };
     }
     return { detail, relatedNoticeKeys, warnings };
-  } finally { await browser.close(); }
+  } finally { await measure("browser.close", () => browser.close()); }
 }
