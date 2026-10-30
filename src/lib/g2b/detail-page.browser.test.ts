@@ -1,6 +1,7 @@
 import { chromium } from "playwright-core";
-import { afterAll, beforeAll, expect, it } from "vitest";
-import { collectClickDownloads, collectModalContents } from "./detail-page";
+import { afterAll, beforeAll, expect, it, vi } from "vitest";
+import { collectClickDownloads, collectModalContents, scrapeDetailPage } from "./detail-page";
+import type { CollectionStage } from "./collection-progress";
 import { replayModalPath } from "./modal-collector";
 
 let browser: Awaited<ReturnType<typeof chromium.launch>>;
@@ -10,6 +11,39 @@ beforeAll(async () => {
 afterAll(async () => {
   await browser?.close();
 });
+
+it("실제 브라우저 수집 단계 알림을 순서대로 기다리고 종료 알림 실패에도 자원을 닫습니다", async () => {
+  const context = await browser.newContext();
+  const stages: CollectionStage[] = [];
+  const close = vi.fn(async () => context.close());
+  await context.route("**/*", route => route.fulfill({ contentType: "text/html; charset=utf-8", body: `<main>
+    <div class="dfbox"><div class="fl"><h4 class="df_tit">공고일반</h4></div></div>
+    <table><tr><th>공고명</th><td data-title="공고명">관측 테스트</td></tr></table>
+    <table id="test_grdFile_body_table"><tr><td>첨부 없음</td></tr></table></main>` }));
+  const launch = vi.spyOn(chromium, "launch").mockResolvedValue({
+    newPage: () => context.newPage(), close,
+  } as unknown as Awaited<ReturnType<typeof chromium.launch>>);
+  try {
+    const result = await scrapeDetailPage("https://www.g2b.go.kr/link/PNPE027_01/single/?bidPbancNo=R26BK1&bidPbancOrd=000", {
+      onProgress: async stage => { await Promise.resolve(); stages.push(stage); },
+    });
+    expect(result.detail.sections?.[0].fields[0].label).toBe("공고명");
+    expect(stages).toEqual(["opening", "opening", "extracting", "extracting", "tables", "tables", "modals", "modals", "closing", "closing"]);
+    expect(close).toHaveBeenCalledTimes(1);
+  } finally { launch.mockRestore(); await context.close(); }
+
+  const failureContext = await browser.newContext();
+  const failureClose = vi.fn(async () => failureContext.close());
+  const failureLaunch = vi.spyOn(chromium, "launch").mockResolvedValue({
+    newPage: async () => { throw Error("페이지 생성 실패"); }, close: failureClose,
+  } as unknown as Awaited<ReturnType<typeof chromium.launch>>);
+  try {
+    await expect(scrapeDetailPage("https://www.g2b.go.kr/link/PNPE027_01/single/", {
+      onProgress: async stage => { if (stage === "closing") throw Error("진행 저장 실패"); },
+    })).rejects.toThrow("진행 저장 실패");
+    expect(failureClose).toHaveBeenCalledTimes(1);
+  } finally { failureLaunch.mockRestore(); await failureContext.close(); }
+}, 30000);
 
 it("discovers clickable attachment identity from any WebSquare file grid", async () => {
   const page = await browser.newPage();
