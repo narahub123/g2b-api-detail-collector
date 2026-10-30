@@ -74,6 +74,6 @@ describe("CollectionManager", () => {
       "data-show-progress",
       "false",
     );
-    expect(screen.getAllByText("R26BK1--000: 수집 완료")).toHaveLength(1);
+    expect(screen.getAllByRole("row", { name: /R26BK1--000 수집 완료/, hidden: true })).toHaveLength(1);
   });
 });

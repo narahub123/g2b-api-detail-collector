@@ -1,4 +1,4 @@
-import { ChevronRight } from "lucide-react";
+import { CollectionJobObservation } from "./CollectionJobObservation";
 import type { CollectionJob } from "@/lib/g2b/collection-job";
 
 /** 수동·자동 수집 공통 결과. 조회·폴링 로직은 변경하지 않습니다. */
@@ -21,12 +21,12 @@ export function CollectionJobProgress({ job }: { job: CollectionJob | null }) {
           : `${job.apiCount}건`
       : `${job.apiProcessed ?? 0} / ${job.apiTotal}건`;
   return (
-    <div className="collection-progress" aria-live="polite">
+    <div className="collection-progress">
       <div className="collection-progress-overview">
         <span className="collection-progress-mode">
           {job.mode === "incremental" ? "자동 수집" : "수동 수집"}
         </span>
-        <strong
+        <strong role="status"
           className={`collection-progress-status collection-progress-status--${job.status}`}
         >
           {status}
@@ -63,30 +63,7 @@ export function CollectionJobProgress({ job }: { job: CollectionJob | null }) {
           {job.errors.at(-1)}
         </p>
       )}
-      {job.results && job.results.length > 0 && (
-        <details className="job-results collection-progress-results">
-          <summary>
-            <span>공고별 결과 {job.results.length}건</span>
-            <ChevronRight
-              className="collection-progress-results-chevron"
-              size={20}
-              aria-hidden="true"
-            />
-          </summary>
-          <ul>
-            {job.results.map((result) => (
-              <li key={result.key}>
-                {result.key}:{" "}
-                {result.status === "succeeded"
-                  ? "수집 완료"
-                  : result.status === "failed"
-                    ? "수집 실패"
-                    : "수집 전"}
-              </li>
-            ))}
-          </ul>
-        </details>
-      )}
+      <CollectionJobObservation initial={job} />
     </div>
   );
 }

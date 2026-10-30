@@ -15,8 +15,8 @@ describe("CollectionForm", () => {
         { key: "R26BK2--000", status: "failed", error: "상세 접근 실패" }] }) });
     render(<CollectionForm fetcher={fetcher as typeof fetch} />);
     expect(await screen.findByText("공고별 결과 2건")).toBeInTheDocument();
-    expect(screen.getByText(/R26BK1--000: 수집 완료/)).toBeInTheDocument();
-    expect(screen.getByText(/R26BK2--000: 수집 실패/)).toBeInTheDocument();
+    expect(screen.getByRole("row", { name: /R26BK1--000 수집 완료/, hidden: true })).toBeInTheDocument();
+    expect(screen.getByRole("row", { name: /R26BK2--000 수집 실패/, hidden: true })).toBeInTheDocument();
   });
   it("새로고침 후 DB에서 읽은 실행 상태의 API·상세 목표를 표시합니다", async () => {
     const fetcher = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: "job", mode: "collection",
@@ -44,9 +44,9 @@ describe("CollectionForm", () => {
       results: [{ key: "R26BK1--000", status: "succeeded" }, { key: "R26BK2--000", status: "failed" }]
     }) });
     render(<CollectionForm fetcher={fetcher as typeof fetch} />);
-    expect(await screen.findByText("수집 실패")).toBeTruthy();
-    expect(screen.getByText(/R26BK1--000: 수집 완료/)).toBeTruthy();
-    expect(screen.getByText(/R26BK2--000: 수집 실패/)).toBeTruthy();
+    expect(await screen.findByText("상태: 수집 실패")).toBeTruthy();
+    expect(screen.getByRole("row", { name: /R26BK1--000 수집 완료/, hidden: true })).toBeTruthy();
+    expect(screen.getByRole("row", { name: /R26BK2--000 수집 실패/, hidden: true })).toBeTruthy();
   });
   it("rejects reversed posted dates before sending a request", () => {
     const fetcher = vi.fn().mockResolvedValue({ ok: true, json: async () => null });

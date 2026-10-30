@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { getCollectionJob } from "@/lib/g2b/collection-job";
 import { diagnosticCounts, type DiagnosticEntry } from "@/lib/g2b/collection-diagnostics";
+import { CollectionJobObservation } from "@/components/CollectionJobObservation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,7 +21,7 @@ function DiagnosticRow({ entry }: { entry: DiagnosticEntry }) {
   </li>;
 }
 
-/** 작업별 진단과 초과 집계, 이전 형식의 오류를 보여줍니다. */
+/** 작업 관측과 기존 진단 필터·초과 집계·이전 오류 기록을 함께 보여줍니다. */
 export default async function CollectionJobPage({ params, searchParams }: {
   params: Promise<{ jobId: string }>;
   searchParams?: Promise<{ severity?: string; stage?: string; key?: string }>;
@@ -36,8 +37,9 @@ export default async function CollectionJobPage({ params, searchParams }: {
     (!filters.key || entry.target?.key?.includes(filters.key)));
   return <main className="site-shell" style={{ paddingBottom: 70 }}>
     <a className="back-link" href="/admin/collections">← 수집 작업 이력</a>
-    <h1>수집 진단</h1>
-    <p>작업 {job.id} · {job.status} · 실패 {counts.failure}건 · 경고 {counts.warning}건 · 재시도 {counts.retry}건</p>
+    <h1>수집 작업 상세</h1>
+    <p>작업 {job.id} · 실패 {counts.failure}건 · 경고 {counts.warning}건 · 재시도 {counts.retry}건</p>
+    <CollectionJobObservation initial={job} poll />
     {diagnostics ? <>
       <form method="get" style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 24 }}>
         <label>분류 <select name="severity" defaultValue={filters.severity || ""}><option value="">전체</option><option value="failure">실패</option><option value="warning">경고</option><option value="retry">재시도</option></select></label>
