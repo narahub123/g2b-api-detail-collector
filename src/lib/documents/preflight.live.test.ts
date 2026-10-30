@@ -9,6 +9,7 @@ it.skipIf(!process.env.LIVE_DB_TEST||!process.env.DATABASE_URL)('읽기 전용 �
  try{
   await pool.query(`CREATE SCHEMA ${schema}`);await pool.query(`CREATE TABLE ${schema}.notices(key text PRIMARY KEY,detail jsonb)`);
   await pool.query((await readFile('db/migrations/0006-document-extraction.sql','utf8')).replaceAll('public.',`${schema}.`));
+  await pool.query((await readFile('db/migrations/0008-extraction-diagnostics.sql','utf8')).replaceAll('public.',`${schema}.`));
   await pool.query(`INSERT INTO ${schema}.notices VALUES($1,$2)`,[key,JSON.stringify({attachments:[{name:'공고.pdf',url:`/api/attachments/${key}?fileNo=${file}&seq=1`} ]})]);
   expect((await probePdfWork(pool,schema,{discover:false})).needed).toBe(false);
   expect((await probePdfWork(pool,schema,{discover:true})).discovery).toBe(true);

@@ -1,6 +1,7 @@
 import { expect, it, vi } from "vitest";
 import { classifyExtractionError } from "./errors";
 import { runBatch, LocalWake } from "./worker";
+import type {ExtractionProgress} from './diagnostics';
 
 it("영구 오류와 일시 오류를 구분하고 내부 메시지는 저장하지 않습니다",()=>{
   expect(classifyExtractionError(new Error("PDF 처리 시간이 5분 제한을 초과했습니다.")).retry).toBe(false);
@@ -12,7 +13,7 @@ it("영구 오류와 일시 오류를 구분하고 내부 메시지는 저장하
 /** 실제 실행 대신 제어 가능한 저장소로 배치 경계만 검사합니다. */
 function batchStore(){
  return {acquire:vi.fn(async()=>true),release:vi.fn(async()=>{}),renew:vi.fn(async()=>true),
- recover:vi.fn(async()=>({checked:0,recovered:0,exhausted:0})),
+ recover:vi.fn(async()=>({checked:0,recovered:0,exhausted:0})),progress:vi.fn<(_token:string,_id:string,value:ExtractionProgress)=>Promise<void>>(async()=>{}),recordDiagnostic:vi.fn(async()=>{}),
  claim:vi.fn(async()=>({id:"id",notice_key:"key"})),complete:vi.fn(async()=>{}),fail:vi.fn(async()=>{}),readyCount:vi.fn(async()=>0)};
 }
 it("임대 갱신 실패는 자식을 중단하고 결과 저장·다음 파일 선점을 막습니다",async()=>{
@@ -28,6 +29,7 @@ it("저장 실패를 추출 실패로 바꾸지 않고 복구 대상 processing�
  const store=batchStore();store.complete.mockRejectedValue(new Error('DB 저장 오류'));
  await expect(runBatch(store as never,{mode:"local",extract:async()=>({result:{pages:[],pageCount:0,characterCount:0,extractorVersion:"test",fileHash:"hash"},peakMemory:null})})).rejects.toThrow('DB 저장');
  expect(store.fail).not.toHaveBeenCalled();expect(store.release).toHaveBeenCalledOnce();
+ expect(store.recordDiagnostic).toHaveBeenCalledWith(expect.any(String),'id',expect.objectContaining({message:'DB 저장 오류'}));
 });
 it("6분 여유가 없으면 파일을 시작하지 않고 미래 요청만 남아도 기다리지 않습니다",async()=>{
  const store=batchStore();let calls=0;
@@ -68,6 +70,28 @@ it("로컬 깨우기를 합치며 실행 중 추가 깨우기로 새 회차를 �
  const wake=new LocalWake(async()=>{calls++;await new Promise<void>(r=>{resolve=r;});});
  const first=wake.wake(); wake.wake(); expect(calls).toBe(1); resolve(); await first;
  const second=wake.wake();expect(calls).toBe(2);resolve();await second;
+});
+it('단계 변경과 마지막 페이지를 완료 저장 전에 순서대로 반영합니다',async()=>{
+ const store=batchStore(),order:string[]=[];
+ store.progress.mockImplementation(async(_token:string,_id:string,p:{stage:string;completedPages?:number})=>{order.push(`${p.stage}:${p.completedPages??'-'}`);});
+ store.complete.mockImplementation(async()=>{order.push('complete');});
+ await runBatch(store as never,{mode:'local',limit:1,extract:async(_r,_t,_s,progress)=>{
+  progress?.({stage:'download',at:new Date().toISOString()});
+  progress?.({stage:'extracting',at:new Date().toISOString(),currentPage:1,completedPages:0,totalPages:2});
+  progress?.({stage:'extracting',at:new Date().toISOString(),currentPage:2,completedPages:2,totalPages:2});
+  return {result:{pages:[],pageCount:2,characterCount:0,extractorVersion:'test',fileHash:'hash'},peakMemory:null};
+ }});
+ expect(order).toEqual(['attachment:-','download:-','extracting:0','extracting:2','saving:-','complete']);
+});
+it('결과 저장 단계의 진행 기록 실패도 저장 진단으로 남깁니다',async()=>{
+ const store=batchStore();store.progress.mockImplementation(async(_t:string,_id:string,p:{stage:string})=>{if(p.stage==='saving')throw new Error('진행 저장 실패');});
+ await expect(runBatch(store as never,{mode:'local',limit:1,extract:async()=>({result:{pages:[],pageCount:0,characterCount:0,extractorVersion:'test',fileHash:'hash'},peakMemory:null})})).rejects.toThrow('진행 저장 실패');
+ expect(store.recordDiagnostic).toHaveBeenCalled();expect(store.fail).not.toHaveBeenCalled();
+});
+it('추출 중 진행 기록 실패도 원본 오류를 정제해 진단으로 남깁니다',async()=>{
+ const store=batchStore();store.progress.mockRejectedValue(new Error('진행 DB 오류 token=secret'));
+ await expect(runBatch(store as never,{mode:'local',limit:1,extract:async()=>({result:{pages:[],pageCount:0,characterCount:0,extractorVersion:'test',fileHash:'hash'},peakMemory:null})})).rejects.toThrow('진행 DB 오류');
+ expect(store.recordDiagnostic).toHaveBeenCalledOnce();expect(JSON.stringify(store.recordDiagnostic.mock.calls)).not.toContain('secret');expect(store.fail).not.toHaveBeenCalled();
 });
 it("로컬 회차는 manual만 최대 3건 처리하고 실행 예산을 초기화하지 않습니다",async()=>{
  const claims: unknown[]=[];let processed=0;

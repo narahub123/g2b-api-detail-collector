@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { MAX_BYTES, RUN_TIMEOUT_MS } from "./contract";
 import type { PdfResult } from "./contract";
+import {ExtractionError,isExtractionProgress} from './diagnostics';
+import type {DiagnosticError,ExtractionProgress} from './diagnostics';
 
 /** 다운로드 임시 디렉터리의 크기를 합산해 완료 전에도 과대 파일을 중단합니다. */
 async function directoryBytes(path: string): Promise<number> {
@@ -20,10 +22,13 @@ async function directoryBytes(path: string): Promise<number> {
 
 /** 파서가 멈춰도 브라우저 자식 프로세스까지 강제 종료하고 임시 자료를 정리합니다. */
 export async function superviseExtraction(id: string, key: string, signal: AbortSignal,
-  options: { timeoutMs?: number; script?: string; maxBytes?: number; ownerToken?: string } = {}): Promise<{ result: PdfResult; peakMemory: number | null }> {
+  options: { timeoutMs?: number; script?: string; maxBytes?: number; ownerToken?: string; onProgress?:(value:ExtractionProgress)=>void } = {}): Promise<{ result: PdfResult; peakMemory: number | null }> {
   const directory = await mkdtemp(join(tmpdir(), "g2b-pdf-worker-"));
   const child = spawn(process.execPath, ["--import", "tsx", options.script ?? resolve("scripts/document-extract.ts"), id, key, directory],
-    { detached: process.platform !== "win32", stdio: "ignore", env: { ...process.env, PDF_EXTRACTION_OWNER_TOKEN: options.ownerToken, TMPDIR: directory, TEMP: directory, TMP: directory } });
+    { detached: process.platform !== "win32", stdio: ['ignore','ignore','ignore','ipc'], env: { ...process.env, PDF_EXTRACTION_OWNER_TOKEN: options.ownerToken, TMPDIR: directory, TEMP: directory, TMP: directory } });
+  child.on('message',(message:unknown)=>{
+    if(message&&typeof message==='object'&&'type' in message&&message.type==='progress'&&'progress' in message&&isExtractionProgress(message.progress))options.onProgress?.(message.progress);
+  });
   let failure: string | null = null;
   let peakMemory: number | null = null;
   let inspecting = false;
@@ -68,13 +73,15 @@ export async function superviseExtraction(id: string, key: string, signal: Abort
   }, 200);
   try {
     if (signal.aborted) abort();
-    const code = await new Promise<number | null>((accept, reject) => {
-      child.once("error", reject); child.once("exit", accept);
+    const [code,exitSignal] = await new Promise<[number | null,NodeJS.Signals|null]>((accept, reject) => {
+      child.once("error", reject); child.once("exit", (code,signal)=>accept([code,signal]));
     });
-    if (failure) throw new Error(failure);
+    if (failure) throw new ExtractionError(/시간/.test(failure)?'time_limit':/크기|50MiB/.test(failure)?'size_limit':'process_exit',failure,{exitCode:code,signal:exitSignal});
     if (code !== 0) {
-      const message = await readFile(join(directory, "error.json"), "utf8").then(value => JSON.parse(value).error).catch(() => "PDF 작업 프로세스가 종료되었습니다.");
-      throw new Error(message);
+      const saved = await readFile(join(directory, "error.json"), "utf8").then(value => JSON.parse(value) as {error:string;diagnostic?:DiagnosticError}).catch(() => null);
+      const error=new ExtractionError(saved?'child_error':'process_exit',saved?.error??'PDF 작업 프로세스가 종료되었습니다.',{exitCode:code,signal:exitSignal});
+      if(saved?.diagnostic)error.diagnostic={...saved.diagnostic,exitCode:code,signal:exitSignal};
+      throw error;
     }
     const result = JSON.parse(await readFile(join(directory, "result.json"), "utf8")) as PdfResult;
     return { result, peakMemory };
