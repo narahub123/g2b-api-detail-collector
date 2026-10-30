@@ -1,5 +1,6 @@
 import {measure, measureSync} from './collection-performance';
 import {redactDiagnostic} from './collection-diagnostics';
+import {ATTACHMENT_NAME_SELECTOR, MODAL_TIMING, isResetControl, isAttachmentPreview} from './modal-policy';
 import * as cheerio from "cheerio";
 import { extractCommonSections } from "./common-content-extractor";
 import { collectAttachments } from "./attachment-collector";
@@ -73,6 +74,9 @@ type Candidate = {
   sectionHint: string | null;
   html: string;
   skip: boolean;
+  buttonLike: boolean;
+  tableId: string;
+  rowHasAttachmentName: boolean;
 };
 
 /**
@@ -160,8 +164,8 @@ type ModalWaitResult = {
 async function waitForModalDataSettled(
   page: import("playwright-core").Page,
   before: DialogSnapshot[],
-  maxWaitMs = 8000,
-  quietMs = 1500,
+  maxWaitMs = MODAL_TIMING.maxWaitMs,
+  quietMs = MODAL_TIMING.quietMs,
 ): Promise<ModalWaitResult> {
   const started = Date.now();
   // 데이터 셀의 값 목록을 직렬화해 변경이 멈췄는지 비교합니다.
@@ -227,7 +231,7 @@ async function waitForModalDataSettled(
         };
       }
     }
-    await page.waitForTimeout(125);
+    await page.waitForTimeout(MODAL_TIMING.pollMs);
   }
   return { status: "timeout", elapsedMs: Date.now() - started, nonemptyValues };
 }
@@ -246,8 +250,8 @@ async function clickCandidates(
   const root = dialogId
     ? page.locator(`[id=${JSON.stringify(dialogId)}]`)
     : page.locator("body");
-  return root.locator(CLICK_SELECTOR).evaluateAll(
-    (nodes, { dialogId, modalSelector }) =>
+  const candidates = await root.locator(CLICK_SELECTOR).evaluateAll(
+    (nodes, { dialogId, modalSelector, attachmentNameSelector }) =>
       nodes
         .map((node, index) => {
           const element = node as HTMLElement;
@@ -380,12 +384,17 @@ async function clickCandidates(
             sectionHint,
             html: element.outerHTML.slice(0, 3000),
             skip,
+            buttonLike: element.matches('button,input,[role="button"]'),
+            tableId: element.closest('table')?.id || '',
+            rowHasAttachmentName: Boolean(element.closest('tr')?.querySelector(attachmentNameSelector)),
           };
         })
         // 위 제외 조건을 하나도 충족하지 않은 요소만 실제 클릭 후보로 반환합니다.
         .filter((candidate) => !candidate.skip),
-    { dialogId, modalSelector: MODAL_SELECTOR },
+    { dialogId, modalSelector: MODAL_SELECTOR, attachmentNameSelector: ATTACHMENT_NAME_SELECTOR },
   );
+  // 브라우저에서는 구조만 읽고 사이트별 제외 규칙은 정책 모듈에서 판정합니다.
+  return candidates.filter(candidate => !isResetControl(candidate) && !isAttachmentPreview(candidate));
 }
 
 /**
