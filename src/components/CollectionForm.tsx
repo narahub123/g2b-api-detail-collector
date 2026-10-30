@@ -47,10 +47,11 @@ export function CollectionForm({ fetcher = fetch, onJobChange, showProgress = tr
     return () => clearTimeout(timer);
   }, [job, pollAttempt, fetcher, router]);
 
+  /** 선택한 서울 시분 범위로 수집을 요청하고 작업 상태를 갱신합니다. */
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
-    if (!start || !end || start > end) { setError("시작일과 종료일의 날짜 범위를 확인하세요."); return; }
+    if (!start || !end || start > end) { setError("시작 일시와 종료 일시의 날짜·시간 범위를 확인하세요."); return; }
     setBusy(true);
     try {
       const response = await fetcher("/api/collections", {
@@ -67,12 +68,12 @@ export function CollectionForm({ fetcher = fetch, onJobChange, showProgress = tr
 
   return <FormAccordion title="수동 공고 수집">
       <p style={{ color: "#637784", fontSize: 14, lineHeight: 1.7, margin: "10px 0 20px" }}>
-        공고 게시일 범위를 지정하면 용역 공고와 공개 상세 정보를 DB에 저장합니다.
+        공고 게시 일시 범위(한국시간)를 지정하면 용역 공고와 공개 상세 정보를 DB에 저장합니다.
       </p>
       <form onSubmit={submit} className="collect-form">
-        <label>시작일<input type="date" value={start} onChange={(event) => setStart(event.target.value)} /></label>
+        <label>시작 일시<input type="datetime-local" step={60} value={start} onChange={(event) => setStart(event.target.value)} /></label>
         <span className="date-separator" aria-hidden="true">—</span>
-        <label>종료일<input type="date" value={end} onChange={(event) => setEnd(event.target.value)} /></label>
+        <label>종료 일시<input type="datetime-local" step={60} value={end} onChange={(event) => setEnd(event.target.value)} /></label>
         <button type="submit" disabled={busy}>{busy ? "수집 중…" : "공고 수집 시작"}</button>
       </form>
       {error && <p role="alert" className="error-message">{error}</p>}

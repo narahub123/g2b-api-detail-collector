@@ -6,6 +6,14 @@ vi.mock('@/lib/documents/history-store',async original=>({...await original<obje
 vi.mock('@/lib/documents/page-access',()=>({guardDocumentPage:vi.fn()}));
 vi.mock('@/lib/documents/pool',()=>({getDocumentPool:vi.fn()}));
 import Page from './page';
+it('기존 날짜 링크를 시분으로 표시하고 페이지 이동에 시분 조건을 보존합니다',async()=>{
+ list.mockResolvedValue({items:[],hasNext:true,page:1,totalCount:41,totalPages:3});
+ const html=renderToStaticMarkup(await Page({searchParams:Promise.resolve({from:'2026-10-30',to:'2026-10-30T10:30'})}));
+ expect(html).toContain('type="datetime-local"');
+ expect(html).toContain('value="2026-10-30T00:00"');
+ expect(html).toContain('value="2026-10-30T10:30"');
+ expect(html).toContain('to=2026-10-30T10%3A30&amp;page=2');
+});
 it('미요청 파일은 실행 상세 링크 없이 공고와 등록 정보를 표시합니다',async()=>{
  listDocuments.mockResolvedValue({items:[{document_id:'doc',notice_key:'notice',filename:'미요청.hwp',document_type:'hwp',created_at:'2026-10-30T00:00:00Z',latest:null}],totalCount:1,totalPages:1,page:1,hasNext:false});
  const html=renderToStaticMarkup(await Page({searchParams:Promise.resolve({view:'documents',status:'unrequested'})}));
@@ -37,7 +45,7 @@ it('문서 공통 필터와 빈 이력 안내를 표시합니다',async()=>{
 it('DB 오류와 잘못된 필터를 사용자 안내로 표시합니다',async()=>{
  list.mockRejectedValue(new Error('secret'));
  expect(renderToStaticMarkup(await Page({searchParams:Promise.resolve({})}))).not.toContain('secret');
- const html=renderToStaticMarkup(await Page({searchParams:Promise.resolve({from:'bad'})}));expect(html).toContain('접수일을 확인하세요.');
+ const html=renderToStaticMarkup(await Page({searchParams:Promise.resolve({from:'bad'})}));expect(html).toContain('접수 시작·종료 일시를 확인하세요.');
 });
 it('공통 페이지네이션으로 이동하면서 추출 검색 조건을 유지합니다',async()=>{
  list.mockResolvedValue({items:[],hasNext:true,page:1,totalCount:41,totalPages:3});

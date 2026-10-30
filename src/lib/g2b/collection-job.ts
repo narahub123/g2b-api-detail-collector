@@ -1,7 +1,8 @@
+import { seoulInputToUtc } from "../seoul-time";
 import { randomUUID } from "node:crypto";
-import { ApiPageError, fetchNoticeByKey, prepareServiceNotices } from "./api-client";
+import { ApiPageError, fetchNoticeByKey, prepareServiceNoticesByMinute } from "./api-client";
 import { addDiagnostic, redactDiagnostic, type DiagnosticState } from "./collection-diagnostics";
-import { parsePostedDateRange } from "./date-range";
+import { parsePostedTimeRange } from "./date-range";
 import { scrapeDetailPage, serviceDetailUrl, type ScrapeResult } from "./detail-page";
 import { noticeKey, noticeKeyFromParts } from "./identity";
 import { normalizeNotice, type NormalizedNotice } from "./normalize";
@@ -229,9 +230,11 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies, l
     }
   };
   try {
-    // 상세 수집 전에 날짜별 API 건수를 확정하고 첫 페이지를 재사용합니다.
+    // 서울 시분을 UTC로 변환해 자동 수집과 같은 날짜별 분할·첫 페이지 재사용을 적용합니다.
     await observation.progress("api");
-    const prepared = await prepareServiceNotices(job.range!, deps.fetcher);
+    const prepared = await prepareServiceNoticesByMinute({
+      start: seoulInputToUtc(job.range!.start), end: seoulInputToUtc(job.range!.end)
+    }, deps.fetcher);
     job.apiTotal = prepared.total;
     await persist();
     await drainRelated();
@@ -276,9 +279,9 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies, l
   }
 }
 
-/** 날짜 범위 수집 작업을 생성하고 백그라운드 실행을 시작합니다. */
+/** 서울 시분 범위 수집 작업을 생성하고 백그라운드 실행을 시작합니다. */
 export async function startCollection(range: PostedDateRange, deps: CollectionDependencies = {}): Promise<CollectionJob> {
-  parsePostedDateRange(range.start, range.end);
+  range = parsePostedTimeRange(range.start, range.end);
   if (!process.env.G2B_SERVICE_KEY) throw new Error("G2B_SERVICE_KEY 환경변수를 설정하세요.");
   getPool();
   if (jobRuntime.__g2bActiveJobId) throw new Error("이미 수집 작업이 진행 중입니다.");

@@ -1,3 +1,4 @@
+import { seoulRangeBounds } from "../seoul-time";
 import type pg from 'pg';
 import {DocumentError} from './contract';
 import {runStatuses} from './model';
@@ -18,12 +19,11 @@ export const runIdPattern=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9
 /** 잘못된 필터로 전체 이력을 과도하게 조회하지 않도록 입력을 검증합니다. */
 export function parseHistoryFilters(params:URLSearchParams):HistoryFilters{
  const value=(name:string,max=200)=>{const v=(params.get(name)||'').trim();if(v.length>max)throw new DocumentError('검색어가 너무 깁니다.');return v;};
- const status=value('status'),type=value('type',30),from=value('from',10),to=value('to',10),view=value('view',20)||'history';
+ const status=value('status'),type=value('type',30),from=value('from',16),to=value('to',16),view=value('view',20)||'history';
  if(view!=='history'&&view!=='documents')throw new DocumentError('조회 기준을 확인하세요.');
  if(status&&!Object.hasOwn(runStatuses,status)&&!(view==='documents'&&status==='unrequested'))throw new DocumentError('추출 상태를 확인하세요.');
  if(type&&!/^[a-z0-9][a-z0-9_-]*$/.test(type)&&!(view==='documents'&&type==='__unknown__'))throw new DocumentError('문서 형식을 확인하세요.');
- for(const date of [from,to])if(date&&(!/^\d{4}-\d{2}-\d{2}$/.test(date)||!Number.isFinite(Date.parse(date))||new Date(date).toISOString().slice(0,10)!==date))throw new DocumentError('접수일을 확인하세요.');
- if(from&&to&&from>to)throw new DocumentError('시작일이 종료일보다 늦습니다.');
+ try { seoulRangeBounds(from,to); } catch { throw new DocumentError('접수 시작·종료 일시를 확인하세요.'); }
  const page=Number(params.get('page')||'1');
  if(!Number.isSafeInteger(page)||page<1||!Number.isSafeInteger((page-1)*20))throw new DocumentError('페이지는 유효한 양의 정수여야 합니다.');
  return {status,type,from,to,page,view,filename:value('filename'),key:value('key')};
@@ -38,13 +38,14 @@ export class DocumentHistoryStore{
  /** 동일한 검색 조건으로 목록과 전체 건수를 조회하며 본문·기술 정보는 제외합니다. */
  async list(filters:HistoryFilters):Promise<HistoryList>{
   const like=(value:string)=>value?`%${value.replace(/[\\%_]/g,'\\$&')}%`:null;
-  // 목록과 집계의 검색 조건이 어긋나지 않도록 같은 절과 매개변수를 공유합니다.
+  // 종료 분의 마지막 순간도 포함하며 목록과 집계에 같은 UTC 경계를 적용합니다.
+  const bounds=seoulRangeBounds(filters.from,filters.to);
   const matching=`FROM ${this.schema}.attachment_extraction_runs r JOIN ${this.schema}.attachment_documents d ON d.id=r.document_id
    WHERE ($1::text IS NULL OR r.status=$1) AND ($2::text IS NULL OR r.document_type=$2)
    AND ($3::text IS NULL OR r.filename ILIKE $3) AND ($4::text IS NULL OR d.notice_key ILIKE $4)
-   AND ($5::date IS NULL OR r.requested_at>=($5::date::timestamp AT TIME ZONE 'Asia/Seoul'))
-   AND ($6::date IS NULL OR r.requested_at<(($6::date+1)::timestamp AT TIME ZONE 'Asia/Seoul'))`;
-  const values=[filters.status||null,filters.type||null,like(filters.filename),like(filters.key),filters.from||null,filters.to||null];
+   AND ($5::timestamptz IS NULL OR r.requested_at>=$5::timestamptz)
+   AND ($6::timestamptz IS NULL OR r.requested_at<$6::timestamptz)`;
+  const values=[filters.status||null,filters.type||null,like(filters.filename),like(filters.key),bounds.start,bounds.endExclusive];
   const [list,count]=await Promise.all([
    this.pool.query(`SELECT ${columns},d.notice_key ${matching} ORDER BY r.requested_at DESC,r.id DESC LIMIT 20 OFFSET $7`,[...values,(filters.page-1)*20]),
    this.pool.query(`SELECT COUNT(*) AS total_count ${matching}`,values),
@@ -55,14 +56,15 @@ export class DocumentHistoryStore{
  /** 누적 카드와 같은 파일·유형·최신 상태 기준으로 미요청 문서까지 조회합니다. */
  async listDocuments(filters:HistoryFilters):Promise<DocumentFileList>{
   const like=(value:string)=>value?`%${value.replace(/[\\%_]/g,'\\$&')}%`:null;
+  const bounds=seoulRangeBounds(filters.from,filters.to);
   const matching=`FROM ${this.schema}.attachment_documents d
    LEFT JOIN ${this.schema}.attachment_extraction_runs r ON r.id=d.latest_run_id AND r.document_id=d.id
    WHERE ($1::text IS NULL OR COALESCE(r.status,'unrequested')=$1)
    AND ($2::text IS NULL OR CASE WHEN $2='__unknown__' THEN COALESCE(d.document_type,r.document_type) IS NULL ELSE COALESCE(d.document_type,r.document_type)=$2 END)
    AND ($3::text IS NULL OR d.filename ILIKE $3) AND ($4::text IS NULL OR d.notice_key ILIKE $4)
-   AND ($5::date IS NULL OR COALESCE(r.requested_at,d.created_at)>=($5::date::timestamp AT TIME ZONE 'Asia/Seoul'))
-   AND ($6::date IS NULL OR COALESCE(r.requested_at,d.created_at)<(($6::date+1)::timestamp AT TIME ZONE 'Asia/Seoul'))`;
-  const values=[filters.status||null,filters.type||null,like(filters.filename),like(filters.key),filters.from||null,filters.to||null];
+   AND ($5::timestamptz IS NULL OR COALESCE(r.requested_at,d.created_at)>=$5::timestamptz)
+   AND ($6::timestamptz IS NULL OR COALESCE(r.requested_at,d.created_at)<$6::timestamptz)`;
+  const values=[filters.status||null,filters.type||null,like(filters.filename),like(filters.key),bounds.start,bounds.endExclusive];
   // 실행 없는 파일은 null로 구분하고, 본문과 기술 정보는 기존 이력처럼 제외합니다.
   const [list,count]=await Promise.all([
    this.pool.query(`SELECT d.id AS document_id,d.notice_key,d.filename,COALESCE(d.document_type,r.document_type) AS document_type,d.created_at,

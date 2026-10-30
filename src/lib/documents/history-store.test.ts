@@ -1,6 +1,23 @@
 import {expect,it,vi} from 'vitest';
 import {DocumentHistoryStore,parseHistoryFilters} from './history-store';
 
+it('날짜 형식 검색은 한국시간 하루 전체의 UTC 경계로 조회합니다',async()=>{
+ const query=vi.fn().mockResolvedValueOnce({rows:[]}).mockResolvedValueOnce({rows:[{total_count:'0'}]});
+ await new DocumentHistoryStore({query} as never).list(parseHistoryFilters(new URLSearchParams('from=2026-10-30&to=2026-10-30')));
+ expect(query.mock.calls[0][1].slice(4,6)).toEqual(['2026-10-29T15:00:00.000Z','2026-10-30T15:00:00.000Z']);
+});
+
+it.each(['history','documents'])('분 단위 %s 조회와 집계에 같은 UTC 경계를 전달합니다',async view=>{
+ const query=vi.fn().mockResolvedValueOnce({rows:[]}).mockResolvedValueOnce({rows:[{total_count:'0'}]});
+ const filters=parseHistoryFilters(new URLSearchParams({view,from:'2026-10-30T10:30',to:'2026-10-30T10:30'}));
+ const store=new DocumentHistoryStore({query} as never);
+ if(view==='history')await store.list(filters);else await store.listDocuments(filters);
+ const [sql,values]=query.mock.calls[0];
+ expect(values.slice(4,6)).toEqual(['2026-10-30T01:30:00.000Z','2026-10-30T01:31:00.000Z']);
+ expect(sql).toContain('>=$5::timestamptz');expect(sql).toContain('<$6::timestamptz');
+ expect(query.mock.calls[1][1]).toEqual(values.slice(0,6));
+});
+
 it('파일별 보기에서만 미요청과 형식 미기록 필터를 허용합니다',()=>{
  expect(parseHistoryFilters(new URLSearchParams('view=documents&status=unrequested&type=__unknown__'))).toMatchObject({view:'documents',status:'unrequested',type:'__unknown__',page:1});
  expect(parseHistoryFilters(new URLSearchParams())).toMatchObject({view:'history'});

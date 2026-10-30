@@ -1,4 +1,12 @@
 import type { PostedDateRange } from "./types";
+import { normalizeSeoulMinute } from "../seoul-time";
+
+/** 날짜 호환 입력을 포함해 수동 수집의 서울 시분 범위를 검증하고 정규화합니다. */
+export function parsePostedTimeRange(start: string, end: string): PostedDateRange {
+  const range = { start: normalizeSeoulMinute(start, "start"), end: normalizeSeoulMinute(end, "end") };
+  if (range.start > range.end) throw new Error("시작 일시가 종료 일시보다 늦습니다.");
+  return range;
+}
 
 export function parsePostedDateRange(start: string, end: string): PostedDateRange {
   const valid = (value: string) => {

@@ -107,6 +107,7 @@ input {
   gap: 12px;
 }
 .collect-form label {
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 9px;
@@ -116,6 +117,9 @@ input {
   flex: 1;
 }
 .collect-form input {
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
   height: 46px;
   border: 1px solid #ced9df;
   border-radius: 9px;
@@ -444,7 +448,7 @@ footer {
   }
   .collect-form {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr;
     align-items: flex-end;
   }
   .date-separator {
