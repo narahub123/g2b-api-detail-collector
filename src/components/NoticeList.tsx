@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { NoticeListItem } from "@/lib/g2b/notices";
 import type { CollectionJob } from "@/lib/g2b/collection-job";
+import { CollectionJobObservation } from "./CollectionJobObservation";
 
 function amount(value: string | null) {
   if (!value) return "금액 정보 없음";
@@ -108,28 +109,11 @@ export function NoticeList({
         </p>
       )}
       {job?.mode === "refresh" && (
-        <div className="refresh-results" aria-live="polite">
+        <div className="refresh-results">
           <strong>
             {job.status === "running" ? "재수집 진행 중" : "재수집 결과"}
           </strong>
-          <ul>
-            {job.results?.map((result) => (
-              <li key={result.key}>
-                {result.key}:{" "}
-                {result.status === "succeeded"
-                  ? "재수집 성공"
-                  : result.status === "failed"
-                    ? "재수집 실패"
-                    : "대기 중"}
-                {result.error && (
-                  <>
-                    {" "}
-                    — <span>{result.error}</span>
-                  </>
-                )}
-              </li>
-            ))}
-          </ul>
+          <CollectionJobObservation initial={job} />
         </div>
       )}
       <div className="notice-list">

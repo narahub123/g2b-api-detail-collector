@@ -1,9 +1,11 @@
 import { listDbJobs } from "@/lib/g2b/collection-job-store";
+import { collectionDuration, collectionStageLabel, collectionStatuses, collectionTime } from "@/lib/g2b/collection-display";
+import "../../collection-progress.css";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** 최근 수집 작업과 진단 분류별 건수를 보여줍니다. */
+/** 최근 수집 작업의 관측 요약과 기존 진단 분류별 건수를 보여줍니다. */
 export default async function CollectionHistoryPage({ searchParams }: { searchParams: Promise<{ page?: string }> }) {
   const requestedPage = Number((await searchParams).page || "1");
   const page = Number.isSafeInteger(requestedPage) ? Math.max(1, Math.min(1000, requestedPage)) : 1;
@@ -13,8 +15,14 @@ export default async function CollectionHistoryPage({ searchParams }: { searchPa
     <h1>수집 작업 이력</h1>
     <p>실패·경고 건수는 구조화된 진단 기록을 기준으로 표시합니다.</p>
     <div className="notice-list">{history.items.map((job) => <article className="notice-card" key={job.id}>
-      <h2><a href={`/admin/collections/${job.id}`}>{new Date(job.startedAt).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })}</a></h2>
-      <p>{job.mode === "incremental" ? "자동 증분 수집" : job.mode === "refresh" ? "선택 재수집" : "수동 수집"} · {job.status}</p>
+      <h2><a href={`/admin/collections/${job.id}`}>{collectionTime(job.startedAt)}</a></h2>
+      <p>{job.mode === "incremental" ? "자동 증분 수집" : job.mode === "refresh" ? "선택 재수집" : "수동 수집"} · {collectionStatuses[job.status]}</p>
+      <dl className="collection-observation-data">
+        <div><dt>{job.status === "interrupted" ? "중단 확인 시각" : "종료"}</dt><dd>{job.finishedAt ? collectionTime(job.finishedAt) : job.status === "running" ? "진행 중" : "기록 없음"}</dd></div>
+        <div><dt>{job.status === "interrupted" ? "중단 확인까지" : "소요 시간"}</dt><dd>{collectionDuration(job.startedAt, job.finishedAt, job.status === "running")}</dd></div>
+        <div><dt>{job.status === "running" ? "현재 단계" : "마지막 단계"}</dt><dd>{collectionStageLabel(job.progress?.stage)}</dd></div>
+        <div><dt>마지막 진행</dt><dd>{collectionTime(job.progress?.lastProgressAt)}</dd></div>
+      </dl>
       <p>실패 {job.failureCount}건 · 경고 {job.warningCount}건 · 재시도 {job.retryCount}건
         {job.legacyErrorCount > 0 && <> · 기존 오류 {job.legacyErrorCount}건</>}
         {job.overflowCount > 0 && <> · 개별 목록 초과 {job.overflowCount}건</>}</p>

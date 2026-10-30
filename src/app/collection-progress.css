@@ -35,10 +35,47 @@
   color: #255d9a;
 }
 .collection-progress-status--failed,
-.collection-progress-status--cancelled {
+.collection-progress-status--interrupted {
   background: #fff0ed;
   color: #a63e35;
 }
+
+.collection-observation {
+  min-width: 0;
+  margin: 18px 0;
+  padding: 18px;
+  border: 1px solid #dbe5e8;
+  border-radius: 12px;
+  background: #fff;
+  color: #263e48;
+}
+.collection-observation h2 { margin: 0 0 12px; font-size: 17px; }
+.collection-observation-status { font-size: 14px; font-weight: 600; }
+.collection-observation-data {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 235px), 1fr));
+  gap: 16px;
+  margin: 16px 0;
+  font-size: 14px;
+}
+.collection-observation-data dt { color: #637784; font-size: 12px; margin-bottom: 5px; }
+.collection-observation-data dd { margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.collection-observation-note { color: #637784; font-size: 12px; line-height: 1.7; }
+.collection-observation-table { overflow-x: auto; margin-top: 14px; }
+.collection-observation-table:focus-visible { outline: 2px solid #255d9a; outline-offset: 3px; }
+.collection-observation-table table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.collection-observation-table caption { text-align: left; color: #637784; padding-bottom: 10px; }
+.collection-observation-table th, .collection-observation-table td {
+  text-align: left;
+  vertical-align: top;
+  padding: 10px 12px;
+  border-bottom: 1px solid #e5ecee;
+  min-width: 100px;
+  line-height: 1.6;
+  font-variant-numeric: tabular-nums;
+}
+.collection-observation-table th { background: #f5f8f9; font-weight: 600; }
+.collection-observation-table a { color: #255d9a; overflow-wrap: anywhere; }
 .collection-progress-metrics {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

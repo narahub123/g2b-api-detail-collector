@@ -3,6 +3,8 @@ import { ApiPageError, fetchNoticeByKey, prepareServiceNoticesByMinute, type Pos
 import { addDiagnostic, redactDiagnostic } from "./collection-diagnostics";
 import { acquireDbJob, releaseDbLease, renewDbLease, saveDbJob } from "./collection-job-store";
 import type { CollectionJob } from "./collection-job";
+import type { CollectionNoticeResult } from "./collection-progress";
+import { createCollectionObserver, observeCollectionPages } from "./collection-observer";
 import { scrapeDetailPage, serviceDetailUrl, type ScrapeResult } from "./detail-page";
 import { noticeKey, noticeKeyFromParts } from "./identity";
 import type { StoredNotice } from "./notices";
@@ -37,7 +39,7 @@ type RunOptions = PostedTimeRange & {
   activationId?: string;
   store?: IncrementalStore;
   fetcher?: typeof fetch;
-  scrape?: (url: string) => Promise<ScrapeResult>;
+  scrape?: typeof scrapeDetailPage;
 };
 
 /** 완료한 구간 끝에서 다시 조회하되 작업당 최대 네 시간만 배정합니다. */
@@ -74,9 +76,10 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
     try { if (lost || !await store.renew(job.id, token)) throw new Error("수집 작업 잠금을 잃었습니다."); }
     catch (error) { addDiagnostic(job, { severity: "failure", stage: "lease", operation: "renew-lease", error }); throw error; }
   };
-  const persist = async () => { await ensureLease();
+  const observation = createCollectionObserver(job, async () => { await ensureLease();
     try { await store.saveJob(job, token); }
-    catch (error) { addDiagnostic(job, { severity: "failure", stage: "database", operation: "save-job", error }); throw error; } };
+    catch (error) { addDiagnostic(job, { severity: "failure", stage: "database", operation: "save-job", error }); throw error; } });
+  const persist = observation.persist;
   const scrape = options.scrape || scrapeDetailPage;
   const seenApi = new Set<string>();
   const relatedApiTargets = new Set<string>();
@@ -84,11 +87,31 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
   const attemptedThisRun = new Set<string>();
   const firstFailures = new Set<string>();
   const results = new Map<string, "pending" | "succeeded" | "failed">();
+  const metadata = new Map<string, CollectionNoticeResult>();
+  /** 집계할 때도 같은 공고 결과 객체를 유지해 관측 시각을 보존합니다. */
   const recount = () => {
-    job.results = [...results].map(([key, status]) => ({ key, status }));
+    job.results = [...results].map(([key, status]) => {
+      const result = metadata.get(key) ?? { key, status };
+      result.status = status;
+      metadata.set(key, result);
+      return result;
+    });
     job.detailSucceeded = [...results.values()].filter((status) => status === "succeeded").length;
     job.detailFailed = [...results.values()].filter((status) => status === "failed").length;
   };
+  /** API 보완 전에 시작한 대상은 재사용하고 재시도 때만 종료를 초기화합니다. */
+  const prepareResult = async (key: string) => {
+    const active = metadata.get(key);
+    if (active?.startedAt && !active.finishedAt) return active;
+    if (!results.has(key)) job.detailTotal = (job.detailTotal || 0) + 1;
+    results.set(key, "pending");
+    recount();
+    const result = metadata.get(key)!;
+    job.phase = "detail";
+    await observation.begin(result);
+    return result;
+  };
+  /** 현재 공고 결과를 확정한 뒤 관련 공고를 별도 대상으로 처리합니다. */
   const handle = async (key: string, api: ApiNotice | null, retry = false): Promise<void> => {
     if (!retry && attemptedThisRun.has(key)) return;
     if (!retry) attemptedThisRun.add(key);
@@ -111,32 +134,31 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
         if (pendingInThisRun) {
           results.set(key, "succeeded");
           recount();
-          await persist();
+          await observation.finish(metadata.get(key)!);
         }
       }
       return;
     }
-    // 상세 실패 전에도 API 원본을 남겨 관리자 화면과 다음 작업에서 찾을 수 있게 합니다.
+    const noticeResult = (previous?.attempts || 0) < 3 ? await prepareResult(key) : undefined;
+    // 상세 실패 전에도 API 원본을 남겨 다음 실행에서 찾을 수 있게 합니다.
     await ensureLease();
     await store.saveNotice(key, record);
-    if ((previous?.attempts || 0) >= 3) {
-      return;
-    }
-    job.phase = "detail";
-    if (!results.has(key)) job.detailTotal = (job.detailTotal || 0) + 1;
-    results.set(key, "pending");
-    recount();
-    await persist();
+    if (!noticeResult) return;
+    await observation.progress("opening", noticeResult);
     const [number, order] = key.split("--");
     let extracted: { result: ScrapeResult; structured: StructuredNoticeDetail };
     try {
-      const result = await scrape(serviceDetailUrl(number, order));
+      const result = await scrape(serviceDetailUrl(number, order), { onProgress: stage => observation.progress(stage, noticeResult) });
+      observation.assert();
+      await observation.progress("structuring", noticeResult);
       extracted = { result, structured: structureNoticeDetail(key, result.detail) };
     } catch (error) {
+      observation.assert();
       const message = redactDiagnostic(error instanceof Error ? error.message : String(error));
       addDiagnostic(job, { severity: "failure", stage: "detail", operation: "scrape-detail", target: { key },
         attempt: (previous?.attempts || 0) + 1, outcome: (previous?.attempts || 0) < 2 ? "retrying" : "failed", error });
       record.detailError = message;
+      await observation.progress("saving", noticeResult);
       await ensureLease();
       await store.saveNotice(key, record);
       const attempts = (previous?.attempts || 0) + 1;
@@ -145,7 +167,7 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
       results.set(key, "failed");
       job.errors.push(`${key}: ${message}`);
       recount();
-      await persist();
+      await observation.finish(noticeResult);
       return;
     }
     record.detail = extracted.structured.detail;
@@ -162,6 +184,7 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
     record.openingDetailKeys = extracted.structured.openingDetailKeys;
     record.independentTriggers = extracted.structured.independentTriggers;
     await ensureLease();
+    await observation.progress("saving", noticeResult);
     await store.saveNotice(key, record, extracted.structured);
     await store.saveAttempt({ key, attempts: (previous?.attempts || 0) + 1, status: "succeeded", error: null });
     // 상세와 시도 기록 저장이 끝난 후 복구 성공을 작업 진단에 반영합니다.
@@ -170,7 +193,7 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
         attempt: (previous?.attempts || 0) + 1, outcome: "recovered", error: previous?.error || "이전 상세 수집 실패 후 복구" });
     results.set(key, "succeeded");
     recount();
-    await persist();
+    await observation.finish(noticeResult);
     for (const related of extracted.result.relatedNoticeKeys.slice(0, 200)) {
       if (related === key) continue;
       try {
@@ -181,17 +204,22 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
         addDiagnostic(job, { severity: "warning", stage: "transform", operation: "related-notice-key", target: { key }, error: `잘못된 관련 공고 키 ${related}` });
         continue;
       }
+      await observation.progress("relations");
       await ensureLease();
       await store.saveRelation(key, related);
       if (attemptedThisRun.has(related)) continue;
       let relatedApi: ApiNotice | null = null;
-      if (!(await store.getNotice(related))?.api) {
+      const relatedRecord = await store.getNotice(related);
+      const relatedAttempt = await store.getAttempt(related);
+      const relatedResult = !relatedRecord?.detail && (relatedAttempt?.attempts || 0) < 3
+        ? await prepareResult(related) : undefined;
+      if (!relatedRecord?.api) {
         // 저장된 API가 없는 관련 공고만 번호별로 조회하고 전체 목표에 더합니다.
         if (!relatedApiTargets.has(related)) {
           relatedApiTargets.add(related);
           job.apiTotal = (job.apiTotal || 0) + 1;
-          await persist();
         }
+        await persist("api", relatedResult);
         relatedApi = await fetchNoticeByKey(related, options.fetcher).catch((error) => {
           addDiagnostic(job, { severity: "warning", stage: "api", operation: "fetch-related-notice", target: { key: related }, error });
           return null;
@@ -199,7 +227,7 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
         if (!relatedApiCompleted.has(related)) {
           relatedApiCompleted.add(related);
           job.apiProcessed = (job.apiProcessed || 0) + 1;
-          await persist();
+          await persist("api", relatedResult);
         }
       }
       await handle(related, relatedApi);
@@ -217,6 +245,7 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
     for (let run = 0; run < 2; run++) {
       try {
         // 첫 페이지를 먼저 확인해 현재 조회 구간의 목표를 저장합니다.
+        await observation.progress("api");
         const prepared = await prepareServiceNoticesByMinute(
           { start: windowStart, end: windowEnd }, options.fetcher);
         job.apiTotal = prepared.total + relatedApiTargets.size;
@@ -225,7 +254,7 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
         for (const item of priorFailures) {
           if (item.attempts < 3) await handle(item.key, null);
         }
-        for await (const page of prepared.pages) {
+        for await (const page of observeCollectionPages(prepared.pages, observation)) {
           for (const item of page.items) {
             job.apiProcessed = (job.apiProcessed || 0) + 1;
             let key: string;
@@ -267,6 +296,14 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
     job.status = "failed";
     job.errors.push(error instanceof Error ? error.message : String(error));
     if (!(error instanceof ApiPageError)) addDiagnostic(job, { severity: "failure", stage: "collection", operation: "run-incremental", error });
+    // 재시도까지 끝난 작업의 미완료 대상만 실패 종료로 확정합니다.
+    for (const result of job.results || []) {
+      if (result.startedAt && !result.finishedAt) {
+        if (result.status === "pending") results.set(result.key, "failed");
+        recount();
+        await observation.finish(result);
+      }
+    }
   } finally {
     job.phase = "done";
     job.finishedAt = new Date().toISOString();

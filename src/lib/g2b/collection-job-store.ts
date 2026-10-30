@@ -82,7 +82,7 @@ export async function getLatestDbJob(): Promise<CollectionJob | null> {
   return result.rows[0] ? getDbJob(result.rows[0].id) : null;
 }
 
-export type CollectionJobSummary = Pick<CollectionJob, "id" | "mode" | "status" | "startedAt" | "finishedAt" | "range" | "windowStart" | "windowEnd" | "detailSucceeded" | "detailFailed"> & {
+export type CollectionJobSummary = Pick<CollectionJob, "id" | "mode" | "phase" | "progress" | "status" | "startedAt" | "finishedAt" | "range" | "windowStart" | "windowEnd" | "detailSucceeded" | "detailFailed"> & {
   failureCount: number; warningCount: number; retryCount: number; legacyErrorCount: number; overflowCount: number;
 };
 
@@ -94,7 +94,7 @@ export async function listDbJobs(page: number): Promise<{ items: CollectionJobSu
     [21, (safePage - 1) * 20]);
   return { items: rows.rows.slice(0, 20).map(({ state }) => {
     const counts = diagnosticCounts(state);
-    return { id: state.id, mode: state.mode, status: state.status, startedAt: state.startedAt,
+    return { id: state.id, mode: state.mode, phase: state.phase, progress: state.progress, status: state.status, startedAt: state.startedAt,
       finishedAt: state.finishedAt, range: state.range, windowStart: state.windowStart, windowEnd: state.windowEnd,
       detailSucceeded: state.detailSucceeded, detailFailed: state.detailFailed,
       failureCount: counts.failure, warningCount: counts.warning, retryCount: counts.retry,

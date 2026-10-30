@@ -19,4 +19,6 @@ it("진단 분류를 기준으로 건수를 표시하고 개별 기록을 필터
   expect(html).toContain("모달 경고");
   expect(html).not.toContain("API 실패");
   expect(html).not.toContain("기존 오류");
+  expect(html).toContain("수집 처리 관측");
+  expect(html.indexOf("수집 처리 관측")).toBeLessThan(html.indexOf("필터 적용"));
 });

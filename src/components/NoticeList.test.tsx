@@ -59,6 +59,6 @@ describe("NoticeList", () => {
       method: "POST", body: JSON.stringify({ keys: ["R26BK1--000", "R26BK1--001"] })
     })));
     await waitFor(() => expect(screen.getByText("접근 실패")).toBeInTheDocument(), { timeout: 3000 });
-    expect(screen.getByText(/R26BK1--000: 재수집 성공/)).toBeInTheDocument();
+    expect(screen.getByRole("row", { name: /R26BK1--000 재수집 성공/, hidden: true })).toBeInTheDocument();
   });
 });

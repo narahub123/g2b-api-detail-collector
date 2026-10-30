@@ -25,6 +25,8 @@ it("공고별 결과는 별도 아코디언으로 접고 펼칠 수 있습니다
   const details = summary.closest("details")!;
   expect(details).not.toHaveAttribute("open");
   expect(summary.querySelector(".collection-progress-results-chevron")).toBeInTheDocument();
+  expect(summary.closest('[aria-live="polite"]')).toBeNull();
+  expect(screen.getByRole("heading", { name: "처리 관측" })).toBeInTheDocument();
   fireEvent.click(summary);
   expect(details).toHaveAttribute("open");
   fireEvent.click(summary);

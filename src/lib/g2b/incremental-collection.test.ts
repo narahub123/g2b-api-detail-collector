@@ -1,4 +1,4 @@
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { runIncrementalCollection, type IncrementalStore } from "./incremental-collection";
 import type { StoredNotice } from "./notices";
 import type { CollectionJob } from "./collection-job";
@@ -188,6 +188,7 @@ it("4시간 구간을 이어받고 성공한 상세를 중복 추출하지 않�
   expect(second).toMatchObject({ status: "completed", windowStart: "2026-10-27T04:00:00.000Z",
     windowEnd: "2026-10-27T05:00:00.000Z", continuation: false, detailSucceeded: 0, detailFailed: 0 });
   expect(scrapes).toBe(1);
+  expect(second.results).toEqual([]);
   expect(memory.notices.get("R26BK1--000")?.detail).toBeTruthy();
   delete process.env.G2B_SERVICE_KEY;
 });
@@ -321,4 +322,40 @@ it("이전 실패 공고 조회의 일시 오류도 전체 작업 재시도에 �
   expect(job.status).toBe("completed");
   expect(attempts).toBe(2);
   delete process.env.G2B_SERVICE_KEY;
+});
+
+it("증분 부모 종료와 자식 API 시작 경계를 보존하고 재시도 메타데이터를 유지합니다", async () => {
+  process.env.G2B_SERVICE_KEY = "test-key";
+  const memory = memoryStore();
+  const base = Date.parse("2026-10-30T00:00:00Z");
+  const clock = vi.spyOn(Date, "now").mockReturnValue(base);
+  let childAttempts = 0;
+  try {
+    const job = await runIncrementalCollection({ start: "2026-10-27T00:00:00Z", end: "2026-10-27T01:00:00Z", store: memory.store,
+      fetcher: async input => {
+        const related = new URL(String(input)).searchParams.get("inqryDiv") === "2";
+        if (related) {
+          const saved = memory.jobs.at(-1)!;
+          expect(saved.results?.[0].finishedAt).toBe(new Date(base + 10).toISOString());
+          expect(saved.results?.[1]).toMatchObject({ key: "R26BK2--000", startedAt: new Date(base + 10).toISOString(), progress: { stage: "api" } });
+          clock.mockReturnValue(base + 20);
+        }
+        return Response.json({ response: { body: { totalCount: 1, numOfRows: 100, pageNo: 1,
+          items: [{ bidNtceNo: related ? "R26BK2" : "R26BK1", bidNtceOrd: "000" }] } } });
+      },
+      scrape: async (url, options) => {
+        expect(memory.jobs.at(-1)?.progress?.currentNoticeKey).toBe(url.includes("R26BK1") ? "R26BK1--000" : "R26BK2--000");
+        await options?.onProgress?.("modals");
+        if (url.includes("R26BK2")) {
+          if (++childAttempts === 1) { clock.mockReturnValue(base + 100); throw Error("자식 실패"); }
+          clock.mockReturnValue(base + 210);
+        } else clock.mockReturnValue(base + 10);
+        return { detail: { sourceUrl: url, sections: [], attachments: [], links: [] }, relatedNoticeKeys: url.includes("R26BK1") ? ["R26BK2--000"] : [] };
+      },
+    });
+    expect(job.results?.[0]).toMatchObject({ status: "succeeded", finishedAt: new Date(base + 10).toISOString() });
+    expect(job.results?.[1]).toMatchObject({ status: "succeeded", startedAt: new Date(base + 10).toISOString(), finishedAt: new Date(base + 210).toISOString(), progress: { stage: "saving" } });
+    expect(childAttempts).toBe(2);
+    expect(memory.jobs.some(j => j.results?.[1]?.status === "failed" && j.results[1].finishedAt === new Date(base + 100).toISOString())).toBe(true);
+  } finally { clock.mockRestore(); delete process.env.G2B_SERVICE_KEY; }
 });

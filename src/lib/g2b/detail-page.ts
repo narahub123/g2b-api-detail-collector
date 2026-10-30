@@ -10,6 +10,7 @@ import { collectClickDownloads } from "./attachment-identity";
 import { fieldText } from "./field-value";
 import { applyPaginatedTables, collectPaginatedTables } from "./table-pagination";
 import type { FieldValuePart } from "./field-value";
+import type { CollectionStage } from "./collection-progress";
 export { collectModalContents, extractModalStructure } from "./modal-collector";
 export { collectClickDownloads } from "./attachment-identity";
 
@@ -123,9 +124,10 @@ export function extractDetailPage(html: string, pageUrl: string, fileMetadata: A
 export type ScrapeResult = { detail: ScrapedDetail; relatedNoticeKeys: string[];
   warnings?: { stage: "attachment" | "detail"; operation: string; message: string }[] };
 
-/** 기존 상세 수집 순서를 유지하면서 선택적으로 단계별 시간을 기록합니다. */
-export async function scrapeDetailPage(url: string): Promise<ScrapeResult> {
+/** 기존 상세 수집 순서를 유지하면서 선택적인 단계 알림과 시간 계측을 제공합니다. */
+export async function scrapeDetailPage(url: string, options?: { onProgress?: (stage: CollectionStage) => Promise<void> }): Promise<ScrapeResult> {
   assertG2bUrl(url);
+  await options?.onProgress?.("opening");
   const browser = await measure("browser.launch", () => chromium.launch({ channel: "chrome", executablePath: process.env.G2B_CHROME_PATH || undefined, headless: true }));
   try {
     const page = await measure("browser.page", () => browser.newPage({ locale: "ko-KR", acceptDownloads: false }));
@@ -144,6 +146,8 @@ export async function scrapeDetailPage(url: string): Promise<ScrapeResult> {
     await measure("wait.network-idle", () => page.waitForLoadState("networkidle", { timeout: 15_000 })).catch((error) => {
       warnings.push({ stage: "detail", operation: "wait-network-idle", message: error instanceof Error ? error.message : String(error) });
     });
+    await options?.onProgress?.("opening");
+    await options?.onProgress?.("extracting");
     const metadata = (await measure("attachment.join", () => Promise.all(responses))).flat();
     const clickDownloads = await measure("attachment.click-metadata", () => collectClickDownloads(page));
     const html = await measure("page.html", () => page.evaluate(() => {
@@ -153,6 +157,8 @@ export async function scrapeDetailPage(url: string): Promise<ScrapeResult> {
       return document.documentElement.outerHTML;
     }));
     const detail = measureSync("detail.extract", () => extractDetailPage(html, url, metadata, clickDownloads));
+    await options?.onProgress?.("extracting");
+    await options?.onProgress?.("tables");
     const pagedTables = await measure("table.collect", () => collectPaginatedTables(page, page.locator("body")));
     detail.paginationAudit = true;
     if (detail.sections) detail.sections = applyPaginatedTables(detail.sections, pagedTables);
@@ -160,7 +166,9 @@ export async function scrapeDetailPage(url: string): Promise<ScrapeResult> {
       count + [...section.tables, ...section.fields.flatMap((field) => field.tables || [])]
         .reduce((rows, table) => rows + table.bodyRows.length, 0), 0) || 0;
     const relatedNoticeKeys = extractRelatedNoticeKeys(html);
-    // Preserve the original extraction independently of modal exploration failures.
+    await options?.onProgress?.("tables");
+    await options?.onProgress?.("modals");
+    // 모달 탐색 실패와 무관하게 기본 추출 결과를 보존합니다.
     try {
       const { captures, discovery } = await measure("modal.collect", () => collectModalContents(page, detail.noticeKey));
       detail.modalCaptures = captures;
@@ -173,6 +181,12 @@ export async function scrapeDetailPage(url: string): Promise<ScrapeResult> {
       detail.modalDiscovery = { candidates: 0, attempted: 0, captured: 0, skipped: 0,
         failures: [error instanceof Error ? error.message : String(error)] };
     }
+    await options?.onProgress?.("modals");
     return { detail, relatedNoticeKeys, warnings };
-  } finally { await measure("browser.close", () => browser.close()); }
+  } finally {
+    // 진행 저장 실패 시에도 브라우저 자원을 반드시 해제합니다.
+    try { await options?.onProgress?.("closing"); }
+    finally { await measure("browser.close", () => browser.close()); }
+    await options?.onProgress?.("closing");
+  }
 }
