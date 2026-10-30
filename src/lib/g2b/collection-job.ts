@@ -13,6 +13,7 @@ import type { StructuredNoticeDetail } from "./structured-data";
 import { getPool, getStoredNotice, saveNoticeRelation, saveStoredNotice } from "./postgres-store";
 import { acquireDbJob, getDbJob, getLatestDbJob, releaseDbLease, renewDbLease, saveDbJob } from "./collection-job-store";
 import { shouldReplacePaginatedDetail } from "./pagination-coverage";
+import type { CollectionNoticeResult, CollectionProgress } from "./collection-progress";
 
 export type CollectionJob = DiagnosticState & {
   id: string;
@@ -20,7 +21,8 @@ export type CollectionJob = DiagnosticState & {
   status: "running" | "completed" | "failed" | "interrupted";
   phase: "api" | "detail" | "done";
   range: PostedDateRange | null;
-  results?: { key: string; status: "pending" | "succeeded" | "failed"; error?: string }[];
+  results?: CollectionNoticeResult[];
+  progress?: CollectionProgress;
   apiCount: number;
   apiTotal?: number;
   apiProcessed?: number;
