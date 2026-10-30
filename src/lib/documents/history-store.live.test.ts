@@ -25,5 +25,22 @@ it.skipIf(!process.env.LIVE_DB_TEST||!process.env.DATABASE_URL)('진단 저장·
   expect(list).toMatchObject({totalCount:1,totalPages:1,hasNext:false});
   expect((await store.list(parseHistoryFilters(new URLSearchParams('from=2026-10-29&to=2026-10-29&status=failed')))).items).toHaveLength(0);
   expect(await store.types()).toEqual(['pdf']);
+  const latestFilter=parseHistoryFilters(new URLSearchParams('view=documents&status=queued&type=pdf'));
+  const queued=await store.listDocuments(latestFilter);
+  expect(queued.totalCount).toBe(1);expect(queued.items[0].latest?.id).toBe(detail.chain[1].id);
+  expect((await store.listDocuments({...latestFilter,status:'failed'})).totalCount).toBe(0);
+  expect((await store.listDocuments({...latestFilter,status:''})).totalCount).toBe(1);
+  expect(JSON.stringify(queued)).not.toMatch(/"(?:diagnostic_error|owner_token|pages|attachment_url)":/);
+  // 미요청 파일과 과거 등록 파일도 카드와 동일한 범위에서 검색되어야 합니다.
+  await pool.query(`INSERT INTO ${schema}.attachment_documents(notice_key,file_no,seq,filename,attachment_url,document_type,is_current,created_at)
+   VALUES($1,$2,1,'미요청.hwp','url','hwp',false,'2026-10-29T15:00:00Z'),($1,$3,1,'형식없음','url',NULL,true,'2026-10-29T14:59:59Z')`,[key,randomUUID(),randomUUID()]);
+  const unrequested=await store.listDocuments(parseHistoryFilters(new URLSearchParams('view=documents&status=unrequested&type=hwp&from=2026-10-30&to=2026-10-30')));
+  expect(unrequested.totalCount).toBe(1);expect(unrequested.items[0]).toMatchObject({filename:'미요청.hwp',latest:null});
+  const unknown=await store.listDocuments(parseHistoryFilters(new URLSearchParams('view=documents&type=__unknown__&status=unrequested')));
+  expect(unknown.totalCount).toBe(1);expect(unknown.items[0].filename).toBe('형식없음');
+  await pool.query(`UPDATE ${schema}.attachment_documents SET document_type='hwp' WHERE id=$1`,[queued.items[0].document_id]);
+  expect((await store.listDocuments(latestFilter)).totalCount).toBe(0);
+  expect((await store.listDocuments({...latestFilter,type:'hwp'})).totalCount).toBe(1);
+  expect((await store.listDocuments(parseHistoryFilters(new URLSearchParams('view=documents')))).totalCount).toBe(3);
  }finally{await pool.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);await pool.end();}
 },120000);

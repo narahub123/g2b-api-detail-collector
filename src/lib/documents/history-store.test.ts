@@ -1,6 +1,24 @@
 import {expect,it,vi} from 'vitest';
 import {DocumentHistoryStore,parseHistoryFilters} from './history-store';
 
+it('파일별 보기에서만 미요청과 형식 미기록 필터를 허용합니다',()=>{
+ expect(parseHistoryFilters(new URLSearchParams('view=documents&status=unrequested&type=__unknown__'))).toMatchObject({view:'documents',status:'unrequested',type:'__unknown__',page:1});
+ expect(parseHistoryFilters(new URLSearchParams())).toMatchObject({view:'history'});
+ expect(()=>parseHistoryFilters(new URLSearchParams('status=unrequested'))).toThrow();
+ expect(()=>parseHistoryFilters(new URLSearchParams('type=__unknown__'))).toThrow();
+ expect(()=>parseHistoryFilters(new URLSearchParams('view=wrong'))).toThrow();
+});
+
+it('파일 목록은 최신 실행 포인터와 미요청 문서를 포함해 조회합니다',async()=>{
+ const query=vi.fn().mockResolvedValueOnce({rows:[{document_id:'doc',latest:null}]}).mockResolvedValueOnce({rows:[{total_count:'1'}]});
+ const result=await new DocumentHistoryStore({query} as never).listDocuments(parseHistoryFilters(new URLSearchParams('view=documents&status=unrequested&type=__unknown__')));
+ expect(result).toMatchObject({totalCount:1,items:[{document_id:'doc',latest:null}]});
+ const [sql,values]=query.mock.calls[0];
+ expect(sql).toContain('LEFT JOIN');expect(sql).toContain('r.id=d.latest_run_id');
+ expect(sql).not.toMatch(/r\.pages|owner_token|diagnostic_error/);
+ expect(values.slice(0,2)).toEqual(['unrequested','__unknown__']);
+});
+
 it('한국 날짜 범위를 검증하고 상태·형식을 검사합니다',()=>{
  const filter=parseHistoryFilters(new URLSearchParams('from=2026-10-30&to=2026-10-30&status=failed&type=pdf&page=2'));
  expect(filter).toMatchObject({from:'2026-10-30',to:'2026-10-30',status:'failed',type:'pdf',page:2});

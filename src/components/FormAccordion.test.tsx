@@ -6,6 +6,13 @@ import { FormAccordion } from "./FormAccordion";
 afterEach(cleanup);
 
 describe("FormAccordion", () => {
+  it('compact 크기를 지정한 중첩 섹션은 독립적으로 열고 닫습니다',()=>{
+    render(<FormAccordion title="바깥" size="compact" defaultOpen><FormAccordion title="안쪽" size="compact">작은 내용</FormAccordion></FormAccordion>);
+    const outer=screen.getByText('바깥').closest('details')!,inner=screen.getByText('안쪽').closest('details')!;
+    expect(outer).toHaveClass('form-accordion-compact');expect(inner).not.toHaveAttribute('open');
+    fireEvent.click(screen.getByText('안쪽'));expect(inner).toHaveAttribute('open');
+    fireEvent.click(screen.getByText('바깥'));expect(outer).not.toHaveAttribute('open');expect(inner).toHaveAttribute('open');
+  });
   it("기본적으로 닫히고 summary를 클릭하면 열리고 닫힙니다", () => {
     render(<FormAccordion title="검증 섹션"><p>내용</p></FormAccordion>);
     const summary = screen.getByText("검증 섹션").closest("summary")!;
