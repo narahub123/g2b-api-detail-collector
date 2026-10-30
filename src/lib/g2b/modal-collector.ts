@@ -1,6 +1,7 @@
 import {measure, measureSync} from './collection-performance';
 import {redactDiagnostic} from './collection-diagnostics';
 import {ATTACHMENT_NAME_SELECTOR, MODAL_TIMING, isResetControl, isAttachmentPreview, isUnneededCompanySearch} from './modal-policy';
+import {isAttachmentDownload, isParticipantLookup, isCollectedReference} from './modal-policy';
 import * as cheerio from "cheerio";
 import { extractCommonSections } from "./common-content-extractor";
 import { collectAttachments } from "./attachment-collector";
@@ -77,6 +78,7 @@ type Candidate = {
   buttonLike: boolean;
   tableId: string;
   rowHasAttachmentName: boolean;
+  attachmentCellId: string;
 };
 
 /**
@@ -250,6 +252,7 @@ async function clickCandidates(
   const root = dialogId
     ? page.locator(`[id=${JSON.stringify(dialogId)}]`)
     : page.locator("body");
+  const downloads = await collectClickDownloads(page, root);
   const candidates = await root.locator(CLICK_SELECTOR).evaluateAll(
     (nodes, { dialogId, modalSelector, attachmentNameSelector }) =>
       nodes
@@ -387,6 +390,7 @@ async function clickCandidates(
             buttonLike: element.matches('button,input,[role="button"]'),
             tableId: element.closest('table')?.id || '',
             rowHasAttachmentName: Boolean(element.closest('tr')?.querySelector(attachmentNameSelector)),
+            attachmentCellId: element.closest(attachmentNameSelector)?.id || '',
           };
         })
         // 위 제외 조건을 하나도 충족하지 않은 요소만 실제 클릭 후보로 반환합니다.
@@ -395,7 +399,9 @@ async function clickCandidates(
   );
   // 브라우저에서는 구조만 읽고 사이트별 제외 규칙은 정책 모듈에서 판정합니다.
   return candidates.filter(candidate => !isResetControl(candidate) && !isAttachmentPreview(candidate)
-    && !isUnneededCompanySearch({...candidate, dialogId}));
+    && !isUnneededCompanySearch({...candidate, dialogId})
+    && !isParticipantLookup({...candidate, dialogId})
+    && !isAttachmentDownload(candidate, downloads));
 }
 
 /**
@@ -417,6 +423,8 @@ export async function collectModalContents(
   const failures: string[] = [];
   // 같은 모달 단계의 클릭 요소를 반복 시도하지 않기 위한 방문 기록입니다.
   const visited = new Set<string>();
+  // 성공한 수집만 참조 제외에 사용하고 실패·빈 결과의 후속 탐색은 유지합니다.
+  const completedReferences = new Set<string>();
   // 수집 실행별로 중복 검사 상태를 독립적으로 관리합니다.
   const modalDeduplication = createModalDeduplication();
   let candidates = 0;
@@ -440,6 +448,7 @@ export async function collectModalContents(
       : page.locator("body");
     for (const candidate of found) {
       if (attempted >= 60) break;
+      if (isCollectedReference({...candidate, dialogId}, noticeKey, completedReferences)) continue;
       // 동일한 모달 단계에서 각 컨트롤을 한 번만 방문합니다.
       const visitKey = `${dialogId || "page"}:${candidate.id || candidate.index}`;
       if (visited.has(visitKey)) continue;
@@ -539,6 +548,7 @@ export async function collectModalContents(
                 elapsedMs: settling.elapsedMs,
               },
             });
+            if (settling.status === "settled") completedReferences.add(candidate.value);
           }
           // 저장할 데이터가 없는 모달도 id가 있고 중복되지 않으면 내부 클릭 후보를 탐색합니다.
           // 데이터 저장 여부와 독립적으로 새로운 모달의 하위 컨트롤을 탐색합니다.

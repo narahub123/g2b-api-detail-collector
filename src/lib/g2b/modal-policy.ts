@@ -12,6 +12,29 @@ type ResetControl={value:string;buttonLike:boolean};
 type PreviewControl={value:string;tableId:string;rowHasAttachmentName:boolean};
 type NoticeDialog={id:string;dataCellCount:number;inputCount:number;text:string};
 type CompanySearchControl={id:string;dialogId:string|null;value:string;buttonLike:boolean};
+const PARTICIPANT_BUTTON_ID='mf_wfm_container_mainWframe_btnFildBfssEtpsList';
+const PLAN_DIALOG_PATTERN=/(?:^|_)PRPA018_01$/;
+const SPEC_REFERENCE_SUFFIX=/^genBfSpecRegList_\d+_ancRelaBfSpecReg$/;
+const NOTICE_REFERENCE_SUFFIX=/^genBidPbancList_\d+_ancRelaBidPbanc$/;
+
+/** 파일 번호·순서가 확보된 셀의 실제 파일명 클릭만 다운로드로 판정합니다. */
+export function isAttachmentDownload(control:{attachmentCellId:string;value:string},downloads:ReadonlyArray<{cellId:string;name:string}>):boolean{
+ return Boolean(control.attachmentCellId)&&downloads.some(file=>file.cellId===control.attachmentCellId&&file.name===control.value);
+}
+/** 검색 조건 입력이 필요한 것으로 확인된 최상위 현장설명회 입력 화면만 제외합니다. */
+export function isParticipantLookup(control:CompanySearchControl):boolean{
+ return control.dialogId===null&&control.buttonLike&&control.id===PARTICIPANT_BUTTON_ID&&control.value==='현장설명참가조회';
+}
+/** 발주계획의 참조 중 현재 공고 또는 이번 실행에서 수집 완료한 번호만 제외합니다. */
+export function isCollectedReference(control:Pick<CompanySearchControl,'id'|'dialogId'|'value'>,noticeKey:string|undefined,completed:ReadonlySet<string>):boolean{
+ if(!control.dialogId||!PLAN_DIALOG_PATTERN.test(control.dialogId))return false;
+ const prefix=`${control.dialogId}_wframe_popupCnts_`;
+ if(!control.id.startsWith(prefix))return false;
+ const suffix=control.id.slice(prefix.length);
+ if(SPEC_REFERENCE_SUFFIX.test(suffix)&&/^R\d{2}BD\d+$/.test(control.value))return completed.has(control.value);
+ if(NOTICE_REFERENCE_SUFFIX.test(suffix)&&/^R\d{2}BK\d+-\d{3}$/.test(control.value))return control.value===noticeKey?.replace('--','-')||completed.has(control.value);
+ return false;
+}
 
 /** 조건 입력·업체 선택을 수행하지 않는 수집에서 확인된 업체 검색 기능만 제외합니다. */
 export function isUnneededCompanySearch(control:CompanySearchControl):boolean{

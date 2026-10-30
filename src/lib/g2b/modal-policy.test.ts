@@ -1,5 +1,29 @@
 import {expect,it} from 'vitest';
 import {isResetControl,isAttachmentPreview,isNoticeDialog,isUnneededCompanySearch,MODAL_TIMING} from './modal-policy';
+import {isAttachmentDownload,isParticipantLookup,isCollectedReference} from './modal-policy';
+
+it('파일 식별자가 확인된 파일명 클릭과 정확한 현장설명회 입력 버튼만 제외합니다',()=>{
+ const downloads=[{cellId:'file_cell_0_2',name:'자료.hwpx'}];
+ expect(isAttachmentDownload({attachmentCellId:'file_cell_0_2',value:'자료.hwpx'},downloads)).toBe(true);
+ expect(isAttachmentDownload({attachmentCellId:'other',value:'자료.hwpx'},downloads)).toBe(false);
+ expect(isAttachmentDownload({attachmentCellId:'file_cell_0_2',value:'상세'},downloads)).toBe(false);
+ expect(isAttachmentDownload({attachmentCellId:'file_cell_0_2',value:'자료.hwpx'},[])).toBe(false);
+ const button={id:'mf_wfm_container_mainWframe_btnFildBfssEtpsList',value:'현장설명참가조회',buttonLike:true,dialogId:null};
+ expect(isParticipantLookup(button)).toBe(true);
+ expect(isParticipantLookup({...button,id:'other'})).toBe(false);
+ expect(isParticipantLookup({...button,dialogId:'another'})).toBe(false);
+ expect(isParticipantLookup({...button,value:'현장설명 상세조회'})).toBe(false);
+});
+it('발주계획 관련 번호는 현재 공고 또는 수집 성공 대상만 건너뜁니다',()=>{
+ const parent='mf_PRPA018_01';
+ const notice={dialogId:parent,id:parent+'_wframe_popupCnts_genBidPbancList_0_ancRelaBidPbanc',value:'R26BK01795307-000'};
+ expect(isCollectedReference(notice,'R26BK01795307--000',new Set())).toBe(true);
+ expect(isCollectedReference({...notice,value:'R26BK01795307-001'},'R26BK01795307--000',new Set())).toBe(false);
+ const spec={dialogId:parent,id:parent+'_wframe_popupCnts_genBfSpecRegList_0_ancRelaBfSpecReg',value:'R26BD00285530'};
+ expect(isCollectedReference(spec,undefined,new Set())).toBe(false);
+ expect(isCollectedReference(spec,undefined,new Set(['R26BD00285530']))).toBe(true);
+ expect(isCollectedReference({...spec,id:'unrelated'},undefined,new Set(['R26BD00285530']))).toBe(false);
+});
 
 it('확인된 업체 검색 모달의 검색·건수 적용만 제외합니다',()=>{
  const parent='mf_wfm_container_mainWframe_PBAB007_01';
