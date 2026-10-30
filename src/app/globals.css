@@ -232,7 +232,7 @@ input {
 /* 수집 전 */
 .status-pill.pending {
   background: #eaf1f3;
-  color: #536b78;`
+  color: #536b78;
 }
 
 /* 수집 완료 */
