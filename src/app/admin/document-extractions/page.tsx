@@ -8,13 +8,19 @@ import {documentDuration,documentSource,documentTime} from '@/lib/documents/disp
 import '../../admin-history.css';
 import '../../notice-list-controls.css';
 import {Pagination} from '@/components/Pagination';
+import {DocumentExtractionOverview} from '@/components/DocumentExtractionOverview';
+import {DocumentOverviewStore} from '@/lib/documents/overview-store';
 
 export const runtime='nodejs';
 export const dynamic='force-dynamic';
 
-/** 공고별 문서 등록을 실행하지 않고 전체 추출 시도를 조건별로 보여줍니다. */
+/** 문서 등록 없이 전체 현황과 검색 조건에 따른 추출 시도 이력을 함께 보여줍니다. */
 export default async function ExtractionHistoryPage({searchParams}:{searchParams:Promise<Record<string,string|string[]|undefined>>}){
  await guardDocumentPage();
+ // 현황 조회가 실패해도 이력 검색은 유지하며, 서로 독립된 조회를 동시에 시작합니다.
+ const overviewPromise=Promise.resolve().then(()=>new DocumentOverviewStore(getDocumentPool()).overview()).then(
+  data=>({data,error:''}),()=>({data:null,error:'문서 추출 현황을 조회하지 못했습니다. 잠시 후 자동으로 다시 확인합니다.'}),
+ );
  const params=new URLSearchParams();
  for(const [key,value] of Object.entries(await searchParams))if(typeof value==='string')params.set(key,value);
  let filters:HistoryFilters|undefined,history:HistoryList|undefined,types:string[]=[],error='';
@@ -22,11 +28,13 @@ export default async function ExtractionHistoryPage({searchParams}:{searchParams
   filters=parseHistoryFilters(params);const store=new DocumentHistoryStore(getDocumentPool());
   [history,types]=await Promise.all([store.list(filters),store.types()]);
  }catch(reason){error=reason instanceof DocumentError?reason.message:'추출 이력을 조회하지 못했습니다. DB 설정과 마이그레이션 적용 여부를 확인하세요.';}
+ const overview=await overviewPromise;
  /** 페이지를 바꾸어도 입력한 검색 조건을 유지합니다. */
  const pageUrl=(page:number)=>{const next=new URLSearchParams(params);next.set('page',String(page));return `/admin/document-extractions?${next}`;};
  return <main className="site-shell" style={{paddingBottom:70}}>
   <a className="back-link" href="/admin">← 관리 화면으로 돌아가기</a>
   <header className="extraction-header"><span className="eyebrow">DOCUMENT EXTRACTIONS</span><h1>첨부파일 추출 이력</h1><p>문서별 추출 시도와 오류 원인을 확인합니다. 시각과 접수일은 한국 시간 기준입니다.</p></header>
+  <DocumentExtractionOverview initial={overview.data} initialError={overview.error}/>
   <form method="get" className="extraction-filters">
    <label>처리 상태<select name="status" defaultValue={params.get('status')||''}><option value="">전체</option>{Object.entries(runStatuses).map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label>
    <label>문서 형식<select name="type" defaultValue={params.get('type')||''}><option value="">전체</option>{Array.from(new Set([...types,...(params.get('type')?[params.get('type')!]:[])])).map(type=><option key={type} value={type}>{type.toUpperCase()}</option>)}</select></label>
