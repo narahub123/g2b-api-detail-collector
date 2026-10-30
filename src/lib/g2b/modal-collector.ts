@@ -1,4 +1,5 @@
-import {measure} from './collection-performance';
+import {measure, measureSync} from './collection-performance';
+import {redactDiagnostic} from './collection-diagnostics';
 import * as cheerio from "cheerio";
 import { extractCommonSections } from "./common-content-extractor";
 import { collectAttachments } from "./attachment-collector";
@@ -445,7 +446,19 @@ export async function collectModalContents(
         // 필터 통과 후 이벤트를 직접 발생시켜 오버레이의 클릭 가로채기를 피합니다.
         await measure("modal.open", () => control.dispatchEvent("click", undefined, { timeout: 2500 }));
         // 새로 열린 모달의 값을 읽기 전에 안정화될 때까지 기다립니다.
-        const settling = await measure("modal.wait-settled", () => waitForModalDataSettled(page, before));
+        const candidateDetails = {
+          candidateId: candidate.id || String(candidate.index),
+          label: redactDiagnostic(candidate.label).slice(0, 120),
+          value: redactDiagnostic(candidate.value).slice(0, 120),
+          depth, parentDialogId: dialogId || "page",
+        };
+        const waitDetails = { ...candidateDetails, outcome: "pending", nonemptyValues: 0 };
+        const settling = await measure("modal.wait-settled", async () => {
+          const result = await waitForModalDataSettled(page, before);
+          waitDetails.outcome = result.status;
+          waitDetails.nonemptyValues = result.nonemptyValues;
+          return result;
+        }, waitDetails);
         if (page.url() !== beforeUrl)
           throw new Error("클릭 후 페이지가 이동했습니다.");
         // 클릭 전에는 없었던 새 모달을 식별합니다.
@@ -453,6 +466,12 @@ export async function collectModalContents(
         const fresh = after.find(
           (item) => !before.some((old) => old.id === item.id),
         );
+        // 대기 이후의 관찰만 기록하며 모달 판정과 기존 대기 조건은 유지합니다.
+        measureSync("modal.observation", () => undefined, {
+          ...candidateDetails, newModal: Boolean(fresh),
+          modalId: fresh?.id || "", outcome: settling.status,
+          nonemptyValues: settling.nonemptyValues,
+        });
         if (fresh) {
           // 모달 HTML을 구조화하고, 실제 저장할 만한 데이터가 있는지 기존 기준으로 판단합니다.
           const currentPath = [...path, { id: candidate.id, index: candidate.index,

@@ -13,6 +13,11 @@ it('원래 오류를 유지하며 실패한 작업의 시간과 상태를 남깁
  expect(events).toHaveLength(1);expect(events[0]).toMatchObject({status:'failed',operation:'scrape',key:'A--000'});
  expect(events[0].durationMs).toBeGreaterThanOrEqual(0);expect(JSON.stringify(events)).not.toContain('실패');
 });
+it('후보 정보와 실제 대기 결과를 함수 성공 여부와 구분해 기록합니다',async()=>{
+ const events:TimingEvent[]=[];const details={candidateId:'button-1',outcome:'pending'};
+ const result=await withMeasurement({runId:'r',key:'A--000',attempt:1,sink:e=>events.push(e)},()=>measure('modal.wait-settled',async()=>{details.outcome='timeout';return 7;},details));
+ expect(result).toBe(7);expect(events[0]).toMatchObject({status:'succeeded',details:{candidateId:'button-1',outcome:'timeout'}});
+});
 it('동시 공고의 문맥과 중첩 부모를 구분하고 동기 측정도 기록합니다',async()=>{
  const events:TimingEvent[]=[];
  await Promise.all(['A','B'].map(key=>withMeasurement({runId:'r',key,attempt:1,sink:e=>events.push(e)},()=>measure('notice',async()=>{

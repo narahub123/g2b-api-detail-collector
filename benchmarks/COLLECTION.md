@@ -26,7 +26,7 @@ node --env-file-if-exists=.env.local --import tsx scripts/benchmark-collection.t
 ## 해석과 제한
 
 - durationMs는 단조 증가 시계 기준입니다. spanId/parentSpanId로 중첩을 구분하며 inclusive 시간을 모두 더하면 안 됩니다. 비동기 첨부 응답 파싱은 다른 작업과 겹칠 수 있습니다.
-- 모달 안정화·표 전환의 개별 호출 횟수와 시간이 기록됩니다. 모달 경로별 식별자와 표별 행 수는 snapshot의 수집 결과를 참고합니다. 모든 개별 경로에 이름을 붙이는 추가 계측은 아직 없습니다.
+- 모달 안정화·표 전환의 개별 호출 횟수와 시간이 기록됩니다. `modal.wait-settled`의 details에는 후보 ID·레이블·값·탐색 깊이·부모 모달과 실제 대기 결과(outcome), 값이 있는 셀 수가 남습니다. `modal.observation`에는 대기 후 새 모달 발견 여부(newModal)가 남습니다. 공고 키·부모 모달·후보 ID로 두 기록을 연결합니다. 함수의 succeeded와 실제 settled/timeout은 다른 의미입니다. 표별 행 수는 snapshot에서 확인합니다.
 - 이벤트 버퍼는 반복당 최대 100,000건입니다. dropped 또는 outputFailed가 있으면 해당 원시 기록은 불완전합니다. 수집 실패·기록 누락 시 종료 코드는 1입니다.
 - 실패 원문은 추가 저장하지 않습니다. 기존 수집 결과의 warnings/modalDiscovery와 실패 구간의 작업명으로 판단합니다. 오류 진단 보강 도구가 아닙니다.
 - 프로세스를 강제 종료하면 메모리의 미저장 기록은 유실될 수 있습니다. summary가 없거나 수집 실패가 있는 반복은 정상 완료 기준 비교에서 제외합니다.
