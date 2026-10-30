@@ -1,11 +1,13 @@
 'use client';
 
 import {useEffect,useState} from 'react';
+import {Download} from 'lucide-react';
 import type {HistoryDetail} from '@/lib/documents/history-store';
 import {extractionStages} from '@/lib/documents/diagnostics';
 import {isActive,runStatuses} from '@/lib/documents/model';
 import {documentDuration,documentSource,documentTime} from '@/lib/documents/display';
 import {DocumentBodyViewer} from './DocumentBodyViewer';
+import {safeAttachmentLink} from '@/lib/g2b/attachment-links';
 
 /** 진행 중에만 갱신하며 본문은 사용자가 요청한 한 페이지만 읽습니다. */
 export function DocumentExtractionDetail({initial}:{initial:HistoryDetail}){
@@ -13,10 +15,12 @@ export function DocumentExtractionDetail({initial}:{initial:HistoryDetail}){
  return <ExtractionDetail key={identity} initial={initial}/>;
 }
 
-/** 실행이 바뀌면 진단 폴링과 본문 요청을 모두 새 수명으로 시작합니다. */
+/** 원본 다운로드를 제공하고 실행이 바뀌면 진단 폴링과 본문 요청을 새로 시작합니다. */
 function ExtractionDetail({initial}:{initial:HistoryDetail}){
  const [detail,setDetail]=useState(initial),[error,setError]=useState('');
  const run=detail.run,active=isActive(run);
+ // 저장된 주소도 기존 첨부 링크 검증을 거쳐 다운로드에 사용합니다.
+ const downloadUrl=run.attachment_url?safeAttachmentLink(run.attachment_url):null;
  useEffect(()=>{
   if(!active)return;
   const abort=new AbortController();let timer:ReturnType<typeof setTimeout>;
@@ -34,7 +38,7 @@ function ExtractionDetail({initial}:{initial:HistoryDetail}){
   timer=setTimeout(poll,5000);return()=>{abort.abort();clearTimeout(timer);};
  },[run.id,active]);
  return <>
-  <header className="extraction-header"><span className="eyebrow">EXTRACTION DIAGNOSTICS</span><h1>첨부파일 추출 진단</h1><p>{run.filename}</p><span className="extraction-status" data-status={run.status}>{runStatuses[run.status]}</span>{active&&<p>5초마다 처리 상태를 확인합니다.</p>}</header>
+  <header className="extraction-header"><span className="eyebrow">EXTRACTION DIAGNOSTICS</span><h1>첨부파일 추출 진단</h1><p className="extraction-file">{run.filename}{downloadUrl&&<a className="extraction-download-icon" href={downloadUrl} download aria-label="원본 파일 다운로드" title="원본 파일 다운로드"><Download size={18} aria-hidden="true"/></a>}</p><span className="extraction-status" data-status={run.status}>{runStatuses[run.status]}</span>{active&&<p>5초마다 처리 상태를 확인합니다.</p>}</header>
   {error&&<p role="alert" className="extraction-error">{error}</p>}
   <div className="extraction-grid">
    <section className="extraction-card"><h2>실행 정보</h2><dl className="extraction-data">

@@ -61,6 +61,28 @@
 .extraction-header h1 {
   margin: 12px 0;
 }
+.extraction-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.extraction-download-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  color: #204e54;
+}
+.extraction-download-icon:hover {
+  background: #e7f1f0;
+}
+.extraction-download-icon:focus-visible {
+  outline: 3px solid #207f84;
+  outline-offset: 2px;
+}
 .extraction-header p {
   color: #60777c;
   line-height: 1.7;
