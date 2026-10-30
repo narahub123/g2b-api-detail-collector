@@ -17,6 +17,18 @@ const fetcher=vi.fn();
 beforeEach(()=>{vi.useFakeTimers();vi.stubGlobal('fetch',fetcher);Object.defineProperty(document,'visibilityState',{configurable:true,value:'visible'});fetcher.mockResolvedValue({ok:true,json:async()=>fixture()});});
 afterEach(()=>{cleanup();vi.useRealTimers();vi.unstubAllGlobals();vi.resetAllMocks();});
 
+it('전체와 유형별 카드는 첫 페이지의 최신 파일 목록 링크와 선택 표시를 제공합니다',()=>{
+ const initial=fixture();initial.byType.push({type:null,counts:{...emptyDocumentCounts(),total:1,unrequested:1}});
+ render(<DocumentExtractionOverview initial={initial} selection={{type:'pdf',status:'failed'}}/>);
+ expect(screen.getByRole('link',{name:'전체 문서 실패 0개 보기'})).toHaveAttribute('href','/admin/document-extractions?view=documents&status=failed#extraction-results');
+ expect(screen.getByRole('link',{name:'전체 문서 등록 파일 2개 보기'})).toHaveAttribute('href','/admin/document-extractions?view=documents#extraction-results');
+ const pdf=screen.getByRole('link',{name:'PDF 실패 0개 보기',hidden:true});
+ expect(pdf).toHaveAttribute('href','/admin/document-extractions?view=documents&type=pdf&status=failed#extraction-results');
+ expect(pdf).toHaveAttribute('aria-current','true');
+ expect(screen.getByRole('link',{name:'HWP 등록 파일 1개 보기',hidden:true})).toHaveAttribute('href','/admin/document-extractions?view=documents&type=hwp#extraction-results');
+ expect(screen.getByRole('link',{name:'형식 기록 없음 미요청 1개 보기',hidden:true})).toHaveAttribute('href','/admin/document-extractions?view=documents&type=__unknown__&status=unrequested#extraction-results');
+});
+
 it('전체 통계·다른 문서 유형과 파일별 페이지 진행을 표시합니다',()=>{
  render(<DocumentExtractionOverview initial={fixture()}/>);
  const totals=screen.getByRole('region',{name:'전체 누적 현황'});

@@ -17,11 +17,25 @@ function typeLabel(type:string|null){return type===null?'형식 기록 없음':t
 /** 기록 없는 유형과 실제 유형 문자열의 React 식별자가 충돌하지 않도록 구분합니다. */
 function typeKey(type:string|null){return type===null?'unknown':`type:${type}`;}
 
-/** 등록 파일 수와 최신 상태별 개수를 같은 배치로 표시합니다. */
-function CountSummary({counts}:{counts:DocumentCounts}){
+/** 등록 파일 수와 최신 상태별 개수를 표시하고 같은 집계 범위의 파일 목록으로 연결합니다. */
+function CountSummary({counts,type,selection}:{counts:DocumentCounts;type?:string|null;selection?:{type:string;status:string}}){
+ const filterType=type===undefined?'':type===null?'__unknown__':type,label=type===undefined?'전체 문서':typeLabel(type);
+ /** 카드의 집계 범위와 일치하도록 다른 검색 조건 없이 최신 파일 목록으로 이동합니다. */
+ function cardLink(status:string){
+  const params=new URLSearchParams({view:'documents'});
+  if(filterType)params.set('type',filterType);
+  if(status)params.set('status',status);
+  return `/admin/document-extractions?${params}#extraction-results`;
+ }
+ /** 유형과 상태가 모두 같은 카드만 선택된 것으로 표시합니다. */
+ function selected(status:string){return selection?.type===filterType&&selection.status===status;}
  return <dl className="overview-counts">
-  <div className="overview-total"><dt>등록 파일</dt><dd>{counts.total.toLocaleString('ko-KR')}</dd></div>
-  {Object.entries(statusLabels).map(([status,label])=><div key={status} data-status={status}><dt>{label}</dt><dd>{counts[status as keyof typeof statusLabels].toLocaleString('ko-KR')}</dd></div>)}
+  <div className="overview-total" data-selected={selected('')}><dt>등록 파일</dt><dd>
+   <a className="overview-count-link" href={cardLink('')} aria-label={`${label} 등록 파일 ${counts.total.toLocaleString('ko-KR')}개 보기`} aria-current={selected('')?'true':undefined}>{counts.total.toLocaleString('ko-KR')}</a>
+  </dd></div>
+  {Object.entries(statusLabels).map(([status,statusLabel])=><div key={status} data-status={status} data-selected={selected(status)}><dt>{statusLabel}</dt><dd>
+   <a className="overview-count-link" href={cardLink(status)} aria-label={`${label} ${statusLabel} ${counts[status as keyof typeof statusLabels].toLocaleString('ko-KR')}개 보기`} aria-current={selected(status)?'true':undefined}>{counts[status as keyof typeof statusLabels].toLocaleString('ko-KR')}</a>
+  </dd></div>)}
  </dl>;
 }
 
@@ -59,7 +73,7 @@ function ProcessingFile({run}:{run:ProcessingDocument}){
 }
 
 /** 화면이 보일 때만 전체 현황을 갱신하며 마지막 정상 데이터와 펼침 상태를 유지합니다. */
-export function DocumentExtractionOverview({initial,initialError=''}:{initial:DocumentOverview|null;initialError?:string}){
+export function DocumentExtractionOverview({initial,initialError='',selection}:{initial:DocumentOverview|null;initialError?:string;selection?:{type:string;status:string}}){
  const [overview,setOverview]=useState(initial),[error,setError]=useState(initialError);
  useEffect(()=>{
   let disposed=false,timer:ReturnType<typeof setTimeout>|undefined,inFlight:AbortController|null=null;
@@ -103,12 +117,12 @@ export function DocumentExtractionOverview({initial,initialError=''}:{initial:Do
    <section aria-labelledby="overview-total-heading" className="overview-total-section">
     <h2 id="overview-total-heading">전체 누적 현황</h2>
     <p className="extraction-meta">등록 문서를 파일별 최신 상태로 집계합니다. 이력 검색 조건과 관계없는 전체 현황입니다.</p>
-    <CountSummary counts={overview.totals}/>
+    <CountSummary counts={overview.totals} selection={selection}/>
    </section>
    <section aria-labelledby="overview-types-heading">
     <h2 id="overview-types-heading">문서 유형별 누적 현황</h2>
-    {overview.byType.map(item=><FormAccordion key={typeKey(item.type)} size="compact" title={`${typeLabel(item.type)} · 등록 ${item.counts.total.toLocaleString('ko-KR')}개`}>
-     <CountSummary counts={item.counts}/>
+    {overview.byType.map(item=><FormAccordion key={typeKey(item.type)} size="compact" defaultOpen={selection?.type===(item.type??'__unknown__')} title={`${typeLabel(item.type)} · 등록 ${item.counts.total.toLocaleString('ko-KR')}개`}>
+     <CountSummary counts={item.counts} type={item.type} selection={selection}/>
     </FormAccordion>)}
     {!overview.byType.length&&<p className="extraction-meta">등록된 추출 대상 문서가 없습니다.</p>}
    </section>
