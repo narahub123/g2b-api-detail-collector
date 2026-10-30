@@ -183,13 +183,15 @@ it("상세 재수집 성공 시 시작·종료와 마지막 저장 단계를 보
 
 it("다음 API 페이지를 요청하기 전에 이전 공고의 현재 단계를 해제합니다", async () => {
   process.env.G2B_SERVICE_KEY = "test-key";
-  const job = await startCollection({ start: "2026-10-28", end: "2026-10-28" }, {
+  let job!: CollectionJob;
+  job = await startCollection({ start: "2026-10-28", end: "2026-10-28" }, {
     fetcher: async input => {
       const second = new URL(String(input)).searchParams.get("pageNo") === "2";
       if (second) {
         const saved = [...db.jobs.values()][0] as CollectionJob;
-        expect(saved.progress?.stage).toBe("api");
-        expect(saved.progress?.currentNoticeKey).toBeUndefined();
+        // 현재 상태는 즉시 전환하지만 DB 반영은 최대 2초 병합될 수 있습니다.
+        expect(job.progress?.stage).toBe("api");
+        expect(job.progress?.currentNoticeKey).toBeUndefined();
         expect(saved.results?.[0].finishedAt).toEqual(expect.any(String));
       }
       return Response.json({ response: { body: { totalCount: 101, numOfRows: 100, pageNo: second ? 2 : 1,

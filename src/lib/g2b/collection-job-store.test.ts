@@ -34,15 +34,15 @@ describe("DB 수집 작업 잠금", () => {
     now += 100;
     await observer.progress("opening", result);
     await observer.progress("opening", result);
-    expect(updates).toHaveLength(2);
+    expect(updates).toHaveLength(1);
     await observer.persist("api", result);
-    expect(updates).toHaveLength(3);
+    expect(updates).toHaveLength(2);
     result.status = "succeeded";
     await observer.finish(result);
     value.status = "completed";
     await observer.persist();
     await observer.progress("modals", result);
-    expect(updates).toHaveLength(5);
+    expect(updates).toHaveLength(4);
     expect(updates.every(({ sql }) => sql.includes("UPDATE public.collection_jobs") && sql.includes("token=$4::uuid"))).toBe(true);
     expect(updates.at(-1)?.state).toMatchObject({ status: "completed", results: [{ finishedAt: new Date(now).toISOString() }] });
   });
