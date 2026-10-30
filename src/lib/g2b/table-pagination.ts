@@ -1,3 +1,4 @@
+import {measure} from './collection-performance';
 import * as cheerio from "cheerio";
 import type { Page, Locator } from "playwright-core";
 import { extractDetailTable, type StructuredTable } from "./structured-table";
@@ -123,7 +124,7 @@ export async function collectPaginatedTables(page: Page, scope: Locator,
         const current = state.current;
         if (state.pageCount && current >= state.pageCount) break;
         if (!state.numbers.some((value) => value > current) && !state.hasNext) break;
-        if (!await advance(page, pager, state, signature, match.gridId, options.transitionTimeoutMs ?? 10000)) {
+        if (!await measure("table.advance", () => advance(page, pager, state!, signature, match.gridId, options.transitionTimeoutMs ?? 10000))) {
           errors.push("페이지 전환 또는 데이터 변경을 확인하지 못했습니다."); break;
         }
         const next = await readPager(pager);
