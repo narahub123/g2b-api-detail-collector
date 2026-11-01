@@ -15,6 +15,10 @@ async function script(body: string) {
 afterEach(async () => { await Promise.all(fixtures.splice(0).map(path => rm(path, { recursive: true, force: true }))); });
 
 describe("PDF 작업 프로세스 경계", () => {
+  it('자식 프로세스의 점검 분류를 보존합니다',async()=>{
+    const path=await script(`await writeFile(join(dir,'error.json'),JSON.stringify({error:'점검',maintenance:{code:'g2b_maintenance',source:'download',detectedAt:new Date().toISOString(),message:'나라장터 시스템 점검으로 보류'}})); process.exitCode=1;`);
+    await expect(superviseExtraction('id','key',new AbortController().signal,{script:path})).rejects.toMatchObject({maintenance:{code:'g2b_maintenance',source:'download'}});
+  });
   it('진행 메시지와 정제된 원본 오류·종료 코드를 전달합니다',async()=>{
     const path=await script(`process.send?.({type:'progress',progress:{stage:'extracting',at:new Date().toISOString(),currentPage:2,completedPages:1,totalPages:3}}); await writeFile(join(dir,'error.json'),JSON.stringify({error:'파서 실패',diagnostic:{name:'ParserError',message:'원본 오류',stack:'원본 스택'}})); process.exitCode=1;`);
     const onProgress=vi.fn();

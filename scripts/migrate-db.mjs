@@ -15,6 +15,7 @@ try {
   await client.query(await readFile(fileURLToPath(new URL("../db/migrations/0006-document-extraction.sql", import.meta.url)), "utf8"));
   await client.query(await readFile(fileURLToPath(new URL("../db/migrations/0007-retire-pdf-poc.sql", import.meta.url)), "utf8"));
   await client.query(await readFile(fileURLToPath(new URL("../db/migrations/0008-extraction-diagnostics.sql", import.meta.url)), "utf8"));
+  await client.query(await readFile(fileURLToPath(new URL("../db/migrations/0009-maintenance-deferral.sql", import.meta.url)), "utf8"));
   await client.query("COMMIT");
   console.log("DB 스키마 적용 완료");
 } catch (error) {

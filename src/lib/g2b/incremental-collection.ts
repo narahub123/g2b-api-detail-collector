@@ -1,3 +1,4 @@
+import { deferCollection, maintenanceFromError } from "./maintenance";
 import { randomUUID } from "node:crypto";
 import { ApiPageError, fetchNoticeByKey, prepareServiceNoticesByMinute, type PostedTimeRange } from "./api-client";
 import { addDiagnostic, redactDiagnostic } from "./collection-diagnostics";
@@ -111,6 +112,53 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
     await observation.begin(result);
     return result;
   };
+  /** 저장된 관계도 다시 따라가 점검 전에 부모만 완료된 경우의 미완료 자식을 복구합니다. */
+  const handleRelated = async (key: string, relatedKeys: string[]): Promise<void> => {
+    const targets: string[] = [];
+    for (const related of relatedKeys.slice(0, 200)) {
+      if (related === key) continue;
+      try {
+        const [relatedNumber, relatedOrder] = related.split("--");
+        if (noticeKeyFromParts(relatedNumber, relatedOrder) !== related) throw new Error("잘못된 공고 키");
+      } catch {
+        job.errors.push(`${key}: 잘못된 관련 공고 키 ${related}`);
+        addDiagnostic(job, { severity: "warning", stage: "transform", operation: "related-notice-key", target: { key }, error: `잘못된 관련 공고 키 ${related}` });
+        continue;
+      }
+      await observation.progress("relations");
+      await ensureLease();
+      await store.saveRelation(key, related);
+      targets.push(related);
+    }
+    // 첫 자식에서 점검이 시작되어도 아직 착수하지 않은 형제 공고까지 복구할 수 있게 합니다.
+    for (const related of targets) {
+      if (attemptedThisRun.has(related)) continue;
+      let relatedApi: ApiNotice | null = null;
+      const relatedRecord = await store.getNotice(related);
+      const relatedAttempt = await store.getAttempt(related);
+      const relatedResult = !relatedRecord?.detail && (relatedAttempt?.attempts || 0) < 3
+        ? await prepareResult(related) : undefined;
+      if (!relatedRecord?.api) {
+        // 저장된 API가 없는 관련 공고만 번호별로 조회하고 전체 목표에 더합니다.
+        if (!relatedApiTargets.has(related)) {
+          relatedApiTargets.add(related);
+          job.apiTotal = (job.apiTotal || 0) + 1;
+        }
+        await persist("api", relatedResult);
+        relatedApi = await fetchNoticeByKey(related, options.fetcher).catch((error) => {
+          if (maintenanceFromError(error)) throw error;
+          addDiagnostic(job, { severity: "warning", stage: "api", operation: "fetch-related-notice", target: { key: related }, error });
+          return null;
+        });
+        if (!relatedApiCompleted.has(related)) {
+          relatedApiCompleted.add(related);
+          job.apiProcessed = (job.apiProcessed || 0) + 1;
+          await persist("api", relatedResult);
+        }
+      }
+      await handle(related, relatedApi);
+    }
+  };
   /** 현재 공고 결과를 확정한 뒤 관련 공고를 별도 대상으로 처리합니다. */
   const handle = async (key: string, api: ApiNotice | null, retry = false): Promise<void> => {
     if (!retry && attemptedThisRun.has(key)) return;
@@ -137,6 +185,7 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
           await observation.finish(metadata.get(key)!);
         }
       }
+      await handleRelated(key, record.relatedNoticeKeys ?? []);
       return;
     }
     const noticeResult = (previous?.attempts || 0) < 3 ? await prepareResult(key) : undefined;
@@ -154,6 +203,7 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
       extracted = { result, structured: structureNoticeDetail(key, result.detail) };
     } catch (error) {
       observation.assert();
+      if (maintenanceFromError(error)) throw error;
       const message = redactDiagnostic(error instanceof Error ? error.message : String(error));
       addDiagnostic(job, { severity: "failure", stage: "detail", operation: "scrape-detail", target: { key },
         attempt: (previous?.attempts || 0) + 1, outcome: (previous?.attempts || 0) < 2 ? "retrying" : "failed", error });
@@ -194,45 +244,9 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
     results.set(key, "succeeded");
     recount();
     await observation.finish(noticeResult);
-    for (const related of extracted.result.relatedNoticeKeys.slice(0, 200)) {
-      if (related === key) continue;
-      try {
-        const [relatedNumber, relatedOrder] = related.split("--");
-        if (noticeKeyFromParts(relatedNumber, relatedOrder) !== related) throw new Error("잘못된 공고 키");
-      } catch {
-        job.errors.push(`${key}: 잘못된 관련 공고 키 ${related}`);
-        addDiagnostic(job, { severity: "warning", stage: "transform", operation: "related-notice-key", target: { key }, error: `잘못된 관련 공고 키 ${related}` });
-        continue;
-      }
-      await observation.progress("relations");
-      await ensureLease();
-      await store.saveRelation(key, related);
-      if (attemptedThisRun.has(related)) continue;
-      let relatedApi: ApiNotice | null = null;
-      const relatedRecord = await store.getNotice(related);
-      const relatedAttempt = await store.getAttempt(related);
-      const relatedResult = !relatedRecord?.detail && (relatedAttempt?.attempts || 0) < 3
-        ? await prepareResult(related) : undefined;
-      if (!relatedRecord?.api) {
-        // 저장된 API가 없는 관련 공고만 번호별로 조회하고 전체 목표에 더합니다.
-        if (!relatedApiTargets.has(related)) {
-          relatedApiTargets.add(related);
-          job.apiTotal = (job.apiTotal || 0) + 1;
-        }
-        await persist("api", relatedResult);
-        relatedApi = await fetchNoticeByKey(related, options.fetcher).catch((error) => {
-          addDiagnostic(job, { severity: "warning", stage: "api", operation: "fetch-related-notice", target: { key: related }, error });
-          return null;
-        });
-        if (!relatedApiCompleted.has(related)) {
-          relatedApiCompleted.add(related);
-          job.apiProcessed = (job.apiProcessed || 0) + 1;
-          await persist("api", relatedResult);
-        }
-      }
-      await handle(related, relatedApi);
-    }
+    await handleRelated(key, extracted.result.relatedNoticeKeys);
     } catch (error) {
+      if (maintenanceFromError(error)) throw error;
       // 저장 오류로 중단된 공고는 같은 조회 구간의 즉시 재시도에서 다시 처리합니다.
       addDiagnostic(job, { severity: "failure", stage: "database", operation: "process-notice", target: { key }, error });
       if (!retry) attemptedThisRun.delete(key);
@@ -274,6 +288,7 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
           attempt: run + 1, outcome: "recovered", error: previousWindowError || "조회 구간 재시도 성공" });
         break;
       } catch (error) {
+        if (maintenanceFromError(error)) throw error;
         addDiagnostic(job, { severity: "failure", stage: error instanceof ApiPageError ? "api" : "collection",
           operation: error instanceof ApiPageError ? "fetch-page" : "run-window",
           target: error instanceof ApiPageError ? { date: error.date, pageNo: error.pageNo } : undefined,
@@ -293,6 +308,7 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
     }
     job.status = "completed";
   } catch (error) {
+    if (deferCollection(job, error)) return job;
     job.status = "failed";
     job.errors.push(error instanceof Error ? error.message : String(error));
     if (!(error instanceof ApiPageError)) addDiagnostic(job, { severity: "failure", stage: "collection", operation: "run-incremental", error });

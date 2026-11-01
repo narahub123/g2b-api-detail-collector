@@ -7,6 +7,15 @@ const key='R26BK01797756--001';
 const docs=[{id:'a',filename:'공고.pdf',seq:1,is_current:true,attachment_url:'/original-a',latest:{id:'a-run',status:'failed',error:'최근 실패'},success:{id:'a-ok',status:'completed',page_count:2,character_count:20}},
 {id:'b',filename:'공고.pdf',seq:2,is_current:true,attachment_url:'/original-b',latest:null,success:null}];
 afterEach(()=>{cleanup();vi.useRealTimers();vi.unstubAllGlobals();});
+
+it('점검 반환 문서는 대기 상태에서 점검 사유를 표시합니다',async()=>{
+ const active={id:'queued',status:'queued',error_code:'g2b_maintenance',error:'나라장터 시스템 점검으로 보류했습니다.',requested_at:'2026-01-01',next_attempt_at:null};
+ vi.stubGlobal('fetch',vi.fn(async(input:string)=>input.includes('/extractions/')?Response.json(active):input.includes('/extractions')?Response.json({runs:[],nextCursor:null}):Response.json({documents:[{...docs[1],active,latest:active}],unsupported:[]})));
+ render(<DocumentPanel noticeKey={key}/>);
+ const title=await screen.findByText(/1\. 공고.pdf/);fireEvent.click(title.closest('summary')!);
+ expect((await screen.findAllByText('나라장터 시스템 점검으로 보류했습니다.')).length).toBeGreaterThan(0);
+ expect(screen.queryByText(/실행 가능한 요청이 30분 이상/)).not.toBeInTheDocument();
+});
 it('같은 이름의 파일도 독립적으로 펼치고 본문을 지연 조회하며 페이지 선택을 유지합니다',async()=>{
  const fetcher=vi.fn(async(input:string,init?:RequestInit)=>{
   if(init?.method==='POST')return Response.json({id:'b-run',awake:false},{status:202});

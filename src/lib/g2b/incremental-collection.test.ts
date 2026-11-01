@@ -2,6 +2,65 @@ import { expect, it, vi } from "vitest";
 import { runIncrementalCollection, type IncrementalStore } from "./incremental-collection";
 import type { StoredNotice } from "./notices";
 import type { CollectionJob } from "./collection-job";
+import { G2bMaintenanceError } from "./maintenance";
+
+it("부모 저장 후 관련 공고에서 점검이 시작되어도 다음 실행에서 미완료 관계를 재개합니다",async()=>{
+  vi.stubEnv("G2B_SERVICE_KEY","test-key");
+  try {
+    const memory=memoryStore();
+    memory.store.saveRelation=async(source,related)=>{
+      const parent=memory.notices.get(source)!;
+      parent.relatedNoticeKeys=[...new Set([...(parent.relatedNoticeKeys??[]),related])];
+    };
+    let maintenance=true;
+    const fetcher=vi.fn(async(input:RequestInfo|URL)=>{
+      const related=new URL(String(input)).searchParams.get('inqryDiv')==='2';
+      if(related&&maintenance)throw new G2bMaintenanceError('api');
+      return Response.json({response:{body:{totalCount:1,numOfRows:100,pageNo:1,items:[{bidNtceNo:related?new URL(String(input)).searchParams.get('bidNtceNo'):'R26BK1',bidNtceOrd:'000'}]}}});
+    });
+    const scrape=vi.fn(async(url:string)=>({detail:{sourceUrl:url,sections:[],attachments:[],links:[]},relatedNoticeKeys:url.includes('R26BK1')?['R26BK2--000','R26BK3--000']:[]}));
+    const options={start:'2026-10-27T00:00:00Z',end:'2026-10-27T01:00:00Z',store:memory.store,fetcher,scrape};
+    const first=await runIncrementalCollection(options);
+    expect(first).toMatchObject({status:'deferred',detailSucceeded:1,detailFailed:0});
+    expect(memory.attempts.has('R26BK2--000')).toBe(false);
+    maintenance=false;
+    expect((await runIncrementalCollection(options)).status).toBe('completed');
+    expect(memory.notices.get('R26BK2--000')?.detail).toBeTruthy();
+    expect(memory.notices.get('R26BK3--000')?.detail).toBeTruthy();
+    expect(scrape).toHaveBeenCalledTimes(3);
+  }finally{vi.unstubAllEnvs();}
+});
+
+it("API 점검은 즉시 보류하고 같은 구간을 다음 정상 실행에서 재수집합니다", async () => {
+  vi.stubEnv("G2B_SERVICE_KEY", "test-key");
+  try {
+    const memory = memoryStore();
+    const fetcher = vi.fn(async () => new Response('<title>시스템 점검 안내</title><p>현재 웹서비스가 중단되고 있음을 알려드립니다.</p>'));
+    const options = { start: "2026-10-27T00:00:00Z", end: "2026-10-27T01:00:00Z", store: memory.store, fetcher };
+    const job = await runIncrementalCollection(options);
+    expect(job).toMatchObject({ status: "deferred", maintenance: { code: "g2b_maintenance", source: "api" }, detailFailed: 0 });
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(await memory.store.getCheckpoint()).toBeNull();
+    const recovered = await runIncrementalCollection({ ...options, fetcher: async () => Response.json({ response: { body: { totalCount: 0, numOfRows: 100, pageNo: 1, items: [] } } }) });
+    expect(recovered.status).toBe("completed");
+    expect(recovered.windowStart).toBe(job.windowStart);
+  } finally { vi.unstubAllEnvs(); }
+});
+
+it("상세 점검은 시도 횟수를 보존하고 다음 공고와 구간 재시도를 중단합니다", async () => {
+  vi.stubEnv("G2B_SERVICE_KEY", "test-key");
+  try {
+    const memory = memoryStore();
+    const scrape = vi.fn(async () => { throw new G2bMaintenanceError("detail"); });
+    const fetcher = vi.fn(async () => Response.json({ response: { body: { totalCount: 2, numOfRows: 100, pageNo: 1,
+      items: [{ bidNtceNo: "R26BK1", bidNtceOrd: "000" }, { bidNtceNo: "R26BK2", bidNtceOrd: "000" }] } } }));
+    const job = await runIncrementalCollection({ start: "2026-10-27T00:00:00Z", end: "2026-10-27T01:00:00Z", store: memory.store, fetcher, scrape });
+    expect(job).toMatchObject({ status: "deferred", detailFailed: 0 });
+    expect(memory.attempts.size).toBe(0);
+    expect(fetcher).toHaveBeenCalledOnce(); expect(scrape).toHaveBeenCalledOnce();
+    expect(job.results?.[0].status).toBe("pending");
+  } finally { vi.unstubAllEnvs(); }
+});
 
 it("구간 건수 부족이 반복되면 완료 지점을 유지하고 같은 구간을 다시 수집합니다", async () => {
   const oldKey = process.env.G2B_SERVICE_KEY;

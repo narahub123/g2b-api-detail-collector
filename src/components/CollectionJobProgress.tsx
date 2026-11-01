@@ -1,22 +1,18 @@
 import { CollectionJobObservation } from "./CollectionJobObservation";
+import { collectionStatuses } from "@/lib/g2b/collection-display";
 import type { CollectionJob } from "@/lib/g2b/collection-job";
 
 /** 수동·자동 수집 공통 결과. 조회·폴링 로직은 변경하지 않습니다. */
 export function CollectionJobProgress({ job }: { job: CollectionJob | null }) {
   if (!job || job.mode === "refresh") return null;
-  const status =
-    job.status === "running"
-      ? "수집 진행 중"
-      : job.status === "completed"
-        ? "수집 완료"
-        : job.status === "failed"
-          ? "수집 실패"
-          : "수집 중단";
+  const status = collectionStatuses[job.status];
   const api =
     job.apiTotal === undefined
       ? job.status === "running"
         ? "목표 확인 중"
-        : job.apiProcessed !== undefined
+        : job.status === "deferred"
+          ? "점검으로 보류"
+          : job.apiProcessed !== undefined
           ? "목표 확인 실패"
           : `${job.apiCount}건`
       : `${job.apiProcessed ?? 0} / ${job.apiTotal}건`;

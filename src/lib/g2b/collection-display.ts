@@ -8,7 +8,7 @@ export const collectionStages: Record<CollectionStage, string> = {
 };
 
 export const collectionStatuses: Record<CollectionJob["status"], string> = {
-  running: "수집 진행 중", completed: "수집 완료", failed: "수집 실패", interrupted: "수집 중단",
+  running: "수집 진행 중", completed: "수집 완료", failed: "수집 실패", interrupted: "수집 중단", deferred: "나라장터 시스템 점검으로 보류",
 };
 
 /** 브라우저와 서버의 로캘 설정에 영향받지 않도록 한국 시각을 고정 형식으로 표시합니다. */

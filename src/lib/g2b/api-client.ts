@@ -1,4 +1,5 @@
 import { postedDays } from "./date-range";
+import { assertNotMaintenance } from "./maintenance";
 import { noticeKey } from "./identity";
 import type { ApiNotice, ApiPage, PostedDateRange } from "./types";
 
@@ -35,9 +36,12 @@ async function fetchBody(url: URL, fetcher: typeof fetch): Promise<ApiBody> {
   url.searchParams.set("numOfRows", String(PAGE_SIZE));
   url.searchParams.set("type", "json");
   const response = await fetcher(url, { cache: "no-store", signal: AbortSignal.timeout(30_000) });
+  const text = await response.text();
+  // 점검 화면은 HTTP 200으로도 반환되므로 JSON 변환 전에 본문을 확인합니다.
+  assertNotMaintenance(text, "api");
   if (!response.ok) throw new Error(`나라장터 API HTTP 오류: ${response.status}`);
   let raw: unknown;
-  try { raw = await response.json(); }
+  try { raw = JSON.parse(text); }
   catch { throw new Error("나라장터 API가 JSON 응답을 반환하지 않았습니다."); }
   const envelope = raw as { response?: { header?: { resultCode?: string }; body?: {
     items?: unknown; totalCount?: number | string; numOfRows?: number | string; pageNo?: number | string

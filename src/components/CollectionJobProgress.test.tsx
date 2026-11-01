@@ -6,6 +6,16 @@ import { CollectionJobProgress } from "./CollectionJobProgress";
 
 afterEach(cleanup);
 
+it("점검 보류를 실패로 표시하지 않고 확인 시각과 안내를 보여줍니다", () => {
+  const job: CollectionJob = { id:"deferred",mode:"incremental",status:"deferred",phase:"done",range:null,
+    startedAt:"2026-11-01T00:00:00Z",finishedAt:"2026-11-01T00:00:01Z",apiCount:0,detailSucceeded:0,detailFailed:0,errors:[],
+    maintenance:{code:"g2b_maintenance",source:"api",detectedAt:"2026-11-01T00:00:01Z",message:"현재 웹서비스가 중단되어 보류했습니다."} };
+  render(<CollectionJobProgress job={job}/>);
+  expect(screen.getAllByText(/나라장터 시스템 점검으로 보류/).length).toBeGreaterThan(0);
+  expect(screen.getByText("현재 웹서비스가 중단되어 보류했습니다.")).toBeInTheDocument();
+  expect(screen.queryByText("목표 확인 실패")).not.toBeInTheDocument();
+});
+
 it("공고별 결과는 별도 아코디언으로 접고 펼칠 수 있습니다", () => {
   const job = {
     id: "job",

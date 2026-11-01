@@ -1,3 +1,4 @@
+import { deferCollection, maintenanceFromError, type MaintenanceInfo } from "./maintenance";
 import { seoulInputToUtc } from "../seoul-time";
 import { randomUUID } from "node:crypto";
 import { ApiPageError, fetchNoticeByKey, prepareServiceNoticesByMinute } from "./api-client";
@@ -20,7 +21,8 @@ import { createCollectionObserver, observeCollectionPages } from "./collection-o
 export type CollectionJob = DiagnosticState & {
   id: string;
   mode?: "collection" | "refresh" | "incremental";
-  status: "running" | "completed" | "failed" | "interrupted";
+  status: "running" | "completed" | "failed" | "interrupted" | "deferred";
+  maintenance?: MaintenanceInfo;
   phase: "api" | "detail" | "done";
   range: PostedDateRange | null;
   results?: CollectionNoticeResult[];
@@ -78,6 +80,7 @@ async function findMissingApi(key: string, record: StoredNotice, job: Collection
   if (record.api) return null;
   try { return await fetchNoticeByKey(key, fetcher); }
   catch (error) {
+    if (maintenanceFromError(error)) throw error;
     job.errors.push(`${key}: API 보완 조회 실패: ${error instanceof Error ? error.message : String(error)}`);
     addDiagnostic(job, { severity: "warning", stage: "api", operation: "fetch-notice-by-key", target: { key }, error });
     return null;
@@ -127,7 +130,7 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies, l
     await ensureLease();
     await saveNoticeRelation(source, related);
   };
-  /** 누락된 API를 보완하고 상세를 수집한 뒤 새로 발견한 관련 공고 키를 반환합니다. */
+  /** API·상세를 보완하고 저장된 관계도 반환해 점검으로 남은 관련 공고를 다시 찾습니다. */
   const processRecord = async (key: string, api: ApiNotice | null = null): Promise<string[]> => {
     const record = await ensureRecord(key, api);
     const needsDetail = !scraped.has(key) && !(record.detail && (!api ||
@@ -150,7 +153,7 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies, l
       await persist("api", noticeResult);
       if (found) { record.api = found; await saveRecord(key, record); }
     }
-    if (!noticeResult) return [];
+    if (!noticeResult) return record.relatedNoticeKeys ?? [];
     await observation.progress("opening", noticeResult);
     const identity = parts(key);
     let result: ScrapeResult;
@@ -158,6 +161,7 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies, l
       onProgress: stage => observation.progress(stage, noticeResult) }); }
     catch (error) {
       observation.assert();
+      if (maintenanceFromError(error)) throw error;
       record.detailError = redactDiagnostic(error instanceof Error ? error.message : "상세 수집 오류");
       noticeResult.status = "failed";
       noticeResult.error = record.detailError;
@@ -255,6 +259,7 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies, l
     }
     job.status = "completed";
   } catch (error) {
+    if (deferCollection(job, error)) return;
     job.status = "failed";
     job.errors.push(error instanceof Error ? error.message : "수집 오류");
     addDiagnostic(job, { severity: "failure", stage: error instanceof ApiPageError ? "api" : job.phase === "detail" ? "detail" : "collection",
@@ -333,6 +338,7 @@ async function runRefresh(job: CollectionJob, deps: CollectionDependencies, leas
         scraped = await scrape(serviceDetailUrl(number, order), { onProgress: stage => observation.progress(stage, result) });
       } catch (error) {
         observation.assert();
+        if (maintenanceFromError(error)) throw error;
         result.status = "failed";
         result.error = redactDiagnostic(error instanceof Error ? error.message : "상세 수집 오류");
         job.detailFailed++;
@@ -375,6 +381,7 @@ async function runRefresh(job: CollectionJob, deps: CollectionDependencies, leas
     }
     job.status = "completed";
   } catch (error) {
+    if (deferCollection(job, error)) return;
     job.status = "failed";
     job.errors.push(error instanceof Error ? error.message : "재수집 오류");
     addDiagnostic(job, { severity: "failure", stage: "collection", operation: "run-refresh", error });

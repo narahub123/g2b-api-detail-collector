@@ -1,4 +1,5 @@
 import { serviceDetailUrl } from "./detail-url";
+import { assertNotMaintenance } from "./maintenance";
 export { serviceDetailUrl } from "./detail-url";
 import {measure, measureSync} from './collection-performance';
 import * as cheerio from "cheerio";
@@ -138,6 +139,8 @@ export async function scrapeDetailPage(url: string, options?: { onProgress?: (st
       }));
     });
     await measure("page.goto", () => page.goto(url, { waitUntil: "domcontentloaded", timeout: 45_000 }));
+    // 정상 화면의 요소를 기다리기 전에 현재 응답의 점검 안내를 구분합니다.
+    assertNotMaintenance(await page.content(), "detail");
     await measure("wait.notice", () => page.locator('td[data-title="공고명"]').first().waitFor({ timeout: 45_000 }));
     await measure("wait.attachment-table", () => page.locator('table[id$="_grdFile_body_table"]').first().waitFor({ timeout: 20_000 }));
     await measure("wait.network-idle", () => page.waitForLoadState("networkidle", { timeout: 15_000 })).catch((error) => {

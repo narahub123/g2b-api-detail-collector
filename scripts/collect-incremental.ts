@@ -1,3 +1,4 @@
+import { collectionExitCode, writeMaintenanceSummary } from "../src/lib/g2b/execution-summary";
 import { runIncrementalCollection } from "../src/lib/g2b/incremental-collection";
 import { runScheduledCollection } from "../src/lib/g2b/scheduled-collection";
 
@@ -7,7 +8,10 @@ async function main() {
     if (process.argv.length !== 3) throw new Error("--scheduled는 다른 인수와 함께 사용할 수 없습니다.");
     const result = await runScheduledCollection();
     console.log(JSON.stringify(result));
-    if (result.kind === "failed") process.exitCode = 1;
+    if ("job" in result) {
+      await writeMaintenanceSummary(result.job.maintenance);
+      process.exitCode = collectionExitCode(result.job.status);
+    }
     return;
   }
   const args = Object.fromEntries(process.argv.slice(2).map((value) => {
@@ -22,8 +26,9 @@ async function main() {
   const job = await runIncrementalCollection({ start, end });
   console.log(JSON.stringify({ id: job.id, status: job.status, windowStart: job.windowStart,
     windowEnd: job.windowEnd, continuation: job.continuation, apiCount: job.apiCount,
-    detailSucceeded: job.detailSucceeded, detailFailed: job.detailFailed, errors: job.errors }));
-  if (job.status !== "completed") process.exitCode = 1;
+    detailSucceeded: job.detailSucceeded, detailFailed: job.detailFailed, errors: job.errors, maintenance: job.maintenance }));
+  await writeMaintenanceSummary(job.maintenance);
+  process.exitCode = collectionExitCode(job.status);
 }
 
 main().catch((error) => { console.error(error instanceof Error ? error.message : String(error)); process.exitCode = 1; });

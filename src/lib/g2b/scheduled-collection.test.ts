@@ -3,6 +3,15 @@ import { latestDueTime, type AutomationSettings } from "./automation-schedule";
 import { runScheduledCollection } from "./scheduled-collection";
 import type { CollectionJob } from "./collection-job";
 
+it("예약 작업의 점검 보류를 실패와 구분합니다",async()=>{
+  const job={id:"job",status:"deferred"} as CollectionJob;
+  const result=await runScheduledCollection(new Date(),{
+    claim:async()=>({kind:"due",dueAt:"2026-11-01T00:00:00Z",settings:{startAt:"2026-10-30T00:00:00Z",activationId:"id"} as AutomationSettings}),
+    run:async()=>job,
+  });
+  expect(result).toMatchObject({kind:"deferred",job});
+});
+
 it("겹친 예약을 건너뛰고 다음 예약에서 같은 활성화 시작점을 넘깁니다", async () => {
   const settings: AutomationSettings = { enabled: true, schedule: "interval", intervalMinutes: 60, times: [],
     startAt: "2026-10-26T00:00:00.000Z", activatedAt: "2026-10-27T00:07:00.000Z",
