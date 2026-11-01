@@ -118,9 +118,9 @@ function DocumentFile({document:doc,index,noticeKey,refresh}:{document:DocumentS
     <button disabled={posting||pending} onClick={()=>void start()}>{pending?'요청 접수됨':doc.latest?.status==='completed'?'재추출':doc.latest?'다시 추출':'추출 요청'}</button></p>}
    {!doc.is_current&&<p>이전 첨부는 재추출할 수 없습니다.</p>}
    {notice&&<p role="status">{notice}</p>}{error&&<p role="alert">{error}</p>}
-   {pending&&<p role="status">{doc.active?.status==='processing'?'PDF를 처리하고 있습니다.':'대기 요청이 저장되어 있습니다. 작업기 실행을 기다립니다.'}
+   {pending&&<p role="status">{doc.active?.error_code==='g2b_maintenance'?doc.active.error:doc.active?.status==='processing'?'PDF를 처리하고 있습니다.':'대기 요청이 저장되어 있습니다. 작업기 실행을 기다립니다.'}
     {doc.active?.next_attempt_at&&` 재시도 예정: ${new Date(doc.active.next_attempt_at).toLocaleString('ko-KR')}`}</p>}
-   {overdue&&<p role="alert">실행 가능한 요청이 30분 이상 대기 중입니다. 작업기·임대·보완 실행 및 Actions 상태를 확인하세요.</p>}
+   {overdue&&doc.active?.error_code!=='g2b_maintenance'&&<p role="alert">실행 가능한 요청이 30분 이상 대기 중입니다. 작업기·임대·보완 실행 및 Actions 상태를 확인하세요.</p>}
    {latestIssue&&<p role="alert">최근 시도: {runStatuses[latestIssue.status]}{latestIssue.error?` · ${latestIssue.error}`:''}{doc.success?' · 마지막 성공 본문을 조회할 수 있습니다.':''}</p>}
    {!!history.length&&<p><label>실행 이력{' '}<select aria-label={`실행 이력 첨부 ${doc.seq}`} value={selectedId} onChange={event=>{setSelection(event.target.value);setPage(1);setText(null);}}>
     {selectedId&&!history.some(item=>item.id===selectedId)&&<option value={selectedId}>선택한 저장 기록</option>}

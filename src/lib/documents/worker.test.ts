@@ -101,3 +101,13 @@ it("로컬 회차는 manual만 최대 3건 처리하고 실행 예산을 초기�
  const summary=await runBatch(store as never,{mode:"local",extract:async()=>({result:{pages:[],pageCount:0,characterCount:0,extractorVersion:"test",fileHash:"hash"},peakMemory:null})});
  expect(processed).toBe(3);expect(claims).toEqual([true,true,true]);expect(summary.reason).toBe("count_limit");
 });
+import { G2bMaintenanceError } from "../g2b/maintenance";
+
+it("점검 문서는 같은 시도로 대기에 반환하고 후속 선점과 실패 집계를 중단합니다", async () => {
+ const store=batchStore(),deferClaim=vi.fn(async()=>{});
+ store.claim.mockResolvedValue({id:'id',notice_key:'key',attempt_number:2} as never);
+ const summary=await runBatch({...store,deferClaim} as never,{mode:'local',extract:async()=>{throw new G2bMaintenanceError('download');}});
+ expect(summary).toMatchObject({reason:'g2b_maintenance',attempts:0,retries:0,failed:0,maintenance:{source:'download'}});
+ expect(deferClaim).toHaveBeenCalledWith(expect.any(String),'id',expect.objectContaining({code:'g2b_maintenance'}));
+ expect(store.claim).toHaveBeenCalledOnce();expect(store.fail).not.toHaveBeenCalled();expect(store.release).toHaveBeenCalledOnce();
+});

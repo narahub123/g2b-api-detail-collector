@@ -1,3 +1,4 @@
+import { writeMaintenanceSummary } from "../src/lib/g2b/execution-summary";
 import { chromium } from "playwright-core";
 import { getDocumentPool } from "../src/lib/documents/pool";
 import { DocumentQueue } from "../src/lib/documents/queue";
@@ -19,6 +20,7 @@ async function main(){
       budgetMinutes:options['budget-minutes']?Number(options['budget-minutes']):50,noticeKey:options['notice-key'],
       signal:abort.signal,discover:!queueOnly});
     console.log(JSON.stringify({operation:"pdf-extraction-batch",...result}));
+    await writeMaintenanceSummary(result.maintenance);
   } finally {process.removeListener('SIGTERM',stop);process.removeListener('SIGINT',stop);}
 }
 main().catch(()=>{console.error(JSON.stringify({operation:"pdf-extraction-batch",error:"배치가 실패했습니다. 설정과 대기열 상태를 확인하세요."}));process.exitCode=1;}).finally(()=>getDocumentPool().end());

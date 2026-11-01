@@ -11,6 +11,15 @@ describe("attachment download request", () => {
   const request = (path = url, signal?: AbortSignal) => new Request(`http://localhost${path}`, { signal });
   const record = { detail: { attachments: [{ name: "같은 이름.hwpx", url }] } };
 
+  it("점검 페이지는 공고 요소를 기다리거나 파일을 클릭하지 않고 종료합니다", async () => {
+    const close = vi.fn(async () => undefined), locator = vi.fn();
+    const launch = vi.fn(async () => ({ close, newPage: async () => ({
+      goto: vi.fn(), content: async () => '<title>시스템 점검 안내</title><p>현재 웹서비스가 중단되고 있음을 알려드립니다.</p>', locator,
+    }) })) as unknown as typeof chromium.launch;
+    await expect(openG2bDownload(key, fileNo, 1, new AbortController().signal, launch)).rejects.toMatchObject({maintenance:{source:"download"}});
+    expect(locator).not.toHaveBeenCalled(); expect(close).toHaveBeenCalledOnce();
+  });
+
   it("rejects invalid identity and targets absent from the stored notice", async () => {
     const open = vi.fn();
     const load = vi.fn(async () => record);
@@ -84,6 +93,7 @@ describe("attachment download request", () => {
     const close = vi.fn(async () => undefined);
     const page = {
       goto: async () => undefined,
+      content: async () => "<html></html>",
       waitForLoadState: async () => undefined,
       waitForEvent: async () => ({ failure: async () => "network failed" }),
       locator: (selector: string) => selector === "td[col_id='orgnlAtchFileNm']"
@@ -101,6 +111,7 @@ describe("attachment download request", () => {
     const close = vi.fn(async () => undefined);
     const page = {
       goto: async () => undefined,
+      content: async () => "<html></html>",
       waitForLoadState: async () => undefined,
       waitForEvent: async () => ({ failure: async () => null, suggestedFilename: () => "같은 이름.hwpx",
         createReadStream: async () => Readable.from([Buffer.from("file")]) }),

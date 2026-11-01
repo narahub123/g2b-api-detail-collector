@@ -92,6 +92,7 @@ function ObservationView({ job }: { job: CollectionJob }) {
   return <ObservationClock key={job.id} active={active}><section className="collection-observation" aria-label="수집 처리 관측">
     <h2>처리 관측</h2>
     <p className="collection-observation-status" role="status">상태: {collectionStatuses[job.status]}</p>
+    {job.maintenance && <div role="status"><p>{job.maintenance.message}</p><p>점검 확인: {collectionTime(job.maintenance.detectedAt)}</p></div>}
     <dl className="collection-observation-data">
       <div><dt>시작</dt><dd>{collectionTime(job.startedAt)}</dd></div>
       <div><dt>{interrupted ? "중단 확인 시각" : "종료"}</dt><dd>{job.finishedAt ? collectionTime(job.finishedAt) : active ? "진행 중" : "기록 없음"}</dd></div>
@@ -112,7 +113,7 @@ function ObservationView({ job }: { job: CollectionJob }) {
             const unknownEnd = !!result.startedAt && !result.finishedAt && !active;
             return <tr key={result.key}>
               <th scope="row"><a href={`/admin/bids/${encodeURIComponent(result.key)}`}>{result.key}</a></th>
-              <td>{noticeStatus(result, active, job.mode === "refresh")}{result.error && <p className="collection-progress-error">{result.error}</p>}</td>
+              <td>{job.status === "deferred" && result.status === "pending" ? "점검으로 보류" : noticeStatus(result, active, job.mode === "refresh")}{result.error && <p className="collection-progress-error">{result.error}</p>}</td>
               <td>{collectionTime(result.startedAt)}</td>
               <td>{unknownEnd ? "확인 불가" : result.finishedAt ? collectionTime(result.finishedAt) : result.startedAt ? "진행 중" : "기록 없음"}</td>
               <td>{unknownEnd ? "확인 불가" : <ElapsedDuration startedAt={result.startedAt} finishedAt={result.finishedAt} running={active && !!result.startedAt} fallback={observedNow} />}</td>

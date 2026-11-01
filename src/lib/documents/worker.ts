@@ -1,3 +1,4 @@
+import { maintenanceFromError, type MaintenanceInfo } from "../g2b/maintenance";
 import { randomUUID } from "node:crypto";
 import type { PdfResult } from "./contract";
 import type { DocumentQueue, QueueRun } from "./queue";
@@ -12,7 +13,8 @@ export type BatchOptions = { mode: "local" | "cloud"; limit?:number; budgetMinut
   extract?:(run:QueueRun,token:string,signal:AbortSignal,progress?:(value:ExtractionProgress)=>void)=>Promise<{result:PdfResult;peakMemory:number|null}> };
 export type BatchSummary = { startedAt:string;finishedAt:string;attempts:number;remainingReady:number;checked:number;recovered:number;exhausted:number;
   elapsedMs:number;retries:number;completed:number;failed:number;noText:number;peakMemoryBytes:number|null;
-  reason:"no_ready_request"|"count_limit"|"time_budget"|"lease_busy"|"lease_lost"|"shutdown" };
+  maintenance?:MaintenanceInfo;
+  reason:"g2b_maintenance"|"no_ready_request"|"count_limit"|"time_budget"|"lease_busy"|"lease_lost"|"shutdown" };
 
 /** 응답 없는 DB 연결이 갱신과 종료를 무한히 붙잡지 않게 합니다. */
 async function bounded<T>(promise:Promise<T>,milliseconds:number):Promise<T>{
@@ -94,6 +96,15 @@ export async function runBatch(store:DocumentQueue,options:BatchOptions):Promise
       } catch(error) {
         await flush();
         if(abort.signal.aborted)break;
+        const maintenance=maintenanceFromError(error);
+        if(maintenance){
+          // 점검으로 사용한 집계를 되돌리고 같은 시도의 대기 상태로 회차를 종료합니다.
+          await store.deferClaim(token,run.id,maintenance);
+          summary.attempts--;
+          if(run.attempt_number>1)summary.retries--;
+          summary.maintenance=maintenance;summary.reason="g2b_maintenance";
+          break;
+        }
         const failure=classifyExtractionError(error);
         const diagnostic=error instanceof ExtractionError&&error.diagnostic?sanitizeStoredDiagnostic(error.diagnostic):diagnosticError(error);
         await store.fail(token,run.id,{...failure,diagnostic});

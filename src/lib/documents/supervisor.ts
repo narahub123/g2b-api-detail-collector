@@ -1,3 +1,4 @@
+import { restoreMaintenance } from "../g2b/maintenance";
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
@@ -78,7 +79,9 @@ export async function superviseExtraction(id: string, key: string, signal: Abort
     });
     if (failure) throw new ExtractionError(/시간/.test(failure)?'time_limit':/크기|50MiB/.test(failure)?'size_limit':'process_exit',failure,{exitCode:code,signal:exitSignal});
     if (code !== 0) {
-      const saved = await readFile(join(directory, "error.json"), "utf8").then(value => JSON.parse(value) as {error:string;diagnostic?:DiagnosticError}).catch(() => null);
+      const saved = await readFile(join(directory, "error.json"), "utf8").then(value => JSON.parse(value) as {error:string;diagnostic?:DiagnosticError;maintenance?:unknown}).catch(() => null);
+      const maintenance=restoreMaintenance(saved?.maintenance);
+      if(maintenance)throw maintenance;
       const error=new ExtractionError(saved?'child_error':'process_exit',saved?.error??'PDF 작업 프로세스가 종료되었습니다.',{exitCode:code,signal:exitSignal});
       if(saved?.diagnostic)error.diagnostic={...saved.diagnostic,exitCode:code,signal:exitSignal};
       throw error;

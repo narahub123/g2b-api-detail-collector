@@ -85,7 +85,7 @@ CREATE TABLE IF NOT EXISTS public.notice_relations (
 CREATE TABLE IF NOT EXISTS public.collection_jobs (
   id uuid PRIMARY KEY,
   state jsonb NOT NULL,
-  status text NOT NULL CHECK (status IN ('running', 'completed', 'failed', 'interrupted')),
+  status text NOT NULL CHECK (status IN ('running', 'completed', 'failed', 'interrupted', 'deferred')),
   started_at timestamptz NOT NULL,
   updated_at timestamptz NOT NULL DEFAULT now()
 );

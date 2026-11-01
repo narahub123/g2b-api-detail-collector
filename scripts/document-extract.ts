@@ -1,3 +1,4 @@
+import { maintenanceFromError } from "../src/lib/g2b/maintenance";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getDocumentPool } from "../src/lib/documents/pool";
@@ -21,6 +22,6 @@ async function main(){
 }
 main().catch(async error=>{
   const diagnostic=diagnosticError(error);
-  await writeFile(join(process.argv[4],"error.json"),JSON.stringify({error:diagnostic.message,diagnostic}),{mode:0o600}).catch(()=>undefined);
+  await writeFile(join(process.argv[4],"error.json"),JSON.stringify({error:diagnostic.message,diagnostic,maintenance:maintenanceFromError(error)}),{mode:0o600}).catch(()=>undefined);
   process.exitCode=1;
 }).finally(()=>getDocumentPool().end());

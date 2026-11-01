@@ -139,6 +139,16 @@ CLI는 한 회차 최대 20건·50분이며 마지막 6분에는 새 파일을 �
 
 ## PDF 자동화: GitHub Actions와 독립 보완 실행
 
+### 나라장터 시스템 점검 처리
+
+실제 API 응답과 상세·다운로드 진입 페이지에서 명시적인 시스템 점검 안내를 확인하면 해당 실행의 후속 작업을 중단합니다. 별도 상태 확인 요청은 보내지 않습니다. 일반 HTTP 오류·타임아웃·연결 오류는 기존 오류 처리 정책을 유지합니다.
+
+공고 작업은 `deferred`로 종료하고 완료 기준점과 점검 대상의 실패 횟수를 유지합니다. 이미 저장한 결과는 보존하며, 다음 예약 실행에서 기존 미수집 구간 재처리 로직을 사용합니다. 수동 수집·선택 재수집은 자동 재실행하지 않습니다.
+
+문서 작업은 선점한 미완료 문서를 같은 시도 번호의 `queued`로 반환하고 배치를 종료합니다. 다음 작업기 실행에서 다시 처리하며, 재선점 시 점검 보류 안내를 해제합니다. PDF 사전 조회와 Docker 빌드는 기존대로 수행하고 실제 다운로드 진입 시 점검을 판단합니다.
+
+점검 보류는 CLI 종료 코드 `0`으로 처리하고 실행 이력·Actions 요약에 원인과 확인 시각을 남깁니다. 반영 전 `npm run db:migrate`로 `0009-maintenance-deferral.sql`의 상태 제약조건 확장을 먼저 적용해야 합니다. 기존 DB의 점검 이전 실패 기록이나 소진된 재시도 횟수는 소급 변경하지 않습니다.
+
 `.github/workflows/pdf-extract.yml`은 기존 `G2B collection` 종료와 수동 dispatch를 받습니다. 기존 수집 워크플로·수집 cron 작업은 변경하지 않습니다. 실행 코드는 `main`에서만 checkout하며 원본 실행의 산출물은 사용하지 않습니다.
 
 수집 종료 이벤트는 저장소·head_repository·main·워크플로 이름·경로 `.github/workflows/collect.yml`·원본 `workflow_dispatch`를 검증하고 success/failure/cancelled/timed_out을 허용합니다. 저장소 변수 `G2B_PDF_EXTRACTION_ENABLED=true`일 때만 수집 종료와 watchdog이 추출을 시작합니다. 수동 `invocation=manual` 검증은 자동 변수가 꺼져 있어도 가능합니다.

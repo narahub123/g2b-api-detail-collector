@@ -27,6 +27,50 @@ vi.mock("./collection-job-store", () => ({
 
 import { getCollectionJob, startCollection, startRefresh } from "./collection-job";
 import type { CollectionJob } from "./collection-job";
+import { G2bMaintenanceError } from "./maintenance";
+
+it("수동 구간 재실행도 완료 부모를 다시 수집하지 않고 점검으로 남은 관련 공고를 처리합니다",async()=>{
+  process.env.G2B_SERVICE_KEY="test-key";
+  db.saveNoticeRelation.mockImplementation(async(source?:string,related?:string)=>{
+    const parent=db.notices.get(source!) as {relatedNoticeKeys:string[]};
+    parent.relatedNoticeKeys=[...new Set([...parent.relatedNoticeKeys,related!])];
+  });
+  let maintenance=true;
+  const scrape=vi.fn(async(url:string)=>{
+    if(url.includes('R26BK2')&&maintenance)throw new G2bMaintenanceError('detail');
+    return {detail:{sourceUrl:url,sections:[],attachments:[],links:[]},relatedNoticeKeys:url.includes('R26BK1')?['R26BK2--000']:[]};
+  });
+  const fetcher=async(input:RequestInfo|URL)=>Response.json({response:{body:{totalCount:1,numOfRows:100,pageNo:1,
+    items:[{bidNtceNo:new URL(String(input)).searchParams.get('inqryDiv')==='2'?'R26BK2':'R26BK1',bidNtceOrd:'000'}]}}});
+  const first=await startCollection({start:'2026-10-28',end:'2026-10-28'},{fetcher,scrape});
+  await vi.waitFor(()=>expect(db.releaseDbLease).toHaveBeenCalledWith(first.id,'lease-token'));
+  expect(await getCollectionJob(first.id)).toMatchObject({status:'deferred',detailSucceeded:1,detailFailed:0});
+  maintenance=false;
+  const second=await startCollection({start:'2026-10-28',end:'2026-10-28'},{fetcher,scrape});
+  await vi.waitFor(()=>expect(db.releaseDbLease).toHaveBeenCalledWith(second.id,'lease-token'));
+  expect(await getCollectionJob(second.id)).toMatchObject({status:'completed',detailSucceeded:1});
+  expect(scrape).toHaveBeenCalledTimes(3);
+});
+
+it("선택 재수집의 점검은 기존 결과를 보존하고 후속 공고를 중단합니다",async()=>{
+  const keys=["R26BK1--000","R26BK2--000"];
+  for(const key of keys)db.notices.set(key,{key,api:{bidNtceNo:key.split("--")[0],bidNtceOrd:"000"},detail:{sourceUrl:"old",text:"기존 결과"},relatedNoticeKeys:[]});
+  const scrape=vi.fn(async()=>{throw new G2bMaintenanceError("detail");});
+  const job=await startRefresh(keys,{scrape});
+  await vi.waitFor(()=>expect(db.releaseDbLease).toHaveBeenCalledWith(job.id,"lease-token"));
+  expect(await getCollectionJob(job.id)).toMatchObject({status:"deferred",detailFailed:0,maintenance:{source:"detail"}});
+  expect(scrape).toHaveBeenCalledOnce();expect(db.saveStoredNotice).not.toHaveBeenCalled();
+});
+
+it("수동 수집의 API 보완 점검도 일반 경고로 삼키지 않습니다",async()=>{
+  process.env.G2B_SERVICE_KEY = "test-key";
+  db.notices.set("R26BK1--000",{key:"R26BK1--000",api:null,detail:null,relatedNoticeKeys:[]});
+  const fetcher=vi.fn(async()=>new Response('<title>시스템 점검 안내</title><p>현재 웹서비스가 중단되고 있음을 알려드립니다.</p>'));
+  const scrape=vi.fn();const job=await startRefresh(["R26BK1--000"],{fetcher,scrape});
+  await vi.waitFor(()=>expect(db.releaseDbLease).toHaveBeenCalledWith(job.id,"lease-token"));
+  expect(await getCollectionJob(job.id)).toMatchObject({status:"deferred",detailFailed:0,maintenance:{source:"api"}});
+  expect(fetcher).toHaveBeenCalledOnce();expect(scrape).not.toHaveBeenCalled();
+});
 
 const runtime = globalThis as typeof globalThis & { __g2bActiveJobId?: string | null };
 const oldKey = process.env.G2B_SERVICE_KEY;

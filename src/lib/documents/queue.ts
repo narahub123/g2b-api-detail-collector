@@ -1,3 +1,4 @@
+import type { MaintenanceInfo } from "../g2b/maintenance";
 import { randomUUID } from "node:crypto";
 import type pg from "pg";
 import { pickPdfAttachment } from "./contract";
@@ -109,7 +110,7 @@ export class DocumentQueue {
         AND (NOT $1::boolean OR r.source='manual') AND ($2::text IS NULL OR d.notice_key=$2)
         ORDER BY (r.source='manual') DESC,r.requested_at,r.id LIMIT 1 FOR UPDATE OF d`,[manualOnly,noticeKey??null])).rows[0];
       if(!doc)return null;
-      const r=(await db.query(`UPDATE ${this.schema}.attachment_extraction_runs SET status='processing',owner_token=$2,started_at=clock_timestamp() WHERE id=$1 AND status='queued' RETURNING *`,[doc.current_run_id,token])).rows[0];
+      const r=(await db.query(`UPDATE ${this.schema}.attachment_extraction_runs SET status='processing',owner_token=$2,started_at=clock_timestamp(),error=NULL,error_code=NULL,diagnostic_error=NULL WHERE id=$1 AND status='queued' RETURNING *`,[doc.current_run_id,token])).rows[0];
       await this.owned(db,token);
       return {...r,notice_key:doc.notice_key,file_no:doc.file_no,seq:doc.seq};
     });
@@ -143,11 +144,11 @@ export class DocumentQueue {
       await db.query(`UPDATE ${this.schema}.attachment_extraction_runs SET diagnostic_error=$2::jsonb WHERE id=$1`,[id,JSON.stringify(sanitizeStoredDiagnostic(error))]);
     });
   }
-  /** 선점 대기로 예산이 줄면 추출하지 않은 요청을 같은 시도 번호로 대기에 돌려놓습니다. */
-  async deferClaim(token:string,id:string){
+  /** 실행 여유 부족이나 점검으로 미완료 요청을 같은 시도 번호로 대기에 돌려놓습니다. */
+  async deferClaim(token:string,id:string,maintenance?:MaintenanceInfo){
     await this.transaction(async db=>{
       await this.processing(db,token,id);
-      await db.query(`UPDATE ${this.schema}.attachment_extraction_runs SET status='queued',owner_token=NULL,started_at=NULL,stage=NULL,stage_started_at=NULL,last_progress_at=NULL,current_page=NULL,completed_pages=NULL,total_pages=NULL WHERE id=$1`,[id]);
+      await db.query(`UPDATE ${this.schema}.attachment_extraction_runs SET status='queued',owner_token=NULL,started_at=NULL,stage=NULL,stage_started_at=NULL,last_progress_at=NULL,current_page=NULL,completed_pages=NULL,total_pages=NULL,error_code=$2,error=$3,diagnostic_error=NULL WHERE id=$1`,[id,maintenance?.code??null,maintenance?.message??null]);
       await this.owned(db,token);
     });
   }
