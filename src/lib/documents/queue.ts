@@ -7,7 +7,8 @@ import { parseAttachmentDownloadUrl } from "../g2b/attachment-links";
 import {sanitizeStoredDiagnostic} from './diagnostics';
 import type {DiagnosticError,ExtractionProgress} from './diagnostics';
 
-export const EXTRACTOR_VERSION = "6.4.299 / reading-order-v1";
+import { EXTRACTOR_VERSION } from "./extractor-version";
+export { EXTRACTOR_VERSION } from "./extractor-version";
 export type Failure = { code: string; message: string; retry: boolean; status?: "failed" | "interrupted" | "unsupported"; diagnostic?:DiagnosticError };
 export type QueueRun = { id: string; document_id: string; chain_id: string; source: string; status: string;
   attempt_number: number; retry_eligible: boolean; finished_at: Date; notice_key: string; file_no: string; seq: number };

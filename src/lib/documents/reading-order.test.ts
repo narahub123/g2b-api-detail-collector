@@ -50,6 +50,37 @@ describe("PDF 좌표 기반 읽기 순서", () => {
     expect(readingOrderText([item("자", 10, 20, 10), item("격", 20, 20, 10), item("등록", 45, 20, 20)], viewport)).toBe("자격 등록");
     expect(readingOrderText([], viewport)).toBe("");
   });
+  it("내용 칸 경계를 복원하지 못한 부분 표는 영역 전체를 행 순서로 읽습니다", () => {
+    const cells = [0, 1, 2].flatMap(i => [
+      { x: 20, y: 20 + i * 30, width: 60, height: 30 },
+      { x: 80, y: 20 + i * 30, width: 60, height: 30 }]);
+    const items = [0, 1, 2].flatMap(i => [item(`항목${i}`, 25, 25 + i * 30, 40),
+      item(`세부${i}`, 85, 25 + i * 30, 40), item(`내용${i}`, 145, 25 + i * 30, 130)]);
+    expect(readingOrderText(items, viewport, cells)).toBe(
+      "항목0 세부0 내용0\n항목1 세부1 내용1\n항목2 세부2 내용2");
+  });
+  it("완성된 표 옆의 독립 메모 때문에 병합 셀 읽기 순서를 바꾸지 않습니다", () => {
+    const cells = [{ x: 0, y: 0, width: 50, height: 60 }, { x: 50, y: 0, width: 50, height: 30 },
+      { x: 50, y: 30, width: 50, height: 30 }, { x: 0, y: 60, width: 50, height: 30 },
+      { x: 50, y: 60, width: 50, height: 30 }];
+    const text = readingOrderText([item("병합항목", 5, 40, 40), item("첫내용", 55, 10, 40),
+      item("둘째내용", 55, 40, 40), item("다음항목", 5, 70, 40), item("셋째내용", 55, 70, 40),
+      item("독립메모", 110, 10, 40)], viewport, cells);
+    expect(text.indexOf("병합항목")).toBeLessThan(text.indexOf("첫내용"));
+    expect(text.match(/독립메모/g)).toHaveLength(1);
+  });
+  it("인접한 별도 표의 레이블을 부분 표의 누락된 열로 가져오지 않습니다", () => {
+    const cells = [{ x: 0, y: 0, width: 50, height: 60 }, { x: 50, y: 0, width: 50, height: 30 },
+      { x: 50, y: 30, width: 50, height: 30 }, { x: 0, y: 60, width: 50, height: 30 },
+      { x: 50, y: 60, width: 50, height: 30 }, ...[0, 1, 2].flatMap(i => [
+        { x: 110, y: i * 30, width: 50, height: 30 }, { x: 160, y: i * 30, width: 50, height: 30 }])];
+    const text = readingOrderText([item("병합항목", 5, 40, 40), item("첫내용", 55, 10, 40),
+      item("둘째내용", 55, 40, 40), item("다음항목", 5, 70, 40), item("셋째내용", 55, 70, 40),
+      ...[0, 1, 2].flatMap(i => [item(`오른항목${i}`, 115, 10 + i * 30, 40),
+        item(`오른내용${i}`, 165, 10 + i * 30, 40)])], viewport, cells);
+    expect(text).toContain("병합항목\t첫내용\n둘째내용\n다음항목\t셋째내용");
+    expect(text).toContain("오른항목0\t오른내용0\n오른항목1\t오른내용1\n오른항목2\t오른내용2");
+  });
   it("회전된 페이지도 표시 좌표로 변환합니다", () => {
     const rotated = [0, 1, 1, 0, 0, 0];
     const result = readingOrderText([

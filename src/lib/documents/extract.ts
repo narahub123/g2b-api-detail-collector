@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { MAX_BYTES } from "./contract";
-import { pathRectangles, readingOrderText, READING_ORDER_VERSION } from "./reading-order";
+import { pathRectangles, readingOrderText } from "./reading-order";
+import { EXTRACTOR_VERSION } from "./extractor-version";
 import type { PdfResult } from "./contract";
 import type {ExtractionProgress} from './diagnostics';
 
@@ -25,7 +26,7 @@ export async function extractPdf(bytes: Uint8Array, maxPages = 500, progress?: (
       const page = await document.getPage(number);
       const content = await page.getTextContent();
       const viewport = page.getViewport({ scale: 1 });
-      // 표의 닫힌 경로를 셀 경계로 사용하며 그리기 명령을 읽지 못해도 텍스트는 보존합니다.
+      // 배경과 선 경계로 셀을 복원하며 그리기 명령을 읽지 못해도 텍스트는 보존합니다.
       const operations = await page.getOperatorList().catch(() => ({ fnArray: [], argsArray: [] }));
       const cells = pathRectangles(operations, viewport.transform, pdfjs.OPS);
       pages.push({ pageNumber: number, text: readingOrderText(content.items.filter(item => "str" in item), viewport.transform, cells) });
@@ -33,7 +34,7 @@ export async function extractPdf(bytes: Uint8Array, maxPages = 500, progress?: (
       progress?.({stage:'extracting',at:new Date().toISOString(),currentPage:number,completedPages:pages.length,totalPages:document.numPages});
     }
     return { pages, pageCount: pages.length, characterCount: pages.reduce((sum, page) => sum + page.text.length, 0),
-      extractorVersion: `${pdfjs.version} / ${READING_ORDER_VERSION}`, fileHash: createHash("sha256").update(bytes).digest("hex") };
+      extractorVersion: EXTRACTOR_VERSION, fileHash: createHash("sha256").update(bytes).digest("hex") };
   } catch (error) {
     if (error instanceof Error && error.name === "PasswordException") throw new Error("암호화된 PDF는 처리하지 않습니다.",{cause:error});
     if (error instanceof Error && error.name === "InvalidPDFException") throw new Error("PDF가 손상되었거나 읽을 수 없는 형식입니다.",{cause:error});

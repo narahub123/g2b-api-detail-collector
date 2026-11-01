@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import pg from "pg";
 import { expect, it } from "vitest";
-import { DocumentQueue } from "./queue";
+import { DocumentQueue, EXTRACTOR_VERSION } from "./queue";
 
 /** 실제 SQL 경계에서만 오류를 주입해 트랜잭션 전체의 롤백을 확인합니다. */
 function failingQueue(pool:pg.Pool,schema:string,pattern:RegExp,afterCommit=false) {
@@ -49,10 +49,10 @@ it.skipIf(!process.env.LIVE_DB_TEST || !process.env.DATABASE_URL)("운영 대기
     expect((await pool.query(`SELECT stage,current_page,completed_pages FROM ${schema}.attachment_extraction_runs WHERE id=$1`,[run!.id])).rows[0]).toMatchObject({stage:'extracting',current_page:2,completed_pages:1});
     await expect(q.progress(rival,run!.id,{stage:'saving',at})).rejects.toThrow();
     await expect(q.complete(rival,run!.id,{pages:[],pageCount:0,characterCount:0,extractorVersion:"test",fileHash:"hash"},null)).rejects.toThrow();
-    await q.complete(token,run!.id,{pages:[{pageNumber:1,text:"원문"}],pageCount:1,characterCount:2,extractorVersion:"6.4.299 / reading-order-v1",fileHash:"hash"},null);
+    await q.complete(token,run!.id,{pages:[{pageNumber:1,text:"원문"}],pageCount:1,characterCount:2,extractorVersion:EXTRACTOR_VERSION,fileHash:"hash"},null);
     await expect(q.progress(token,run!.id,{stage:'saving',at})).rejects.toThrow();
     expect((await q.claim(token))?.id).toBe(second.id);
-    await q.complete(token,second.id,{pages:[{pageNumber:1,text:"원문"}],pageCount:1,characterCount:2,extractorVersion:"6.4.299 / reading-order-v1",fileHash:"hash"},null);
+    await q.complete(token,second.id,{pages:[{pageNumber:1,text:"원문"}],pageCount:1,characterCount:2,extractorVersion:EXTRACTOR_VERSION,fileHash:"hash"},null);
     const fresh = await q.enqueue(key,fileNo,2,"manual");
     expect((await q.claim(token))?.id).toBe(fresh.id);
     for(const boundary of [/SET status=\$2,error_code/,/INSERT INTO .*attachment_extraction_runs/,/^COMMIT$/]) {

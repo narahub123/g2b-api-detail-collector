@@ -3,6 +3,7 @@ import {readFile} from 'node:fs/promises';
 import pg from 'pg';
 import {expect,it} from 'vitest';
 import {probePdfWork} from './preflight';
+import {EXTRACTOR_VERSION} from './extractor-version';
 it.skipIf(!process.env.LIVE_DB_TEST||!process.env.DATABASE_URL)('읽기 전용 사전 조회는 대기·만료·후속 누락·새 PDF를 구분하고 DB를 변경하지 않습니다',async()=>{
  const pool=new pg.Pool({connectionString:process.env.DATABASE_URL,max:5}),schema=`pdf_probe_${randomUUID().replaceAll('-','')}`;
  const key='R26BK01797756--001',file=randomUUID(),doc=randomUUID(),run=randomUUID();
@@ -27,9 +28,12 @@ it.skipIf(!process.env.LIVE_DB_TEST||!process.env.DATABASE_URL)('읽기 전용 �
   await pool.query(`UPDATE ${schema}.attachment_extraction_runs SET status='failed',retry_eligible=true,finished_at=now() WHERE id=$1`,[run]);
   await pool.query(`UPDATE ${schema}.attachment_documents SET current_run_id=NULL WHERE id=$1`,[doc]);
   expect((await probePdfWork(pool,schema,{discover:false})).missingRetry).toBe(true);
-  await pool.query(`UPDATE ${schema}.attachment_extraction_runs SET retry_eligible=false,status='completed',extractor_version='6.4.299 / reading-order-v1' WHERE id=$1`,[run]);
+  await pool.query(`UPDATE ${schema}.attachment_extraction_runs SET retry_eligible=false,status='completed',extractor_version=$2 WHERE id=$1`,[run,EXTRACTOR_VERSION]);
   const before=(await pool.query(`SELECT md5(row_to_json(r)::text) hash FROM ${schema}.attachment_extraction_runs r WHERE id=$1`,[run])).rows[0].hash;
   expect((await probePdfWork(pool,schema,{discover:true})).needed).toBe(false);
   const after=(await pool.query(`SELECT md5(row_to_json(r)::text) hash FROM ${schema}.attachment_extraction_runs r WHERE id=$1`,[run])).rows[0].hash;expect(after).toBe(before);
+  // 이전 버전 성공은 새 버전의 자동 발견을 막지 않습니다.
+  await pool.query(`UPDATE ${schema}.attachment_extraction_runs SET extractor_version='6.4.299 / reading-order-v1' WHERE id=$1`,[run]);
+  expect((await probePdfWork(pool,schema,{discover:true})).discovery).toBe(true);
  }finally{await pool.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);await pool.end();}
 },60000);

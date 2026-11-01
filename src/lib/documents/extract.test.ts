@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { extractPdf } from "./extract";
+import { EXTRACTOR_VERSION } from "./queue";
 
 /** 실제 PDF 파서로 빈 페이지와 영문 본문을 검증할 최소 문서를 만듭니다. */
 function fixture(text = "Eligibility deadline", encrypted = false, customStream?: string) {
@@ -21,7 +22,7 @@ describe("PDF 실제 추출", () => {
     const result = await extractPdf(fixture());
     expect(result.pages).toEqual([{ pageNumber: 1, text: "Eligibility deadline" }, { pageNumber: 2, text: "" }]);
     expect(result.characterCount).toBe(20);
-    expect(result.extractorVersion).toBeTruthy();
+    expect(result.extractorVersion).toBe(EXTRACTOR_VERSION);
   });
   it("HTML 응답과 손상·페이지 제한을 거부합니다", async () => {
     await expect(extractPdf(Buffer.from("<html>error</html>"))).rejects.toThrow("PDF");

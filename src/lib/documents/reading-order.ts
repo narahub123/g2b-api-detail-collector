@@ -3,7 +3,7 @@ import { bounds, multiply, point } from "./geometry";
 import type { Matrix, Rect } from "./geometry";
 export { pathRectangles } from "./geometry";
 
-export const READING_ORDER_VERSION = "reading-order-v1";
+export { READING_ORDER_VERSION } from "./extractor-version";
 type TextItem = { str: string; width: number; height: number; transform: number[]; hasEOL?: boolean };
 type Positioned = Rect & { text: string; index: number; font: number; baseline: number; source: TextItem };
 type Block = Rect & { text: string; count: number; positioned?: Positioned };
@@ -56,6 +56,13 @@ function adjacent(a: Rect, b: Rect) {
     ((Math.abs(a.y + a.height - b.y) < 1.5 || Math.abs(b.y + b.height - a.y) < 1.5) && overlapX > 3);
 }
 
+/** 텍스트의 중심점이 셀 안에 있는지 경계 오차를 허용해 확인합니다. */
+function contains(cell: Rect, item: Positioned) {
+  const x = item.x + item.width / 2, y = item.y + item.height / 2;
+  return x >= cell.x - 0.5 && x <= cell.x + cell.width + 0.5 &&
+    y >= cell.y - 0.5 && y <= cell.y + cell.height + 0.5;
+}
+
 /** 실제 셀 경계를 가진 표를 먼저 묶어 병합 셀과 표 안 여백이 읽기 순서를 깨지 않게 합니다. */
 function tableBlocks(items: Positioned[], rectangles: Rect[]) {
   const groups: Rect[][] = [], remaining = new Set(rectangles.map((_, index) => index));
@@ -70,13 +77,32 @@ function tableBlocks(items: Positioned[], rectangles: Rect[]) {
       group.some(cell => Math.abs(cell.y - group[0].y) > 3)) groups.push(group);
   }
   const used = new Set<number>(), blocks: Block[] = [];
+  const font = median(items.map(item => item.font));
   for (const group of groups) {
+    const area = bounds(group.flatMap(cell => [[cell.x, cell.y], [cell.x + cell.width, cell.y + cell.height]] as [number, number][]));
+    /** 다른 표에 이미 속한 텍스트는 누락된 열 후보나 복원 실패 영역으로 가져오지 않습니다. */
+    const belongsElsewhere = (item: Positioned) => groups.some(other => other !== group && other.some(cell => contains(cell, item)));
+    // 여러 셀의 시작 행에 대응하는 본문이 표 바로 옆에 반복될 때만 빠진 열로 판단합니다.
+    const neighbors = items.filter(item => !used.has(item.index) && !belongsElsewhere(item) && item.y < area.y + area.height && item.y + item.height > area.y &&
+      ((item.x >= area.x + area.width && item.x - area.x - area.width <= font * 2) ||
+        (item.x + item.width <= area.x && area.x - item.x - item.width <= font * 2)));
+    const uncovered = items.some(item => !used.has(item.index) && !belongsElsewhere(item) && contains(area, item) &&
+      !group.some(cell => contains(cell, item)));
+    const missingRows = new Set(group.filter(cell => neighbors.some(item =>
+      item.y >= cell.y - 0.5 && item.y < cell.y + font * 2 && item.y + item.height <= cell.y + cell.height + 0.5))
+      .map(cell => cell.y));
+    if (missingRows.size >= 2 || uncovered) {
+      const region = bounds([[area.x, area.y], [area.x + area.width, area.y + area.height],
+        ...neighbors.flatMap(item => [[item.x, item.y], [item.x + item.width, item.y + item.height]] as [number, number][])]);
+      const content = items.filter(item => !used.has(item.index) && !belongsElsewhere(item) && contains(region, item));
+      content.forEach(item => used.add(item.index));
+      blocks.push({ ...region, text: lines(content), count: content.length });
+      continue;
+    }
     const cellItems = group.map(() => [] as Positioned[]);
     for (const item of items) {
       if (used.has(item.index)) continue;
-      const x = item.x + item.width / 2, y = item.y + item.height / 2;
-      const matches = group.map((cell, index) => ({ cell, index })).filter(({ cell }) =>
-        x >= cell.x - 0.5 && x <= cell.x + cell.width + 0.5 && y >= cell.y - 0.5 && y <= cell.y + cell.height + 0.5)
+      const matches = group.map((cell, index) => ({ cell, index })).filter(({ cell }) => contains(cell, item))
         .sort((a, b) => a.cell.width * a.cell.height - b.cell.width * b.cell.height);
       if (matches[0]) { cellItems[matches[0].index].push(item); used.add(item.index); }
     }
