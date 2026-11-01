@@ -11,7 +11,10 @@ export function NoticeRegions({ region, basePath = "/", filters = {} }: RegionCo
     const name = part.trim().replace(/\s+/g, " ");
     if (!name) return null;
     // 안내 문구에는 조작 가능한 배지 모양을 사용하지 않습니다.
-    if (name === "공고서 참조" || name === "정보 없음") return <span key={index}>{name}</span>;
+    if (
+      name === "공고서 참조" || name === "공고서참조" || name === "해당 없음" || name === "해당없음" || name === "정보 없음"
+    )
+      return <span key={index}>{name}</span>;
     const codes = resolveNoticeRegion(name);
     if (!codes) return <span className="region-badge" key={index}>{name}</span>;
     const selected = codes.provinceCode === filters.provinceCode && codes.districtCode === (filters.districtCode || "");
