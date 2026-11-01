@@ -40,6 +40,8 @@ export function NoticeFilters({
               <select name="searchField" defaultValue={values.searchField}>
                 <option value="title">공고명</option>
                 <option value="notice_number">공고번호</option>
+                <option value="demand_agency">수요기관</option>
+                {basePath === "/admin" && <option value="notice_agency">공고기관</option>}
               </select>
             </label>
             <label>

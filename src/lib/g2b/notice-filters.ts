@@ -1,7 +1,7 @@
 import regions from "@/data/regions.json";
 
 export type NoticeFilters = {
-  searchField?: "title" | "notice_number";
+  searchField?: "title" | "notice_number" | "demand_agency" | "notice_agency";
   query?: string;
   postedFrom?: string;
   postedTo?: string;
@@ -24,10 +24,12 @@ export function parseNoticePage(value: string | string[] | undefined): number {
 }
 
 /** URL 조건을 화면 값과 검증된 DB 조회 조건으로 나눕니다. */
-export function parseNoticeFilters(params: SearchParams): { values: NoticeFilterValues; filters: NoticeFilters; error: string | null } {
+export function parseNoticeFilters(params: SearchParams, audience: "public" | "admin" = "admin"): { values: NoticeFilterValues; filters: NoticeFilters; error: string | null } {
   const value = (name: string) => { const item = params[name]; return typeof item === "string" ? item.trim() : ""; };
+  const allowedFields: NonNullable<NoticeFilters["searchField"]>[] = ["title", "notice_number", "demand_agency", ...(audience === "admin" ? ["notice_agency" as const] : [])];
+  const searchField = allowedFields.find((field) => field === value("searchField")) ?? "title";
   const values: NoticeFilterValues = {
-    searchField: value("searchField") === "notice_number" ? "notice_number" : "title",
+    searchField,
     query: value("query"), postedFrom: value("postedFrom"), postedTo: value("postedTo"),
     deadlineFrom: value("deadlineFrom"), deadlineTo: value("deadlineTo"),
     minAmount: value("minAmount"), maxAmount: value("maxAmount"),
@@ -39,7 +41,7 @@ export function parseNoticeFilters(params: SearchParams): { values: NoticeFilter
 
   // 잘못된 범위는 DB 조회 전에 차단해 결과를 오해하지 않도록 합니다.
   let error: string | null = null;
-  if (value("searchField") && !["title", "notice_number"].includes(value("searchField"))) error = "검색 대상을 확인해 주세요.";
+  if (value("searchField") && !allowedFields.some((field) => field === value("searchField"))) error = "검색 대상을 확인해 주세요.";
   else if (!validDate(values.postedFrom) || !validDate(values.postedTo)) error = "게시일을 확인해 주세요.";
   else if (values.postedFrom && values.postedTo && values.postedFrom > values.postedTo) error = "게시일 시작일이 종료일보다 늦습니다.";
   else if (!validDate(values.deadlineFrom) || !validDate(values.deadlineTo)) error = "마감일을 확인해 주세요.";
@@ -59,4 +61,14 @@ export function parseNoticeFilters(params: SearchParams): { values: NoticeFilter
     if (values[key]) filters[key] = values[key];
   }
   return { values, filters, error };
+}
+
+/** 검증된 조건만 직렬화하여 지역 변경과 페이지 이동에서 검색 조건을 보존합니다. */
+export function noticeListHref(basePath: "/" | "/admin", filters: NoticeFilters, page?: number): string {
+  const params = new URLSearchParams();
+  for (const key of ["searchField", "query", "postedFrom", "postedTo", "deadlineFrom", "deadlineTo", "minAmount", "maxAmount", "provinceCode", "districtCode"] as const) {
+    if (filters[key]) params.set(key, filters[key]);
+  }
+  if (page !== undefined) params.set("page", String(page));
+  return params.size ? `${basePath}?${params}` : basePath;
 }

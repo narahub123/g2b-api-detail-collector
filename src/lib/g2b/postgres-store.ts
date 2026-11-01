@@ -200,9 +200,9 @@ function noticeWhere(filters: NoticeFilters, audience: NoticeAudience = "admin")
     clauses.push(sql(values.length));
   };
 
-  // 검색 컬럼은 허용된 두 컬럼 중에서만 선택하고 값은 매개변수로 전달합니다.
+  // 검색 컬럼은 명시한 허용 목록에서만 선택하고 값은 매개변수로 전달합니다.
   if (filters.query) {
-    const column = filters.searchField === "notice_number" ? "notice_number" : "title";
+    const column = ({ title: "title", notice_number: "notice_number", demand_agency: "demand_agency", notice_agency: "notice_agency" } as const)[filters.searchField ?? "title"];
     add((index) => `strpos(lower(${column}), lower($${index})) > 0`, filters.query);
   }
   add((index) => `posted_at >= $${index}::date`, filters.postedFrom);

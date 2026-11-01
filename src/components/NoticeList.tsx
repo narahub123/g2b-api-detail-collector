@@ -7,6 +7,8 @@ import { serviceDetailUrl } from "@/lib/g2b/detail-url";
 import type { NoticeListItem } from "@/lib/g2b/notices";
 import type { CollectionJob } from "@/lib/g2b/collection-job";
 import { CollectionJobObservation } from "./CollectionJobObservation";
+import type { NoticeFilters } from "@/lib/g2b/notice-filters";
+import { NoticeRegions } from "./NoticeRegions";
 
 function amount(value: string | null) {
   if (!value) return "금액 정보 없음";
@@ -20,9 +22,11 @@ function amount(value: string | null) {
 export function NoticeList({
   notices,
   fetcher = fetch,
+  filters = {},
 }: {
   notices: NoticeListItem[];
   fetcher?: typeof fetch;
+  filters?: NoticeFilters;
 }) {
   const router = useRouter();
   const [selected, setSelected] = useState<string[]>([]);
@@ -174,7 +178,7 @@ export function NoticeList({
               </span>
               <span>
                 <small>지역</small>
-                {notice.region || "정보 없음"}
+                <NoticeRegions region={notice.region} basePath="/admin" filters={filters} />
               </span>
             </div>
           </article>

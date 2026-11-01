@@ -2,6 +2,11 @@ import { describe, expect, it } from "vitest";
 import { parseNoticeFilters, parseNoticePage } from "./notice-filters";
 
 describe("parseNoticeFilters", () => {
+  it("기관 검색 대상을 화면별로 검증합니다", () => {
+    expect(parseNoticeFilters({ searchField: "demand_agency", query: " 교육청 " }, "public")).toMatchObject({ filters: { searchField: "demand_agency", query: "교육청" }, error: null });
+    expect(parseNoticeFilters({ searchField: "notice_agency", query: "조달청" }, "admin").error).toBeNull();
+    expect(parseNoticeFilters({ searchField: "notice_agency", query: "조달청" }, "public").error).toContain("검색 대상");
+  });
   it("빈 조건에는 공고명 검색을 기본값으로 사용합니다", () => {
     expect(parseNoticeFilters({})).toEqual({
       values: { searchField: "title", query: "", postedFrom: "", postedTo: "", deadlineFrom: "", deadlineTo: "", minAmount: "", maxAmount: "", provinceCode: "", districtCode: "" },

@@ -8,6 +8,7 @@ import "../notice-list-controls.css";
 import "../automation-settings.css";
 import "../admin-history.css";
 import {AdminHistoryCard} from '@/components/AdminHistoryCard';
+import { ActiveNoticeRegion } from "@/components/NoticeRegions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -69,9 +70,11 @@ export default async function AdminPage({
 
         {result && (
           <>
+            <ActiveNoticeRegion basePath="/admin" filters={filters} />
             <NoticeList
               key={`${result.page}:${JSON.stringify(filters)}`}
               notices={result.notices}
+              filters={filters}
             />
             <NoticePagination
               basePath="/admin"

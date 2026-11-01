@@ -113,3 +113,53 @@
 .notice-pagination a:hover { background: #eaf5f5; }
 .notice-pagination .page-current { background: #08747a; border-color: #08747a; color: #fff; }
 .notice-pagination .page-disabled { color: #9aa8af; background: #f2f5f6; }
+
+.notice-regions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.region-badge {
+  display: inline-block;
+  max-width: 100%;
+  padding: 4px 9px;
+  border: 1px solid #dce3e7;
+  border-radius: 999px;
+  background: #f2f5f6;
+  color: #52616c;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.region-badge-link {
+  border-color: #8cbfc1;
+  background: #eef8f8;
+  color: #08676d;
+  text-decoration: none;
+  cursor: pointer;
+}
+.region-badge-link:hover,
+.region-badge-link:focus-visible {
+  border-color: #08747a;
+  background: #cdebea;
+  color: #034b50;
+}
+.region-badge-link:focus-visible {
+  outline: 2px solid #08747a;
+  outline-offset: 3px;
+}
+.region-badge-selected {
+  border-color: #08747a;
+  background: #08747a;
+  color: #fff;
+}
+.active-notice-region {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: center;
+  margin: 16px 0;
+  font-size: 13px;
+  color: #52616c;
+}
+.active-notice-region a { color: #08676d; text-decoration: underline; }
