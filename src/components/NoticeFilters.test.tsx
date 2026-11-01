@@ -6,6 +6,14 @@ import { NoticeFilters } from "./NoticeFilters";
 afterEach(cleanup);
 
 describe("NoticeFilters", () => {
+  it("기관 검색 옵션을 화면에 맞게 제공합니다", () => {
+    const values = { searchField: "title" as const, query: "", postedFrom: "", postedTo: "", deadlineFrom: "", deadlineTo: "", minAmount: "", maxAmount: "", provinceCode: "", districtCode: "" };
+    const { rerender } = render(<NoticeFilters values={values} error={null} />);
+    expect(screen.getByRole("option", { name: "수요기관" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "공고기관" })).not.toBeInTheDocument();
+    rerender(<NoticeFilters basePath="/admin" values={values} error={null} />);
+    expect(screen.getByRole("option", { name: "공고기관" })).toBeInTheDocument();
+  });
   it("선택한 조건을 유지하고 전체 목록으로 돌아가는 링크를 제공합니다", () => {
     render(<NoticeFilters values={{ searchField: "notice_number", query: "R26BK", postedFrom: "2026-10-01", postedTo: "",
       deadlineFrom: "", deadlineTo: "2026-10-31", minAmount: "1000", maxAmount: "", provinceCode: "", districtCode: "" }} error={null} />);

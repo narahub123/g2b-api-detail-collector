@@ -92,6 +92,21 @@ describe("noticeSummary", () => {
     expect(statements[0].sql).toContain("FROM public.notices");
   });
 
+  it.each(["demand_agency", "notice_agency"] as const)("%s 검색을 건수와 목록에 동일하게 적용하고 특수문자를 값으로 전달합니다", async (searchField) => {
+    const statements = fakePool();
+    runtime.__g2bPgPool = { query: async (sql: string, values?: unknown[]) => {
+      statements.push({ sql, values }); return { rows: sql.includes("COUNT(*)") ? [{ total: "0" }] : [] };
+    } };
+    const filters = { searchField, query: "교육청%_'" };
+    await countStoredNotices(filters);
+    await listStoredNoticeRows(filters, { limit: 10, offset: 0 });
+    for (const statement of statements) {
+      expect(statement.sql).toContain(`strpos(lower(${searchField}), lower($1)) > 0`);
+      expect(statement.sql).not.toContain(filters.query);
+      expect(statement.values?.[0]).toBe(filters.query);
+    }
+  });
+
   it("검색과 날짜·금액 범위를 SQL 조건에 함께 적용합니다", async () => {
     const statements = fakePool();
     runtime.__g2bPgPool = { query: async (sql: string, values?: unknown[]) => { statements.push({ sql, values }); return { rows: [] }; } };

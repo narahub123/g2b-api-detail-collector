@@ -1,6 +1,8 @@
 import { NoticeSourceLink } from "./NoticeSourceLink";
 import { serviceDetailUrl } from "@/lib/g2b/detail-url";
 import type { NoticeListItem } from "@/lib/g2b/notices";
+import type { NoticeFilters } from "@/lib/g2b/notice-filters";
+import { NoticeRegions } from "./NoticeRegions";
 
 /** 사용자 목록에서 금액을 읽기 쉬운 원화 형식으로 표시합니다. */
 function amount(value: string | null): string {
@@ -10,7 +12,7 @@ function amount(value: string | null): string {
 }
 
 /** 저장된 공고의 요약과 사용자 상세 링크만 표시합니다. */
-export function UserNoticeList({ notices }: { notices: NoticeListItem[] }) {
+export function UserNoticeList({ notices, filters = {} }: { notices: NoticeListItem[]; filters?: NoticeFilters }) {
   if (notices.length === 0) return <div className="empty-state">
     <strong>저장된 공고가 없습니다</strong><p>공고가 저장되면 이곳에서 확인할 수 있습니다.</p>
   </div>;
@@ -23,7 +25,7 @@ export function UserNoticeList({ notices }: { notices: NoticeListItem[] }) {
       <span><small>게시</small>{notice.postedAt || "정보 없음"}</span>
       <span><small>마감</small>{notice.deadline || "정보 없음"}</span>
       <span><small>금액</small>{amount(notice.amount)}</span>
-      <span><small>지역</small>{notice.region || "정보 없음"}</span>
+      <span><small>지역</small><NoticeRegions region={notice.region} filters={filters} /></span>
     </div>
   </article>)}</div>;
 }
