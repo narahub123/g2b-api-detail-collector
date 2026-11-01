@@ -27,6 +27,10 @@ describe("사용자 공고 상세 페이지", () => {
     const html = renderToStaticMarkup(await BidUserViewPage({ params: Promise.resolve({ key: "R26BK1--000" }) }));
     expect(html).toContain("수요기관: 국무조정실");
     expect(html).not.toContain("공고기관: 조달청");
+    expect(html).toContain('title="나라장터 원문 보기"');
+    expect(html).toContain('aria-label="나라장터 원문 보기"');
+    expect(html).toContain('target="_blank"');
+    expect(html).toContain('rel="noopener noreferrer"');
   });
 
   it("관련 공고 중 상세 수집에 성공한 공고만 연결합니다", async () => {

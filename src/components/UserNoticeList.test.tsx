@@ -39,3 +39,15 @@ describe("UserNoticeList", () => {
     expect(screen.getByText("금액 정보 없음")).toBeInTheDocument();
   });
 });
+
+it("수요기관이 없어도 차수별 원문 아이콘을 새 탭으로 연결합니다", () => {
+ render(<UserNoticeList notices={[{ ...notice, demandAgency: null, order: "002" }]} />);
+ const link = screen.getByRole("link", { name: "나라장터 원문 보기" });
+ expect(link).toHaveAttribute("href", "https://www.g2b.go.kr/link/PNPE027_01/single/?bidPbancNo=R26BK1&bidPbancOrd=002");
+ expect(link).toHaveAttribute("target", "_blank");
+ expect(link).toHaveAttribute("rel", "noopener noreferrer");
+ expect(link).toHaveAttribute("title", "나라장터 원문 보기");
+ expect(link.textContent).toBe("");
+ expect(link.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
+ expect(link.parentElement).toHaveTextContent("수요기관: 정보 없음");
+});

@@ -22,7 +22,12 @@ describe("NoticeDetail", () => {
     expect(screen.getByText("공고기관: 조달청")).toBeInTheDocument();
     expect(screen.getAllByText("정보 없음").length).toBeGreaterThan(0);
     expect(screen.getByRole("link", { name: "공고문.pdf" })).toHaveAttribute("download");
-    expect(screen.getByRole("link", { name: "나라장터 원문 보기" })).toHaveAttribute("target", "_blank");
+    const source = screen.getByRole("link", { name: "나라장터 원문 보기" });
+    expect(source).toHaveAttribute("title", "나라장터 원문 보기");
+    expect(source.textContent).toBe("");
+    expect(source.parentElement).toHaveTextContent("수요기관: 국무조정실");
+    expect(source).toHaveAttribute("href", notice.originalUrl);
+    expect(source).toHaveAttribute("target", "_blank");
     expect(screen.getByRole("link", { name: "나라장터 원문 보기" })).toHaveAttribute("rel", "noopener noreferrer");
     expect(screen.getByRole("link", { name: "수집 정보 비교" })).toHaveAttribute("href", "/admin/bids/R26BK1--000/compare");
     expect(screen.getByRole("link", { name: "사용자 화면 보기" })).toHaveAttribute("href", "/bids/R26BK1--000");

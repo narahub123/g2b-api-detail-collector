@@ -1,3 +1,5 @@
+import { NoticeSourceLink } from "./NoticeSourceLink";
+import { serviceDetailUrl } from "@/lib/g2b/detail-url";
 import type { NoticeListItem } from "@/lib/g2b/notices";
 
 /** 사용자 목록에서 금액을 읽기 쉬운 원화 형식으로 표시합니다. */
@@ -16,7 +18,7 @@ export function UserNoticeList({ notices }: { notices: NoticeListItem[] }) {
   return <div className="notice-list">{notices.map((notice) => <article className="notice-card" key={notice.key}>
     <div className="notice-topline"><span className="notice-id">{notice.number} · {notice.order}차</span></div>
     <h3><a href={`/bids/${encodeURIComponent(notice.key)}`}>{notice.title || "제목 정보 없음"}</a></h3>
-    <p className="agency">수요기관: {notice.demandAgency || "정보 없음"}</p>
+    <p className="agency">수요기관: {notice.demandAgency || "정보 없음"} <NoticeSourceLink href={serviceDetailUrl(notice.number, notice.order)} /></p>
     <div className="notice-facts">
       <span><small>게시</small>{notice.postedAt || "정보 없음"}</span>
       <span><small>마감</small>{notice.deadline || "정보 없음"}</span>

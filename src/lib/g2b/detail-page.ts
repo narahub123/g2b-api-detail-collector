@@ -1,3 +1,5 @@
+import { serviceDetailUrl } from "./detail-url";
+export { serviceDetailUrl } from "./detail-url";
 import {measure, measureSync} from './collection-performance';
 import * as cheerio from "cheerio";
 import { chromium } from "playwright-core";
@@ -51,12 +53,7 @@ export type ScrapedDetail = {
   text?: string;
 };
 
-export function serviceDetailUrl(number: string, order: string): string {
-  const url = new URL("https://www.g2b.go.kr/link/PNPE027_01/single/");
-  url.searchParams.set("bidPbancNo", number);
-  url.searchParams.set("bidPbancOrd", order);
-  return url.toString();
-}
+
 function assertG2bUrl(value: string): URL {
   const url = new URL(value);
   if (url.protocol !== "https:" || url.hostname !== "www.g2b.go.kr") throw new Error("나라장터 상세 URL만 수집할 수 있습니다.");

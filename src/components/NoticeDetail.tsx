@@ -1,3 +1,4 @@
+import { NoticeSourceLink } from "./NoticeSourceLink";
 import type { FieldValue, NormalizedNotice } from "@/lib/g2b/normalize";
 
 function Info({ label, field, wide = false, money = false }: { label: string; field: FieldValue; wide?: boolean; money?: boolean }) {
@@ -21,7 +22,7 @@ export function NoticeDetail({ notice, relatedNoticeKeys = [], relatedNoticeStat
     <section className="detail-hero">
       <span className="eyebrow">SERVICE BID NOTICE</span>
       <h1>{notice.title.value || "제목 정보 없음"}</h1>
-      <p><span>수요기관: {notice.demandAgency.value || "정보 없음"}</span><br />
+      <p><span>수요기관: {notice.demandAgency.value || "정보 없음"} <NoticeSourceLink href={notice.originalUrl} /></span><br />
         <span>공고기관: {notice.noticeAgency.value || "정보 없음"}</span></p>
       <div className="detail-id">공고번호 {notice.number} <span>차수 {notice.order}</span></div>
     </section>
@@ -65,7 +66,6 @@ export function NoticeDetail({ notice, relatedNoticeKeys = [], relatedNoticeStat
       {collectionStatus === "succeeded" &&
         <a className="source-link" href={`/bids/${encodeURIComponent(notice.key)}`}>사용자 화면 보기</a>}
       <a className="source-link" href={`/admin/bids/${encodeURIComponent(notice.key)}/compare`}>수집 정보 비교</a>
-      <a className="source-link" href={notice.originalUrl} target="_blank" rel="noopener noreferrer">나라장터 원문 보기 <span aria-hidden="true">↗</span></a>
     </div>
   </>;
 }
