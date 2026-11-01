@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { NoticeSourceLink } from "./NoticeSourceLink";
+import { serviceDetailUrl } from "@/lib/g2b/detail-url";
 import type { NoticeListItem } from "@/lib/g2b/notices";
 import type { CollectionJob } from "@/lib/g2b/collection-job";
 import { CollectionJobObservation } from "./CollectionJobObservation";
@@ -145,7 +147,7 @@ export function NoticeList({
               </a>
             </h3>
             <p className="agency">
-              <span>수요기관: {notice.demandAgency || "정보 없음"}</span>
+              <span>수요기관: {notice.demandAgency || "정보 없음"} <NoticeSourceLink href={serviceDetailUrl(notice.number, notice.order)} /></span>
               <br />
               <span>공고기관: {notice.noticeAgency || "정보 없음"}</span>
             </p>
