@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { NoticeNavigationContext } from "./NoticeNavigationContext";
 import { NoticeUserView } from "./NoticeUserView";
 import type { ScrapedDetail } from "@/lib/g2b/detail-page";
 
@@ -30,6 +31,65 @@ const detail: ScrapedDetail = {
 describe("NoticeUserView", () => {
   afterEach(cleanup);
 
+  it("중첩 표의 페이지를 독립적으로 이동하고 번호 탐색을 유지한다", () => {
+    const navigate = vi.fn();
+    const table = { headerRows: [], bodyRows: Array.from({ length: 12 }, (_, index) => [
+      { value: `행 ${index + 1}`, column: 0, rowspan: 1, colspan: 1 }
+    ]) };
+    render(<NoticeNavigationContext.Provider value={{ active: "notice", navigate,
+      targets: { currentKey: "R26BK1--000", relatedKeys: [], planNumbers: ["R26DD00000001"],
+        specNumbers: [], opening: [] } }}>
+      <NoticeUserView detail={{ ...detail, sections: [{ title: "바깥", fields: [], tables: [table],
+        details: [{ title: "중간 모달", sections: [{ title: "중간 섹션", fields: [], tables: [],
+          details: [{ title: "안쪽 모달", sections: [{ title: "안쪽", fields: [
+            { label: "계획번호", value: [{ text: "R26DD00000001", visible: true }] }
+          ], tables: [table] }] }] }] }] }] }} />
+    </NoticeNavigationContext.Provider>);
+    const inner = screen.getByText("안쪽").closest("details")!;
+    fireEvent.click(within(inner).getByRole("button", { name: "다음" }));
+    expect(within(inner).getByText("행 11")).toBeInTheDocument();
+    expect(within(inner).queryByText("행 1")).not.toBeInTheDocument();
+    expect(screen.getByRole("table", { name: "바깥 표 1" })).toHaveTextContent("행 1");
+    expect(screen.getByRole("table", { name: "바깥 표 1" })).not.toHaveTextContent("행 11");
+    fireEvent.click(within(inner).getByRole("button", { name: "R26DD00000001" }));
+    expect(navigate).toHaveBeenCalledWith("plan", "R26DD00000001");
+  });
+
+  it("세 단계의 섹션을 같은 아코디언으로 표시하고 첨부 범위를 유지한다", () => {
+    const fileField = { label: "파일", value: [{ text: "동일.pdf", visible: true }] };
+    const source: ScrapedDetail = { ...detail,
+      attachments: [{ name: "동일.pdf", url: "https://www.g2b.go.kr/root.pdf" }],
+      sections: [{ title: "최상위", fields: [fileField], tables: [], details: [{ title: "부모 모달",
+        attachments: [{ name: "동일.pdf", url: "https://www.g2b.go.kr/parent.pdf" }],
+        sections: [{ title: "중간", fields: [fileField], tables: [], details: [{ title: "자식 모달",
+          attachments: [{ name: "동일.pdf", url: "https://www.g2b.go.kr/child.pdf" }],
+          sections: [{ title: "마지막", fields: [fileField], tables: [] },
+            { title: "빈 하위", fields: [], tables: [] },
+            { title: "숨긴 하위", visible: false, fields: [fileField], tables: [] }]
+        }] }]
+      }] }]
+    };
+    render(<NoticeUserView detail={source} />);
+    const sections = ["최상위", "중간", "마지막"].map((title) => {
+      const summary = screen.getByText(title).parentElement!;
+      expect(summary.tagName).toBe("SUMMARY");
+      const section = summary.parentElement!;
+      expect(section).toHaveClass("form-accordion");
+      expect(section).toHaveAttribute("open");
+      return section;
+    });
+    expect(sections[0]).toContainElement(sections[1]);
+    expect(sections[1]).toContainElement(sections[2]);
+    expect(screen.getAllByRole("link", { name: "동일.pdf" }).map((link) => link.getAttribute("href")))
+      .toEqual(["https://www.g2b.go.kr/root.pdf", "https://www.g2b.go.kr/parent.pdf", "https://www.g2b.go.kr/child.pdf"]);
+    expect(screen.queryByText("빈 하위")).not.toBeInTheDocument();
+    expect(screen.queryByText("숨긴 하위")).not.toBeInTheDocument();
+    fireEvent.click(sections[1].querySelector("summary")!);
+    expect(sections[1]).not.toHaveAttribute("open");
+    expect(sections[0]).toHaveAttribute("open");
+    expect(sections[2]).toHaveAttribute("open");
+  });
+
   it("연결된 모든 모달 섹션의 파일명에 해당 모달의 URL을 적용한다", () => {
     const source: ScrapedDetail = { ...detail, attachments: [], sections: [{ title: "규격", fields: [], tables: [],
       details: [{ title: "상세 규격", attachments: [{ name: "규격서.hwp", url: "https://www.g2b.go.kr/spec.hwp" }],
@@ -49,8 +109,8 @@ describe("NoticeUserView", () => {
       ]
     }] }] };
     render(<NoticeUserView detail={source} />);
-    expect(screen.getByRole("heading", { name: "계약정보" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "담당자정보" })).toBeInTheDocument();
+    expect(screen.getByText("계약정보").closest("details")).toHaveAttribute("open");
+    expect(screen.getByText("담당자정보").closest("details")).toHaveAttribute("open");
     expect(screen.getByText("일반경쟁")).toBeInTheDocument();
     expect(screen.getByText("홍길동")).toBeInTheDocument();
   });
@@ -73,7 +133,7 @@ describe("NoticeUserView", () => {
     expect(screen.queryByText("제안요청정보")).not.toBeInTheDocument();
     expect(screen.queryByText("게시물 첨부파일")).not.toBeInTheDocument();
     expect(screen.queryByText("파일첨부")).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "미분류" })).toBeInTheDocument();
+    expect(screen.getByText("미분류").closest("details")).toHaveAttribute("open");
     expect(screen.getByRole("link", { name: "안내문.hwp" }))
       .toHaveAttribute("href", "https://www.g2b.go.kr/notice.hwp");
   });

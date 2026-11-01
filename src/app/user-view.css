@@ -2,7 +2,8 @@
 .user-view-heading { padding: 4px 0 30px; }
 .user-view-heading h1 { margin: 10px 0; font-size: clamp(27px, 3.4vw, 42px); letter-spacing: -.05em; }
 .user-view-heading p { margin: 0; color: #637784; font-size: 14px; line-height: 1.6; }
-.user-sections { display: grid; gap: 14px; padding-bottom: 56px; }
+.user-detail-page { padding-bottom: 56px; }
+.user-sections { display: grid; gap: 14px; min-width: 0; }
 .user-sections > .form-accordion { margin-bottom: 0; }
 .user-section { overflow: hidden; border: 1px solid #dce6e9; border-radius: 14px; background: #fff; }
 .user-section summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 22px; cursor: pointer; color: #1b4950; background: #f0f7f7; font-size: 17px; font-weight: 700; list-style: none; }
@@ -18,8 +19,8 @@
 .user-table { width: 100%; border-collapse: collapse; font-size: 13px; line-height: 1.6; }
 .user-table th, .user-table td { min-width: 110px; padding: 11px 13px; border: 1px solid #e4ecee; text-align: left; vertical-align: top; white-space: pre-wrap; overflow-wrap: anywhere; }
 .user-table th { color: #375a64; background: #f1f6f7; font-weight: 700; }
-.user-linked-detail { margin-top: 20px; padding: 18px; border: 1px solid #e1eaec; border-radius: 10px; background: #fbfdfd; }
-.user-linked-detail h3 { margin: 0 0 8px; color: #244750; font-size: 15px; }
+.user-linked-detail { margin-top: 20px; min-width: 0; }
+.user-linked-detail > h3 { margin: 0 0 8px; color: #244750; font-size: 15px; }
 .user-download-link { color: #08747a; font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
 .user-download-link:hover { color: #075f65; }
 .user-download-link:focus-visible { outline: 2px solid #087b80; outline-offset: 2px; }

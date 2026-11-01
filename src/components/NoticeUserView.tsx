@@ -127,37 +127,43 @@ function UserFields({ fields, links }: { fields: StructuredField[]; links: Map<s
   </div>; })}</dl>;
 }
 
-/** 연결된 모달의 섹션과 그 안의 하위 상세를 같은 표시 기준으로 렌더링합니다. */
-function UserLinkedDetail({ item, sectionTitle }: { item: LinkedDetail; sectionTitle: string }) {
-  const links = attachmentLinkMap(item.attachments || []);
-  return <div className="user-linked-detail">
-    <h3>{item.title}</h3>
-    {contentSections(item, item.title).filter(hasVisibleSectionContent).map((part, partIndex) =>
-      <div key={partIndex}>
-        {item.sections && <h4>{part.title}</h4>}
-        <UserFields fields={part.fields} links={links} />
-        {part.tables.map((table, tableIndex) => <UserTable table={table}
-          label={`${sectionTitle} ${item.title} ${part.title} 표 ${tableIndex + 1}`}
-          links={links} section={part.title} key={tableIndex} />)}
-        {part.details?.filter(hasVisibleDetailContent).map((child, childIndex) =>
-          <UserLinkedDetail item={child} sectionTitle={part.title} key={childIndex} />)}
-      </div>)}
+/** 모든 깊이의 섹션에 동일한 표시 규칙과 아코디언을 적용합니다. */
+function UserSections({ sections, links, labelPrefix = "" }: { sections: StructuredSection[];
+  links: Map<string, string>; labelPrefix?: string }) {
+  return <div className="user-sections">{sections.filter(hasVisibleSectionContent).map((section, index) =>
+    <UserSection section={section} links={links} labelPrefix={labelPrefix} key={index} />)}
   </div>;
 }
 
-/** 섹션의 필드·표·연결된 상세를 표시 상태에 맞춰 제공합니다. */
+/** 필드·표·하위 상세를 같은 섹션 레이아웃 안에 배치합니다. */
+function UserSection({ section, links, labelPrefix }: { section: StructuredSection;
+  links: Map<string, string>; labelPrefix: string }) {
+  const label = labelPrefix + section.title;
+  return <FormAccordion title={section.title} defaultOpen>
+    <UserFields fields={section.fields} links={links} />
+    {section.tables.map((table, tableIndex) => <UserTable table={table}
+      label={label + " 표 " + (tableIndex + 1)} links={links} section={section.title} key={tableIndex} />)}
+    {section.details?.filter(hasVisibleDetailContent).map((item, detailIndex) =>
+      <UserLinkedDetail item={item} labelPrefix={label + " "} key={detailIndex} />)}
+  </FormAccordion>;
+}
+
+/** 모달의 부모 관계와 첨부 범위를 유지하면서 내부 섹션을 공통 렌더러에 전달합니다. */
+function UserLinkedDetail({ item, labelPrefix }: { item: LinkedDetail; labelPrefix: string }) {
+  // 같은 파일명이 있어도 다른 모달의 첨부 주소를 사용하지 않도록 범위를 전환합니다.
+  const links = attachmentLinkMap(item.attachments || []);
+  return <div className="user-linked-detail">
+    <h3>{item.title}</h3>
+    <UserSections sections={contentSections(item, item.title)} links={links}
+      labelPrefix={labelPrefix + item.title + " "} />
+  </div>;
+}
+
+/** 페이지의 빈 상태를 처리하고 모든 섹션을 공통 렌더러로 표시합니다. */
 export function NoticeUserView({ detail }: { detail: ScrapedDetail | null }) {
   if (!detail) return <p className="muted user-empty">상세 페이지 수집 자료가 없습니다.</p>;
-  const links = attachmentLinkMap(detail.attachments);
-  // 표시 가능한 값이 없는 섹션은 빈 카드로 남기지 않습니다.
-  const sections = (detail.sections || []).filter(hasVisibleSectionContent);
-  if (!sections.length) return <p className="muted user-empty">표시할 상세 정보가 없습니다.</p>;
-  return <div className="user-sections">{sections.map((section, index) => <FormAccordion
-    title={section.title} key={`${section.title}-${index}`} defaultOpen>
-      <UserFields fields={section.fields} links={links} />
-      {section.tables.map((table, tableIndex) => <UserTable table={table}
-        label={`${section.title} 표 ${tableIndex + 1}`} links={links} section={section.title} key={tableIndex} />)}
-      {section.details?.filter(hasVisibleDetailContent).map((item, detailIndex) =>
-        <UserLinkedDetail item={item} sectionTitle={section.title} key={detailIndex} />)}
-  </FormAccordion>)}</div>;
+  const sections = detail.sections || [];
+  if (!sections.some(hasVisibleSectionContent)) return <p className="muted user-empty">표시할 상세 정보가 없습니다.</p>;
+  return <div className="user-detail-page"><UserSections sections={sections}
+    links={attachmentLinkMap(detail.attachments)} /></div>;
 }
