@@ -62,3 +62,60 @@ it('이전 이력을 펼친 뒤 폴링해도 과거 이력을 보존하고 완�
  const calls=fetcher.mock.calls.length;await act(()=>vi.advanceTimersByTimeAsync(15000));expect(fetcher.mock.calls).toHaveLength(calls);
  expect(screen.getAllByRole('link',{name:'실행 상세'})).toHaveLength(2);
 });
+
+/** 실제 페이지 경계에서 신규 실행 삽입을 검증할 최신순 이력을 만듭니다. */
+function historyRun(index:number):RunMetadata{
+ return {...run,id:`history-${index}`,status:'completed',requested_at:new Date(Date.UTC(2026,10,2)-index*1000).toISOString()};
+}
+
+/** 화면에 표시된 실행 ID의 순서와 중복을 함께 검증합니다. */
+function displayedRuns():string[]{
+ return screen.getAllByRole('link',{name:'실행 상세',exact:true}).map(link=>link.getAttribute('href')!.split('/').at(-1)!);
+}
+
+it('과거 이력 40건을 펼친 상태에서 재추출을 접수해도 이력과 다음 조회 위치를 유지합니다',async()=>{
+ const first=Array.from({length:20},(_,index)=>historyRun(index));
+ const older=Array.from({length:20},(_,index)=>historyRun(index+20));
+ const newest={...historyRun(-1),id:'new-run',status:'queued' as const};
+ const cursors:string[]=[];
+ const fetcher=vi.fn<typeof fetch>(async(url,init)=>{
+  if(init?.method==='POST')return Response.json({id:newest.id,awake:true},{status:202});
+  if(String(url).includes('/files/'))return Response.json({...initial,latest:newest,requestState:{canRequest:false,reason:'대기 중',active:{id:newest.id,status:'queued'}}});
+  const cursor=new URL(String(url),'http://localhost').searchParams.get('cursor');
+  if(cursor){cursors.push(cursor);return Response.json(cursor==='page-two'?{runs:older,nextCursor:'page-three'}:{runs:[historyRun(40)],nextCursor:null});}
+  return Response.json({runs:[newest,...first.slice(0,19)],nextCursor:'shifted-first-page'});
+ });vi.stubGlobal('fetch',fetcher);
+ render(<DocumentFileDetail initial={{...initial,latest:first[0]}} initialHistory={{runs:first,nextCursor:'page-two'}}/>);
+ fireEvent.click(screen.getByRole('button',{name:'이전 이력 더 보기'}));await act(async()=>{});
+ expect(displayedRuns()).toEqual([...first,...older].map(item=>item.id));
+ fireEvent.click(screen.getByRole('button',{name:'재추출'}));await act(async()=>{});
+ expect(displayedRuns()).toEqual([newest,...first,...older].map(item=>item.id));
+ expect(new Set(displayedRuns()).size).toBe(41);
+ fireEvent.click(screen.getByRole('button',{name:'이전 이력 더 보기'}));await act(async()=>{});
+ expect(cursors).toEqual(['page-two','page-three']);
+ expect(displayedRuns()).toEqual([newest,...first,...older,historyRun(40)].map(item=>item.id));
+ expect(screen.queryByRole('button',{name:'이전 이력 더 보기'})).not.toBeInTheDocument();
+});
+
+it('과거 페이지의 늦은 응답이 신규 실행 폴링 결과를 지우거나 중복시키지 않습니다',async()=>{
+ vi.useFakeTimers();
+ const first=Array.from({length:20},(_,index)=>historyRun(index));
+ const newest={...historyRun(-1),id:'new-automatic-run',status:'processing' as const};
+ const active={...initial,latest:first[0],requestState:{canRequest:false,reason:'처리 중',active:{id:first[0].id,status:'processing' as const}}};
+ let resolveOlder!:(response:Response)=>void;
+ const slowOlder=new Promise<Response>(resolve=>{resolveOlder=resolve;});
+ vi.stubGlobal('fetch',vi.fn<typeof fetch>(async url=>{
+  if(String(url).includes('cursor='))return slowOlder;
+  if(String(url).includes('/files/'))return Response.json({...active,latest:newest,requestState:{...active.requestState,active:{id:newest.id,status:'processing'}}});
+  return Response.json({runs:[newest,...first.slice(0,19)],nextCursor:'shifted-first-page'});
+ }));
+ render(<DocumentFileDetail initial={active} initialHistory={{runs:first,nextCursor:'page-two'}}/>);
+ fireEvent.click(screen.getByRole('button',{name:'이전 이력 더 보기'}));
+ expect(screen.getByRole('button',{name:'이력 조회 중…'})).toBeDisabled();
+ await act(()=>vi.advanceTimersByTimeAsync(5000));
+ expect(displayedRuns()).toEqual([newest,...first].map(item=>item.id));
+ await act(async()=>{resolveOlder(Response.json({runs:[first[19],historyRun(20)],nextCursor:'page-three'}));});
+ expect(displayedRuns()).toEqual([newest,...first,historyRun(20)].map(item=>item.id));
+ expect(new Set(displayedRuns()).size).toBe(22);
+ expect(screen.getByRole('button',{name:'이전 이력 더 보기'})).toBeEnabled();
+});
