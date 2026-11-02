@@ -3,6 +3,7 @@ import { mkdtemp, writeFile, rm, readdir, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { superviseExtraction } from "./supervisor";
+import { classifyExtractionError } from "./errors";
 const fixtures: string[] = [];
 
 /** 실제 자식 프로세스의 종료와 임시 자료 정리를 확인할 실행 파일을 만듭니다. */
@@ -15,6 +16,11 @@ async function script(body: string) {
 afterEach(async () => { await Promise.all(fixtures.splice(0).map(path => rm(path, { recursive: true, force: true }))); });
 
 describe("PDF 작업 프로세스 경계", () => {
+  it.each(['connection_failed','download_timeout','download_http_retry'])('자식의 %s 오류를 재시도 가능한 상태로 전달합니다',async(code)=>{
+    const path=await script(`await writeFile(join(dir,'error.json'),JSON.stringify({code:${JSON.stringify(code)},error:'첨부파일 다운로드 연결에 실패했습니다.',diagnostic:{name:'ExtractionError',message:'연결 실패'}})); process.exitCode=1;`);
+    const error=await superviseExtraction('id','key',new AbortController().signal,{script:path}).catch(e=>e);
+    expect(classifyExtractionError(error)).toMatchObject({code,retry:true});
+  });
   it('자식 프로세스의 점검 분류를 보존합니다',async()=>{
     const path=await script(`await writeFile(join(dir,'error.json'),JSON.stringify({error:'점검',maintenance:{code:'g2b_maintenance',source:'download',detectedAt:new Date().toISOString(),message:'나라장터 시스템 점검으로 보류'}})); process.exitCode=1;`);
     await expect(superviseExtraction('id','key',new AbortController().signal,{script:path})).rejects.toMatchObject({maintenance:{code:'g2b_maintenance',source:'download'}});

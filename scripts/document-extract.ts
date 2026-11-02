@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { getDocumentPool } from "../src/lib/documents/pool";
 import { DocumentQueue } from "../src/lib/documents/queue";
 import { extractAttachmentPdf } from "../src/lib/documents/attachment-extraction";
-import {diagnosticError} from '../src/lib/documents/diagnostics';
+import {diagnosticError,ExtractionError} from '../src/lib/documents/diagnostics';
 import type {ExtractionProgress} from '../src/lib/documents/diagnostics';
 
 /** DB 갱신은 부모에게 맡기고 진행 정보만 프로세스 사이에 전달합니다. */
@@ -22,6 +22,7 @@ async function main(){
 }
 main().catch(async error=>{
   const diagnostic=diagnosticError(error);
-  await writeFile(join(process.argv[4],"error.json"),JSON.stringify({error:diagnostic.message,diagnostic,maintenance:maintenanceFromError(error)}),{mode:0o600}).catch(()=>undefined);
+  // 부모가 일시 오류의 재시도 여부를 판단할 수 있도록 분류 코드를 함께 전달합니다.
+  await writeFile(join(process.argv[4],"error.json"),JSON.stringify({code:error instanceof ExtractionError?error.code:undefined,error:diagnostic.message,diagnostic,maintenance:maintenanceFromError(error)}),{mode:0o600}).catch(()=>undefined);
   process.exitCode=1;
 }).finally(()=>getDocumentPool().end());
