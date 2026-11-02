@@ -4,6 +4,8 @@ import pg from 'pg';
 import { expect, it } from 'vitest';
 import { DocumentQueue } from './queue';
 import { DocumentStore } from './store';
+import {runBatch} from './worker';
+import type {ExtractionProgress} from './diagnostics';
 
 it.skipIf(!process.env.LIVE_DB_TEST||!process.env.DATABASE_URL)('중복 본문을 한 건으로 이관하고 재추출·실패·시간 기록을 검증합니다',async()=>{
  const pool=new pg.Pool({connectionString:process.env.DATABASE_URL,max:3});
@@ -72,5 +74,29 @@ it.skipIf(!process.env.LIVE_DB_TEST||!process.env.DATABASE_URL)('중복 본문�
   expect(await store.page(key,doc,request.id,1)).toEqual({pageNumber:1,text:'새 본문'});
   await queue.release(rival);
   await queue.release(token);
+  // 실제 저장소를 통해 취소 직전의 대기 스냅샷과 다음 작업기의 복구 결과를 조회합니다.
+  const shutdown=await queue.enqueue(key,file,1,'manual'),controller=new AbortController();
+  // 앞선 중단에서 재사용된 재시도도 이 테스트에서는 즉시 선점할 수 있게 합니다.
+  await pool.query(`UPDATE ${schema}.attachment_extraction_runs SET next_attempt_at=now()-interval '1 second' WHERE id=$1`,[shutdown.id]);
+  const details:NonNullable<ExtractionProgress['details']>=[
+   {step:'start',elapsedMs:25,outcome:'completed'},
+   {step:'receive',elapsedMs:null,outcome:'running'},
+  ];
+  const summary=await runBatch(queue,{mode:'local',noticeKey:key,limit:1,signal:controller.signal,
+   extract:async(run,_token,_signal,progress)=>{
+    expect(run.id).toBe(shutdown.id);
+    progress?.({stage:'download',at:new Date().toISOString()});
+    progress?.({stage:'download',at:new Date().toISOString(),details});
+    controller.abort();throw new Error('작업 서비스 종료');
+   }});
+  expect(summary.reason).toBe('shutdown');
+  const saved=(await pool.query(`SELECT status,stage_timings FROM ${schema}.attachment_extraction_runs WHERE id=$1`,[shutdown.id])).rows[0];
+  expect(saved.status).toBe('processing');
+  expect(saved.stage_timings.at(-1)).toMatchObject({stage:'download',details});
+  const recovery=randomUUID();expect(await queue.acquire(recovery)).toBe(true);
+  await queue.recover(recovery);
+  const recovered=(await pool.query(`SELECT stage_timings FROM ${schema}.attachment_extraction_runs WHERE id=$1`,[shutdown.id])).rows[0];
+  expect(recovered.stage_timings.at(-1)).toMatchObject({stage:'download',details,outcome:'interrupted',estimated:true});
+  await queue.release(recovery);
  }finally{await pool.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);await pool.end();}
 },120000);

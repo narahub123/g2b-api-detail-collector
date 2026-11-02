@@ -109,10 +109,10 @@ export async function runBatch(store:DocumentQueue,options:BatchOptions):Promise
         lastStage=value.stage;lastWrite=Date.now();pending=undefined;
         writes=writes.then(async()=>{if(!progressError&&!abort.signal.aborted)await store.progress?.(token,run.id,value);}).catch(error=>{progressError=error;lose();});
       };
-      /** 종료 직전의 마지막 페이지 진행도 완료 상태보다 먼저 반영합니다. */
+      /** 정상 종료의 취소 신호에도 소유권이 유효하면 마지막 진행 기록을 보존합니다. */
       const flush=async()=>{
         clearTimeout(progressTimer);progressTimer=undefined;
-        try{await writes;if(pending&&!abort.signal.aborted)await store.progress?.(token,run.id,pending);pending=undefined;if(progressError)throw progressError;}
+        try{await writes;if(pending&&!lost)await store.progress?.(token,run.id,pending);pending=undefined;if(progressError)throw progressError;}
         catch(error){await recordStorageError(error);throw error;}
       };
       try {
