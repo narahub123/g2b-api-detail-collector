@@ -1,3 +1,4 @@
+import {downloadableAttachmentSql} from '../g2b/attachment-sql';
 import type { MaintenanceInfo } from "../g2b/maintenance";
 import { randomUUID } from "node:crypto";
 import type pg from "pg";
@@ -129,7 +130,7 @@ export class DocumentQueue {
       const doc=(await db.query(`SELECT d.* FROM ${this.schema}.attachment_documents d JOIN ${this.schema}.attachment_extraction_runs r ON r.id=d.current_run_id
         WHERE r.status='queued' AND r.chain_id=d.active_chain_id AND (r.next_attempt_at IS NULL OR r.next_attempt_at<=clock_timestamp())
         AND (NOT $1::boolean OR r.source='manual') AND ($2::text IS NULL OR d.notice_key=$2)
-        AND d.attachment_url LIKE 'https://www.g2b.go.kr/%/downloadFile.do?%'
+        AND ${downloadableAttachmentSql('d.attachment_url')}
         AND ${fixedAttachmentExclusionSql('d.file_no::text','d.seq')}
         ORDER BY CASE WHEN r.source='manual' THEN 0 WHEN r.purpose='initial' THEN 1 ELSE 2 END,r.requested_at,r.id LIMIT 1 FOR UPDATE OF d`,[manualOnly,noticeKey??null])).rows[0];
       if(!doc)return null;
@@ -244,7 +245,7 @@ export class DocumentQueue {
     const rows=(await this.pool.query(`SELECT CASE WHEN r.source='manual' THEN 'manual' WHEN r.purpose='initial' THEN 'initial' ELSE 'reextract' END AS kind,count(*)::int AS n
       FROM ${this.schema}.attachment_extraction_runs r JOIN ${this.schema}.attachment_documents d ON d.current_run_id=r.id AND d.active_chain_id=r.chain_id
       WHERE r.status='queued' AND (r.next_attempt_at IS NULL OR r.next_attempt_at<=clock_timestamp())
-       AND d.attachment_url LIKE 'https://www.g2b.go.kr/%/downloadFile.do?%'
+       AND ${downloadableAttachmentSql('d.attachment_url')}
        AND ${fixedAttachmentExclusionSql('d.file_no::text','d.seq')}
        AND (NOT $1::boolean OR r.source='manual') AND ($2::text IS NULL OR d.notice_key=$2) GROUP BY 1`,[manualOnly,noticeKey??null])).rows;
     const counts:ReadyCounts={manual:0,initial:0,reextract:0};

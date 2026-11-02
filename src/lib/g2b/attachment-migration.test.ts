@@ -1,10 +1,34 @@
 import {expect,it} from 'vitest';
-import {planAttachmentMigration} from './attachment-migration';
+import {planAttachmentMigration,proposalMigrationCandidates} from './attachment-migration';
+import {buildProposalUrl} from './attachment-proposal';
 
 const key='R26BK01784794--000',fileNo='7b8df1b5-f09d-43a7-b647-36089d0e2228';
 const legacy=(seq=1,modal=false)=>`/api/attachments/${key}?fileNo=${fileNo}&seq=${seq}${modal?'&modal=0':''}`;
 /** 주 첨부 표의 파일명을 갖춘 저장 자료를 만듭니다. */
 const fileSection=(names:string[])=>({title:'파일첨부',tables:[{sourceId:'main_grdFile_body_table',bodyRows:names.map(value=>[{value}])}]});
+
+it('제안요청 후보는 같은 이름의 다른 묶음·모달·다른 공고·고정 제외를 선택하지 않습니다',()=>{
+ const make=(attachments:{name:string;url:string}[])=>[{key,notice_number:'R26BK01784794',notice_order:'000',api:null,detail:{attachments,sections:[{title:'제안요청정보',tables:[{sourceId:'grdPrpsDmndInfoView_body_table',bodyRows:[[{value:'제안.pdf'}]]}]}]}}];
+ const valid={name:'제안.pdf',url:legacy()};
+ expect(proposalMigrationCandidates(make([valid]))).toHaveLength(1);
+ expect(proposalMigrationCandidates(make([valid,{name:'제안.pdf',url:legacy().replace(fileNo,'11111111-1111-1111-1111-111111111111')}]))).toEqual([]);
+ for(const url of [legacy(1,true),legacy().replace(key,'R26BK01799999--000'),legacy().replace(fileNo,'b0de33f9-8021-4b13-8b5c-8e000a9cc20a')])expect(proposalMigrationCandidates(make([{name:'제안.pdf',url}]))).toEqual([]);
+});
+
+it('제안요청 표의 확인된 파일만 외부 주소로 변환하고 중첩 참조와 재실행을 보존합니다',()=>{
+ const attachment={name:'제안요청서.pdf',url:legacy()};
+ const url=buildProposalUrl({untyAtchFileNo:fileNo,atchFileSqno:1,orgnlAtchFileNm:attachment.name,atchFilePathNm:'/data/Attachfiles/prpc/2026/10/27/test.pdf'})!;
+ const notice={key,notice_number:'R26BK01784794',notice_order:'000',api:null,detail:{attachments:[attachment],sections:[{title:'제안요청정보',tables:[{sourceId:'main_grdPrpsDmndInfoView_body_table',bodyRows:[[{value:attachment.name}]]}],details:[{attachments:[attachment]}]}]}};
+ const plan=planAttachmentMigration([notice],[],new Map([[legacy(),{url}]]));
+ expect(plan.mappings).toHaveLength(1);
+ expect(plan.mappings[0].url).toBe(url);
+ const updated=plan.notices[0].after as typeof notice.detail;
+ expect(updated.sections[0].details[0].attachments[0]).toMatchObject({url,fileNo,seq:1});
+ expect(planAttachmentMigration([{...notice,detail:updated}],[],new Map()).mappings).toEqual([]);
+ expect(planAttachmentMigration([notice],[],new Map([[legacy(),{reason:'proposal_metadata_unavailable' as const}]])).excluded).toContainEqual({url:legacy(),reason:'proposal_metadata_unavailable'});
+ const wrong={...notice,detail:{...notice.detail,sections:[{...notice.detail.sections[0],tables:[{sourceId:'other_table',bodyRows:[[{value:attachment.name}]]}]}]}};
+ expect(planAttachmentMigration([wrong],[],new Map([[legacy(),{url}]] )).mappings).toEqual([]);
+});
 
 it('변환 후에도 같은 파일명의 다른 묶음은 제외하며 재실행 때 새 변환을 만들지 않습니다',()=>{
  const other='de557b90-5d96-430d-9dd4-06b2d7b3627c';

@@ -1,4 +1,5 @@
 import {isFixedAttachmentExclusion} from './attachment-exclusions';
+import {parseProposalUrl,proposalPath} from './attachment-proposal';
 
 export type DownloadContext={kind:'notice'|'pre-specification'|'order-plan';number:string;order?:string;businessCode:string};
 const paths={notice:'/pn/pnp/pnpe/UntyAtchFile/downloadFile.do','pre-specification':'/pn/pnz/pnza/UntyAtchFile/downloadFile.do','order-plan':'/pr/prp/prpa/UntyAtchFile/downloadFile.do'} as const;
@@ -24,6 +25,7 @@ export function buildDirectAttachmentUrl(context:DownloadContext,seq:number):str
 
 /** 직접 다운로드를 허용할 나라장터 파일 주소를 검증합니다. */
 export function validateDirectAttachmentUrl(value:string):string|null{
+ if(parseProposalUrl(value))return value;
  try{const url=new URL(value);
   if(url.protocol!=='https:'||url.hostname!=='www.g2b.go.kr'||url.port||url.username||url.password||url.hash||!Object.values(paths).includes(url.pathname as typeof paths[keyof typeof paths]))return null;
   const kind=(Object.keys(paths) as (keyof typeof paths)[]).find(key=>paths[key]===url.pathname)!;
@@ -44,6 +46,7 @@ export function directAttachmentIdentity(key:string,file:{url?:unknown;fileNo?:u
  if(typeof file.fileNo!=='string'||!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(file.fileNo)||!Number.isSafeInteger(file.seq)||Number(file.seq)<=0||typeof file.url!=='string'||!validateDirectAttachmentUrl(file.url))return null;
  const url=new URL(file.url);
  if(isFixedAttachmentExclusion(file.fileNo,Number(file.seq)))return null;
+ if(url.pathname===proposalPath){const identity=parseProposalUrl(file.url);return identity?.fileNo===file.fileNo&&identity.seq===file.seq?{key,fileNo:file.fileNo,seq:Number(file.seq)}:null;}
  if(url.pathname!==paths.notice||`${url.searchParams.get('bidPbancNo')}--${url.searchParams.get('bidPbancOrd')}`!==key||Number(url.searchParams.get('fileSeq'))!==file.seq)return null;
  return {key,fileNo:file.fileNo,seq:Number(file.seq)};
 }
