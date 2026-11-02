@@ -294,7 +294,7 @@
 }
 .extraction-page-nav .extraction-button,
 .extraction-page-controls > span,
-.extraction-body-initial-actions .extraction-button {
+.extraction-body-actions .extraction-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -316,12 +316,20 @@
   box-sizing: border-box;
   min-height: calc(100dvh - var(--extraction-scroll-offset));
 }
-.extraction-body-initial-actions {
+.extraction-body-header {
   display: flex;
-  justify-content: flex-end;
-  margin: 24px 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  flex-wrap: wrap;
 }
-.extraction-body-initial-actions .extraction-button:disabled {
+.extraction-body-heading { flex: 1 1 260px; }
+.extraction-body-heading h2 { margin-top: 0; }
+.extraction-body-heading p { margin-bottom: 0; }
+.extraction-body-actions { display: flex; align-items: flex-start; justify-content: flex-end; gap: 12px; flex-wrap: wrap; margin-left: auto; max-width: 100%; }
+.extraction-body-actions .extraction-request-actions { margin: 0; max-width: 440px; }
+.extraction-body-actions .extraction-request-actions p { margin-top: 0; }
+.extraction-body-actions .extraction-button:disabled {
   opacity: 0.5;
   cursor: default;
 }
@@ -347,9 +355,11 @@
     width: 100%;
   }
 }
-.extraction-batch-actions { margin-bottom: 20px; }
+.extraction-batch-accordion { margin-bottom: 20px; }
 .extraction-batch-actions > span, .extraction-batch-actions > button { margin-left: 16px; }
 .extraction-batch-actions input, .extraction-selectable-card input { margin-right: 6px; }
 .extraction-selectable-card { min-width: 0; }
-.extraction-selectable-card > label { display: block; padding: 8px 0; }
+.extraction-selectable-title { display: flex; align-items: baseline; gap: 10px; }
+.extraction-selectable-title input { flex: 0 0 auto; margin: 0; }
+.extraction-selectable-title a { min-width: 0; overflow-wrap: anywhere; }
 .extraction-request-actions { margin: 16px 0; }

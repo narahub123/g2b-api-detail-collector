@@ -240,12 +240,13 @@ export default async function ExtractionHistoryPage({
         {listing && (
           <>
             <DocumentExtractionSelection documents={documents?.items} scopeKey={params.toString()}>
-              {records?.map((item) => (
-                <article
+              {records?.map((item) => {
+                const Card = documentView ? 'div' : 'article';
+                return <Card
                   key={documentView ? item.document_id : item.run!.id}
-                  className="extraction-card"
+                  className={documentView ? undefined : "extraction-card"}
                 >
-                  <h2>
+                  {!documentView && <h2>
                     <a
                       href={
                         item.run
@@ -255,7 +256,7 @@ export default async function ExtractionHistoryPage({
                     >
                       {item.filename}
                     </a>
-                  </h2>
+                  </h2>}
                   <span
                     className="extraction-status"
                     data-status={item.run?.status ?? "unrequested"}
@@ -293,8 +294,8 @@ export default async function ExtractionHistoryPage({
                       {item.run.error}
                     </p>
                   )}
-                </article>
-              ))}
+                </Card>;
+              })}
             </DocumentExtractionSelection>
             {!listing.items.length && (
               <p className="empty-state">

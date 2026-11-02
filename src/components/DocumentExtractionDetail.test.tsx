@@ -6,6 +6,16 @@ import type {HistoryDetail} from '@/lib/documents/history-store';
 const initial={run:{id:'run',document_id:'doc',notice_key:'key',filename:'공고.pdf',document_type:'pdf',status:'processing',source:'manual',attempt_number:1,stage:'extracting',has_content:true,page_count:2,current_page:2,completed_pages:1,total_pages:2,requested_at:'2026-10-30T00:00:00Z',diagnostic_error:null},chain:[]} as unknown as HistoryDetail;
 beforeEach(()=>{vi.spyOn(window,'scrollTo').mockImplementation(()=>{});});
 afterEach(()=>{cleanup();vi.useRealTimers();vi.unstubAllGlobals();vi.restoreAllMocks();});
+it('추출 본문 제목과 같은 헤더에 재추출과 본문 조회를 배치합니다',async()=>{
+ vi.stubGlobal('fetch',vi.fn(async()=>Response.json({text:'저장된 본문'})));
+ render(<DocumentExtractionDetail initial={{...initial,run:{...initial.run,status:'completed'},requestState:{canRequest:true,reason:null,active:null}}}/>);
+ const heading=screen.getByRole('heading',{name:'추출 본문'}),header=heading.closest('header')!;
+ expect(header).not.toBeNull();
+ expect(within(header).getByRole('button',{name:'재추출'})).toBeInTheDocument();
+ fireEvent.click(within(header).getByRole('button',{name:'본문 조회'}));await screen.findByText('저장된 본문');
+ expect(within(header).queryByRole('button',{name:'본문 조회'})).not.toBeInTheDocument();
+ expect(within(header).getByRole('button',{name:'재추출'})).toBeInTheDocument();
+});
 it('본문이 정리된 과거 성공 이력은 현재 공고로 안내합니다',()=>{
  render(<DocumentExtractionDetail initial={{...initial,run:{...initial.run,status:'completed',has_content:false}}}/>);
  expect(screen.queryByRole('button',{name:'본문 조회'})).not.toBeInTheDocument();

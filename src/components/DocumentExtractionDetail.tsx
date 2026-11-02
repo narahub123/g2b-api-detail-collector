@@ -41,7 +41,6 @@ function ExtractionDetail({initial}:{initial:HistoryDetail}){
  },[run.id,active]);
  return <>
   <header className="extraction-header"><span className="eyebrow">EXTRACTION DIAGNOSTICS</span><h1>첨부파일 추출 진단</h1><p className="extraction-file">{run.filename}{downloadUrl&&<a className="extraction-download-icon" href={downloadUrl} download aria-label="원본 파일 다운로드" title="원본 파일 다운로드"><Download size={18} aria-hidden="true"/></a>}</p><span className="extraction-status" data-status={run.status}>{runStatuses[run.status]}</span>{active&&<p>5초마다 처리 상태를 확인합니다.</p>}</header>
-  <ManualExtractionAction noticeKey={run.notice_key} documentId={run.document_id} state={detail.requestState}/>
   {error&&<p role="alert" className="extraction-error">{error}</p>}
   <div className="extraction-grid">
    <section className="extraction-card"><h2>실행 정보</h2><dl className="extraction-data">
@@ -64,6 +63,8 @@ function ExtractionDetail({initial}:{initial:HistoryDetail}){
   </section>
   <section className="extraction-card" style={{marginTop:24}}><h2>재시도 흐름</h2><ol>{detail.chain.map(item=><li key={item.id}><a href={`/admin/document-extractions/${item.id}`} aria-current={item.id===run.id?'page':undefined}>{item.attempt_number}차 · {runStatuses[item.status]}</a> · {documentTime(item.requested_at)}{item.error_code&&` · ${item.error_code}`}</li>)}</ol></section>
   <section className="extraction-card" style={{marginTop:24}}><h2>단계별 처리 시간</h2><StageTimings timings={run.stage_timings}/></section>
-  {run.has_content===true&&!!run.page_count?<DocumentBodyViewer noticeKey={run.notice_key} documentId={run.document_id} runId={run.id} pageCount={run.page_count}/>:<p>같은 첨부파일은 현재 성공 본문만 보관하며 이전 실행은 처리 이력만 제공합니다. <a href={`/admin/bids/${encodeURIComponent(run.notice_key)}`}>현재 본문 확인</a></p>}
+  <DocumentBodyViewer noticeKey={run.notice_key} documentId={run.document_id} runId={run.id} pageCount={run.has_content===true?run.page_count??0:0}
+   actions={<ManualExtractionAction noticeKey={run.notice_key} documentId={run.document_id} state={detail.requestState}/>}
+   emptyMessage={<p>같은 첨부파일은 현재 성공 본문만 보관하며 이전 실행은 처리 이력만 제공합니다. <a href={`/admin/bids/${encodeURIComponent(run.notice_key)}`}>현재 본문 확인</a></p>}/>
  </>;
 }
