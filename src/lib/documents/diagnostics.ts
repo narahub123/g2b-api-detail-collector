@@ -1,8 +1,8 @@
 import {serializeError} from '../error-diagnostics';
 import {isDownloadTimings} from './download-timings';
 
-export const extractionStages = { attachment: '첨부 확인', download: '다운로드', opening: '문서 열기', extracting: '텍스트 추출', saving: '결과 저장' } as const;
-export type ExtractionStage = keyof typeof extractionStages;
+import {extractionStages,type ExtractionStage} from './extraction-stages';
+export {extractionStages,type ExtractionStage} from './extraction-stages';
 export type ExtractionProgress = { stage: ExtractionStage; at: string; currentPage?: number; completedPages?: number; totalPages?: number; details?: import('./download-timings').DownloadTiming[] };
 export type DiagnosticError = { [key:string]: unknown; name: string; message: string; stack?: string; cause?: DiagnosticError; exitCode?: number | null; signal?: string | null };
 

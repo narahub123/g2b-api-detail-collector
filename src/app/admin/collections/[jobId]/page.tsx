@@ -18,6 +18,9 @@ function DiagnosticRow({ entry }: { entry: DiagnosticEntry }) {
     {entry.outcome && <> · {entry.outcome}</>}
     <div>{entry.error.name}{entry.error.code && ` (${entry.error.code})`}: {entry.error.message}</div>
     {entry.error.cause && <div>원인: {entry.error.cause}</div>}
+    {entry.diagnostic ? <details><summary>기술 정보 펼쳐보기</summary>
+      <pre style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{JSON.stringify(entry.diagnostic,null,2)}</pre>
+    </details> : <p>원인 진단 미기록</p>}
   </li>;
 }
 
@@ -59,7 +62,7 @@ export default async function CollectionJobPage({ params, searchParams }: {
             <ul><DiagnosticRow entry={type.representative} /></ul></li>)}</ul>
       </section>}
     </> : job.errors.length > 0 ? <section><h2>기존 오류 {job.errors.length}건</h2>
-      <p>이 작업은 단계별 진단 기록을 저장하기 전에 실행되었습니다.</p>
+      <p>원인 진단 미기록 — 저장된 오류 안내만 확인할 수 있습니다.</p>
       <ul>{job.errors.map((error, index) => <li key={index}>{error}</li>)}</ul></section> : <p>진단 기록이 없습니다.</p>}
   </main>;
 }
