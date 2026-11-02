@@ -3,6 +3,7 @@
 import {useCallback,useEffect,useRef,useState} from 'react';
 import {StageTimings} from './StageTimings';
 import {FormAccordion} from './FormAccordion';
+import {documentWorkLabel} from '@/lib/documents/display';
 import {isActive,runStatuses} from '@/lib/documents/model';
 import type {DocumentList,DocumentSummary,RunMetadata} from '@/lib/documents/model';
 
@@ -127,7 +128,7 @@ function DocumentFile({document:doc,index,noticeKey,refresh}:{document:DocumentS
    {latestIssue&&<p role="alert">최근 시도: {runStatuses[latestIssue.status]}{latestIssue.error?` · ${latestIssue.error}`:''}{doc.success?' · 마지막 성공 본문을 조회할 수 있습니다.':''}</p>}
    {!!history.length&&<p><label>실행 이력{' '}<select aria-label={`실행 이력 첨부 ${doc.seq}`} value={selectedId} onChange={event=>setSelection(event.target.value)}>
     {selectedId&&!history.some(item=>item.id===selectedId)&&<option value={selectedId}>선택한 저장 기록</option>}
-    {history.map(item=><option key={item.id} value={item.id}>{runStatuses[item.status]} · {new Date(item.requested_at).toLocaleString('ko-KR')} · 시도 {item.attempt_number}</option>)}
+    {history.map(item=><option key={item.id} value={item.id}>{documentWorkLabel(item)} · {runStatuses[item.status]} · {new Date(item.requested_at).toLocaleString('ko-KR')} · 시도 {item.attempt_number}</option>)}
    </select></label>{' '}{cursor&&<button disabled={loadingHistory} onClick={()=>void more()}>이전 이력 더 보기</button>}</p>}
    {run&&<div><p>{runStatuses[run.status]} · 페이지 {run.page_count??'-'} · 문자 {run.character_count??'-'} · 완료 {run.finished_at?new Date(run.finished_at).toLocaleString('ko-KR'):'-'}</p>
     {run.error&&run.id!==latestIssue?.id&&<p role="alert">{run.error}</p>}

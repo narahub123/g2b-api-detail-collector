@@ -1,8 +1,9 @@
 import type {StageTiming} from './stage-timings';
+import type {ExtractionPurpose} from './priority';
 export type RunStatus='queued'|'processing'|'completed'|'no_text'|'failed'|'interrupted'|'unsupported';
 export type RunMetadata={id:string;filename:string;status:RunStatus;source:string;requested_at:string;started_at:string|null;finished_at:string|null;
  next_attempt_at:string|null;error:string|null;error_code:string|null;attempt_number:number;page_count:number|null;character_count:number|null;
- elapsed_ms:number|null;extractor_version:string|null;file_hash:string|null;peak_memory_bytes:number|null;stage_timings?:StageTiming[]};
+ elapsed_ms:number|null;extractor_version:string|null;file_hash:string|null;peak_memory_bytes:number|null;stage_timings?:StageTiming[];purpose?:ExtractionPurpose};
 export type DocumentSummary={id:string;notice_key:string;file_no:string;seq:number;filename:string;attachment_url:string;is_current:boolean;
  latest:RunMetadata|null;success:RunMetadata|null;active:RunMetadata|null};
 export type DocumentList={documents:DocumentSummary[];unsupported:{name:string;reason:string}[]};

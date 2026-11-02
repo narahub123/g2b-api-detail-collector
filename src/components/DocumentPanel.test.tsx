@@ -110,3 +110,17 @@ it('닫힌 파일은 현재 실행과 본문 폴링을 멈추고 목록 요약�
  expect(fetcher.mock.calls.filter(([url])=>url.includes('/pages/')||url.includes('/extractions/active'))).toHaveLength(bodyCalls);
  expect(fetcher.mock.calls.filter(([url])=>url.includes('/documents?')).length).toBeGreaterThan(1);
 });
+
+it('실행 이력 선택지에서 자동 신규 추출과 재추출을 구분합니다',async()=>{
+ const runs=[{id:'initial',status:'failed',source:'automatic',purpose:'initial',requested_at:'2026-10-29',attempt_number:1},
+ {id:'repeat',status:'failed',source:'automatic',purpose:'reextract',requested_at:'2026-10-29',attempt_number:1}];
+ vi.stubGlobal('fetch',vi.fn(async(input:string)=>{
+  if(input.includes('/extractions/'))return Response.json(runs[0]);
+  if(input.includes('/extractions'))return Response.json({runs,nextCursor:null});
+  return Response.json({documents:[{...docs[0],success:null,latest:runs[0]}],unsupported:[]});
+ }));
+ render(<DocumentPanel noticeKey={key}/>);
+ fireEvent.click((await screen.findByText(/1\. 공고.pdf/)).closest('summary')!);
+ expect(await screen.findByRole('option',{name:/자동 신규 추출/})).toHaveValue('initial');
+ expect(screen.getByRole('option',{name:/자동 재추출/})).toHaveValue('repeat');
+});

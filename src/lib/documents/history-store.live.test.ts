@@ -10,7 +10,7 @@ it.skipIf(!process.env.LIVE_DB_TEST||!process.env.DATABASE_URL)('진단 저장·
  const key='R26BK01797756--001',fileNo=randomUUID(),token=randomUUID();
  try{
   await pool.query(`CREATE SCHEMA ${schema}`);await pool.query(`CREATE TABLE ${schema}.notices(key text PRIMARY KEY,detail jsonb)`);
-  for(const path of ['0006-document-extraction.sql','0008-extraction-diagnostics.sql','0010-single-document-content.sql','0011-stage-timings.sql'])await pool.query((await readFile(`db/migrations/${path}`,'utf8')).replaceAll('public.',`${schema}.`));
+  for(const path of ['0006-document-extraction.sql','0008-extraction-diagnostics.sql','0010-single-document-content.sql','0011-stage-timings.sql','0012-extraction-priority.sql'])await pool.query((await readFile(`db/migrations/${path}`,'utf8')).replaceAll('public.',`${schema}.`));
   await pool.query(`INSERT INTO ${schema}.notices VALUES($1,$2)`,[key,JSON.stringify({attachments:[{name:'자료.pdf',url:`/api/attachments/${key}?fileNo=${fileNo}&seq=1`}]})]);
   const queue=new DocumentQueue(pool,schema),store=new DocumentHistoryStore(pool,schema);
   const run=await queue.enqueue(key,fileNo,1,'manual');await queue.acquire(token);await queue.claim(token);

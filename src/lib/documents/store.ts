@@ -3,7 +3,7 @@ import {DocumentError,pickPdfAttachment} from './contract';
 import {parseAttachmentDownloadUrl} from '../g2b/attachment-links';
 import type {DocumentList,DocumentSummary,RunMetadata} from './model';
 
-const metadata=['id','filename','status','source','requested_at','started_at','finished_at','next_attempt_at','error','error_code','attempt_number','page_count','character_count','elapsed_ms','extractor_version','file_hash','peak_memory_bytes','stage_timings'];
+const metadata=['id','filename','status','source','purpose','requested_at','started_at','finished_at','next_attempt_at','error','error_code','attempt_number','page_count','character_count','elapsed_ms','extractor_version','file_hash','peak_memory_bytes','stage_timings'];
 /** 페이지 배열이나 실행 소유 토큰을 메타데이터 응답에 포함하지 않습니다. */
 function fields(alias:string){return metadata.map(name=>name==='requested_at'
  ?`to_char(${alias}.requested_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS requested_at`

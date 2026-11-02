@@ -29,7 +29,7 @@ it.skipIf(!process.env.LIVE_DB_TEST||!process.env.DATABASE_URL)('중복 본문�
   await expect(migrate('0010-single-document-content.sql')).rejects.toThrow('작업기가 실행 중');
   expect((await pool.query(`SELECT count(*)::int n FROM pg_attribute WHERE attrelid='${schema}.attachment_extraction_runs'::regclass AND attname='pages' AND NOT attisdropped`)).rows[0].n).toBe(1);
   await pool.query(`UPDATE ${schema}.attachment_extraction_worker_lease SET owner_token=NULL,expires_at=NULL WHERE id=1`);
-  await migrate('0010-single-document-content.sql'); await migrate('0011-stage-timings.sql');
+  await migrate('0010-single-document-content.sql'); await migrate('0011-stage-timings.sql'); await migrate('0012-extraction-priority.sql');
   await migrate('0010-single-document-content.sql');
   expect((await pool.query(`SELECT run_id,pages FROM ${schema}.attachment_document_contents WHERE document_id=$1`,[doc])).rows).toEqual([{run_id:current,pages:[{pageNumber:1,text:'현재 본문'}]}]);
   expect((await pool.query(`SELECT last_success_run_id FROM ${schema}.attachment_documents WHERE id=$1`,[fallbackDoc])).rows[0].last_success_run_id).toBe(fallbackRun);

@@ -14,7 +14,7 @@ it("영구 오류와 일시 오류를 구분하고 내부 메시지는 저장하
 function batchStore(){
  return {acquire:vi.fn(async()=>true),release:vi.fn(async()=>{}),renew:vi.fn(async()=>true),
  recover:vi.fn(async()=>({checked:0,recovered:0,exhausted:0})),progress:vi.fn<(_token:string,_id:string,value:ExtractionProgress)=>Promise<void>>(async()=>{}),recordDiagnostic:vi.fn(async()=>{}),
- claim:vi.fn(async()=>({id:"id",notice_key:"key"})),complete:vi.fn(async()=>{}),fail:vi.fn(async()=>{}),readyCount:vi.fn(async()=>0)};
+ claim:vi.fn(async()=>({id:"id",notice_key:"key",source:'manual'})),complete:vi.fn(async()=>{}),fail:vi.fn(async()=>{}),readyCounts:vi.fn(async()=>({manual:0,initial:0,reextract:0}))};
 }
 it("임대 갱신 실패는 자식을 중단하고 결과 저장·다음 파일 선점을 막습니다",async()=>{
  const store=batchStore();store.renew.mockResolvedValue(false);
@@ -54,7 +54,7 @@ it("발견 전에 복구하고 복구로 실행 여유가 줄면 선점하지 �
 });
 it("선점 대기로 6분 여유가 사라지면 추출 없이 대기로 반환합니다",async()=>{
  const store=batchStore();let time=0;
- store.claim.mockImplementation(async()=>{time=15*60000;return {id:'id',notice_key:'key'};});
+ store.claim.mockImplementation(async()=>{time=15*60000;return {id:'id',notice_key:'key',source:'manual'};});
  const deferClaim=vi.fn(async()=>{}),extract=vi.fn();
  const summary=await runBatch({...store,deferClaim} as never,{mode:'local',now:()=>time,extract});
  expect(summary.reason).toBe('time_budget');expect(extract).not.toHaveBeenCalled();expect(deferClaim).toHaveBeenCalledOnce();
@@ -97,17 +97,80 @@ it("로컬 회차는 manual만 최대 3건 처리하고 실행 예산을 초기�
  const claims: unknown[]=[];let processed=0;
  const store={acquire:async()=>true,release:async()=>{},renew:async()=>true,recover:async()=>({recovered:0,checked:0,exhausted:0}),
  claim:async(_token:string,manual:boolean)=>{claims.push(manual);return {id:String(claims.length),notice_key:"key"};},
- complete:async()=>{processed++;},fail:async()=>{},readyCount:async()=>8};
+ complete:async()=>{processed++;},fail:async()=>{},readyCounts:async()=>({manual:8,initial:0,reextract:0})};
  const summary=await runBatch(store as never,{mode:"local",extract:async()=>({result:{pages:[],pageCount:0,characterCount:0,extractorVersion:"test",fileHash:"hash"},peakMemory:null})});
  expect(processed).toBe(3);expect(claims).toEqual([true,true,true]);expect(summary.reason).toBe("count_limit");
 });
 import { G2bMaintenanceError } from "../g2b/maintenance";
 
+it('수동 문서를 먼저 처리한 뒤 파일 사이마다 발견합니다',async()=>{
+ const store=batchStore(),events:string[]=[];
+ const waiting=[{id:'manual',notice_key:'key',source:'manual',attempt_number:1}];
+ const claim=async(_token:string,manualOnly:boolean)=>{
+  const index=waiting.findIndex(run=>!manualOnly||run.source==='manual');
+  return index<0?null:waiting.splice(index,1)[0];
+ };
+ let discovered=0;
+ const discover=async()=>{events.push('discover');waiting.push({id:`auto-${++discovered}`,notice_key:'key',source:'auto',attempt_number:1});return 1;};
+ const summary=await runBatch({...store,claim,discover} as never,{mode:'cloud',discover:true,limit:3,extract:async(run)=>{
+  events.push(run.id);
+  return {result:{pages:[],pageCount:0,characterCount:1,extractorVersion:'test',fileHash:'hash'},peakMemory:null};
+ }});
+ expect(events).toEqual(['manual','discover','auto-1','discover','auto-2']);
+ expect(summary.byKind.manual).toMatchObject({attempts:1,completed:1});
+ expect(summary.byKind.initial).toMatchObject({attempts:2,completed:2});
+});
+
+it('종류별 완료·실패·텍스트 없음과 남은 대기를 집계합니다',async()=>{
+ const store=batchStore();
+ const runs=[{id:'manual',source:'manual'},{id:'initial',source:'auto',purpose:'initial'},{id:'reextract',source:'auto',purpose:'reextract'}];
+ store.claim.mockImplementation(async()=>runs.shift() as never);
+ store.readyCounts.mockResolvedValue({manual:2,initial:3,reextract:4});
+ const summary=await runBatch(store as never,{mode:'cloud',limit:3,extract:async(run)=>{
+  if(run.id==='initial')throw new Error('PDF가 손상되었거나 읽을 수 없는 형식입니다.');
+  return {result:{pages:[],pageCount:0,characterCount:run.id==='manual'?1:0,extractorVersion:'test',fileHash:'hash'},peakMemory:null};
+ }});
+ expect(summary.remainingReady).toBe(9);
+ expect(summary.byKind).toEqual({manual:{attempts:1,completed:1,failed:0,noText:0,remainingReady:2},initial:{attempts:1,completed:0,failed:1,noText:0,remainingReady:3},reextract:{attempts:1,completed:0,failed:0,noText:1,remainingReady:4}});
+});
+
+it.each(['local','cloud'] as const)('%s 대기열 전용 실행은 발견하지 않습니다',async(mode)=>{
+ const store=batchStore(),discover=vi.fn(async()=>0);
+ await runBatch({...store,discover} as never,{mode,discover:mode==='local',limit:1,extract:async()=>({result:{pages:[],pageCount:0,characterCount:0,extractorVersion:'test',fileHash:'hash'},peakMemory:null})});
+ expect(discover).not.toHaveBeenCalled();
+});
+
+it('발견 중 실행 여유가 사라지면 자동 문서를 선점하지 않습니다',async()=>{
+ const store=batchStore();let time=0;
+ store.claim.mockResolvedValue(null as never);
+ const discover=async()=>{time=15*60000;return 1;};
+ const summary=await runBatch({...store,discover} as never,{mode:'cloud',discover:true,budgetMinutes:20,now:()=>time});
+ expect(summary.reason).toBe('time_budget');expect(summary.attempts).toBe(0);
+ expect(store.claim).toHaveBeenCalledExactlyOnceWith(expect.any(String),true,undefined);
+});
+
+it('재추출 중 추가된 수동 요청을 다음 파일로 실행합니다',async()=>{
+ const store=batchStore(),processed:string[]=[];
+ const waiting=[{id:'old',notice_key:'key',source:'auto',purpose:'reextract'}];
+ const claim=async(_token:string,manualOnly:boolean)=>{
+  const index=waiting.findIndex(run=>!manualOnly||run.source==='manual');
+  return index<0?null:waiting.splice(index,1)[0];
+ };
+ const summary=await runBatch({...store,claim} as never,{mode:'cloud',limit:2,extract:async(run)=>{
+  processed.push(run.id);
+  if(run.id==='old')waiting.push({id:'new-manual',notice_key:'key',source:'manual',purpose:'initial'});
+  return {result:{pages:[],pageCount:0,characterCount:1,extractorVersion:'test',fileHash:'hash'},peakMemory:null};
+ }});
+ expect(processed).toEqual(['old','new-manual']);
+ expect(summary.byKind.reextract.completed).toBe(1);expect(summary.byKind.manual.completed).toBe(1);
+});
+
 it("점검 문서는 같은 시도로 대기에 반환하고 후속 선점과 실패 집계를 중단합니다", async () => {
  const store=batchStore(),deferClaim=vi.fn(async()=>{});
- store.claim.mockResolvedValue({id:'id',notice_key:'key',attempt_number:2} as never);
+ store.claim.mockResolvedValue({id:'id',notice_key:'key',source:'manual',attempt_number:2} as never);
  const summary=await runBatch({...store,deferClaim} as never,{mode:'local',extract:async()=>{throw new G2bMaintenanceError('download');}});
  expect(summary).toMatchObject({reason:'g2b_maintenance',attempts:0,retries:0,failed:0,maintenance:{source:'download'}});
+ expect(summary.byKind.manual.attempts).toBe(0);
  expect(deferClaim).toHaveBeenCalledWith(expect.any(String),'id',expect.objectContaining({code:'g2b_maintenance'}));
  expect(store.claim).toHaveBeenCalledOnce();expect(store.fail).not.toHaveBeenCalled();expect(store.release).toHaveBeenCalledOnce();
 });

@@ -14,6 +14,7 @@ it.skipIf(!process.env.LIVE_DB_TEST||!process.env.DATABASE_URL)('조회는 문�
   await pool.query((await readFile('db/migrations/0006-document-extraction.sql','utf8')).replaceAll('public.',`${schema}.`));
   await pool.query((await readFile('db/migrations/0008-extraction-diagnostics.sql','utf8')).replaceAll('public.',`${schema}.`));
   await pool.query((await readFile('db/migrations/0011-stage-timings.sql','utf8')).replaceAll('public.',`${schema}.`));
+  await pool.query((await readFile('db/migrations/0012-extraction-priority.sql','utf8')).replaceAll('public.',`${schema}.`));
   await pool.query(`INSERT INTO ${schema}.notices VALUES($1,$2),($3,$4)`,[key,JSON.stringify({attachments:[attachment(1),attachment(2),{name:'외부.pdf',url:'https://other.test/a.pdf'}]}),other,JSON.stringify({attachments:[]})]);
   const store=new DocumentStore(pool,schema),queue=new DocumentQueue(pool,schema);const list=await store.list(key);
   expect(list.documents).toHaveLength(2);expect(list.unsupported).toHaveLength(1);

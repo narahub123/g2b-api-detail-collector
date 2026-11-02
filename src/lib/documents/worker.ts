@@ -6,12 +6,14 @@ import { classifyExtractionError } from "./errors";
 import { superviseExtraction } from "./supervisor";
 import {diagnosticError,ExtractionError,sanitizeStoredDiagnostic} from './diagnostics';
 import type {ExtractionProgress} from './diagnostics';
+import {workKind,type WorkKind} from './priority';
 
 export type BatchOptions = { mode: "local" | "cloud"; limit?:number; budgetMinutes?:number; noticeKey?:string;
   discover?:boolean;
   signal?:AbortSignal; heartbeatMs?:number; renewalTimeoutMs?:number; now?:()=>number;
   extract?:(run:QueueRun,token:string,signal:AbortSignal,progress?:(value:ExtractionProgress)=>void)=>Promise<{result:PdfResult;peakMemory:number|null}> };
 export type BatchSummary = { startedAt:string;finishedAt:string;attempts:number;remainingReady:number;checked:number;recovered:number;exhausted:number;
+  byKind:Record<WorkKind,{attempts:number;completed:number;failed:number;noText:number;remainingReady:number}>;
   elapsedMs:number;retries:number;completed:number;failed:number;noText:number;peakMemoryBytes:number|null;
   maintenance?:MaintenanceInfo;
   reason:"g2b_maintenance"|"no_ready_request"|"count_limit"|"time_budget"|"lease_busy"|"lease_lost"|"shutdown" };
@@ -30,7 +32,8 @@ export async function runBatch(store:DocumentQueue,options:BatchOptions):Promise
   const budget=Math.min(options.budgetMinutes??(local?20:50),local?20:50)*60000;
   if(!Number.isInteger(limit)||limit<1||!Number.isFinite(budget)||budget<360000)throw new Error("PDF 배치 한도가 올바르지 않습니다.");
   const summary:BatchSummary={startedAt:new Date(start).toISOString(),finishedAt:"",attempts:0,remainingReady:0,checked:0,recovered:0,exhausted:0,
-    elapsedMs:0,retries:0,completed:0,failed:0,noText:0,peakMemoryBytes:null,reason:"no_ready_request"};
+    elapsedMs:0,retries:0,completed:0,failed:0,noText:0,peakMemoryBytes:null,reason:"no_ready_request",
+    byKind:{manual:{attempts:0,completed:0,failed:0,noText:0,remainingReady:0},initial:{attempts:0,completed:0,failed:0,noText:0,remainingReady:0},reextract:{attempts:0,completed:0,failed:0,noText:0,remainingReady:0}}};
   const token=randomUUID(), abort=new AbortController(); let heartbeat:Promise<void>|undefined, lost=false;
   const renewalTimeout=Math.min(options.renewalTimeoutMs??15000,15000);
   /** 갱신 실패 시 자식 작업을 중단하고 이 회차의 새 선점을 금지합니다. */
@@ -51,7 +54,6 @@ export async function runBatch(store:DocumentQueue,options:BatchOptions):Promise
   try {
     const initial=await store.recover(token);
     summary.checked+=initial.checked;summary.recovered+=initial.recovered;summary.exhausted+=initial.exhausted;
-    if(options.discover && !local && !abort.signal.aborted) await store.discover(options.noticeKey,()=>abort.signal.aborted || now()-start+360000>budget);
     while(!abort.signal.aborted) {
       if(summary.attempts>=limit){summary.reason="count_limit";break;}
       if(now()-start+360000>budget){summary.reason="time_budget";break;}
@@ -59,11 +61,21 @@ export async function runBatch(store:DocumentQueue,options:BatchOptions):Promise
       summary.checked+=recovery.checked;summary.recovered+=recovery.recovered;summary.exhausted+=recovery.exhausted;
       if(abort.signal.aborted)break;
       if(now()-start+360000>budget){summary.reason='time_budget';break;}
-      const run=await store.claim(token,local,options.noticeKey);
+      // 이미 대기 중인 수동 요청을 먼저 실행하고 파일 사이에만 자동 후보를 보충합니다.
+      let run=await store.claim(token,true,options.noticeKey);
+      if(!run&&!local){
+        if(options.discover&&!abort.signal.aborted&&now()-start+360000<=budget){
+          await store.discover(options.noticeKey,()=>abort.signal.aborted||now()-start+360000>budget);
+        }
+        if(abort.signal.aborted)break;
+        if(now()-start+360000>budget){summary.reason='time_budget';break;}
+        run=await store.claim(token,false,options.noticeKey);
+      }
       if(!run){summary.reason="no_ready_request";break;}
-      summary.attempts++;
       if(abort.signal.aborted)break;
       if(now()-start+360000>budget){await store.deferClaim(token,run.id);summary.reason='time_budget';break;}
+      const kind=workKind(run),kindSummary=summary.byKind[kind];
+      summary.attempts++;kindSummary.attempts++;
       if(run.attempt_number>1)summary.retries++;
       let extracted: {result:PdfResult;peakMemory:number|null};
       let pending:ExtractionProgress|undefined,lastStage='',lastWrite=0,progressError:unknown;
@@ -101,6 +113,7 @@ export async function runBatch(store:DocumentQueue,options:BatchOptions):Promise
           // 점검으로 사용한 집계를 되돌리고 같은 시도의 대기 상태로 회차를 종료합니다.
           await store.deferClaim(token,run.id,maintenance);
           summary.attempts--;
+          kindSummary.attempts--;
           if(run.attempt_number>1)summary.retries--;
           summary.maintenance=maintenance;summary.reason="g2b_maintenance";
           break;
@@ -109,6 +122,7 @@ export async function runBatch(store:DocumentQueue,options:BatchOptions):Promise
         const diagnostic=error instanceof ExtractionError&&error.diagnostic?sanitizeStoredDiagnostic(error.diagnostic):diagnosticError(error);
         await store.fail(token,run.id,{...failure,diagnostic});
         summary.failed++;
+        kindSummary.failed++;
         if(failure.retry && run.attempt_number>=3)summary.exhausted++;
         continue;
       }
@@ -122,11 +136,12 @@ export async function runBatch(store:DocumentQueue,options:BatchOptions):Promise
         await recordStorageError(error);
         throw error;
       }
-      if(extracted.result.characterCount)summary.completed++;else summary.noText++;
+      if(extracted.result.characterCount){summary.completed++;kindSummary.completed++;}else{summary.noText++;kindSummary.noText++;}
       if(extracted.peakMemory!==null)summary.peakMemoryBytes=Math.max(summary.peakMemoryBytes??0,extracted.peakMemory);
     }
     if(abort.signal.aborted)summary.reason=lost?"lease_lost":"shutdown";
-    summary.remainingReady=await store.readyCount(local,options.noticeKey);
+    const remaining=await store.readyCounts(local,options.noticeKey);
+    for(const kind of ['manual','initial','reextract'] as const){summary.byKind[kind].remainingReady=remaining[kind];summary.remainingReady+=remaining[kind];}
     return summary;
   } finally {
     clearInterval(timer);await heartbeat;clearTimeout(expiryTimer!);options.signal?.removeEventListener("abort",stop);

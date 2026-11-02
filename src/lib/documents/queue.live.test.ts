@@ -35,6 +35,7 @@ it.skipIf(!process.env.LIVE_DB_TEST || !process.env.DATABASE_URL)("운영 대기
     await pool.query((await readFile('db/migrations/0008-extraction-diagnostics.sql','utf8')).replaceAll('public.',`${schema}.`));
   await pool.query((await readFile('db/migrations/0010-single-document-content.sql','utf8')).replaceAll('public.',`${schema}.`));
   await pool.query((await readFile('db/migrations/0011-stage-timings.sql','utf8')).replaceAll('public.',`${schema}.`));
+  await pool.query((await readFile('db/migrations/0012-extraction-priority.sql','utf8')).replaceAll('public.',`${schema}.`));
     await pool.query(`INSERT INTO ${schema}.notices VALUES($1,$2)`,[key,JSON.stringify({attachments:[file(1),file(2)]})]);
     const requests = await Promise.all([q.enqueue(key,fileNo,1,"automatic"),q.enqueue(key,fileNo,1,"manual")]);
     expect(requests[0].id).toBe(requests[1].id);
