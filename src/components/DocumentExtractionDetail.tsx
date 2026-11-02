@@ -7,17 +7,15 @@ import {extractionStages} from '@/lib/documents/diagnostics';
 import {isActive,runStatuses} from '@/lib/documents/model';
 import {documentDuration,documentWorkLabel,documentTime} from '@/lib/documents/display';
 import {StageTimings} from './StageTimings';
-import {DocumentBodyViewer} from './DocumentBodyViewer';
 import {safeAttachmentLink} from '@/lib/g2b/attachment-links';
-import {ManualExtractionAction} from './ManualExtractionAction';
 
-/** 진행 중에만 갱신하며 본문은 사용자가 요청한 한 페이지만 읽습니다. */
+/** 해당 실행의 진단만 표시하고 진행 중에만 상태를 갱신합니다. */
 export function DocumentExtractionDetail({initial}:{initial:HistoryDetail}){
  const identity=JSON.stringify([initial.run.notice_key,initial.run.document_id,initial.run.id]);
  return <ExtractionDetail key={identity} initial={initial}/>;
 }
 
-/** 원본 다운로드를 제공하고 실행이 바뀌면 진단 폴링과 본문 요청을 새로 시작합니다. */
+/** 실행별 진단과 재시도 관계를 표시하며 파일 상세로 돌아가는 경로를 제공합니다. */
 function ExtractionDetail({initial}:{initial:HistoryDetail}){
  const [detail,setDetail]=useState(initial),[error,setError]=useState('');
  const run=detail.run,active=isActive(run);
@@ -40,6 +38,7 @@ function ExtractionDetail({initial}:{initial:HistoryDetail}){
   timer=setTimeout(poll,5000);return()=>{abort.abort();clearTimeout(timer);};
  },[run.id,active]);
  return <>
+  <a className="back-link" href={`/admin/document-extractions/files/${run.document_id}`}>← 파일 상세로 돌아가기</a>
   <header className="extraction-header"><span className="eyebrow">EXTRACTION DIAGNOSTICS</span><h1>첨부파일 추출 진단</h1><p className="extraction-file">{run.filename}{downloadUrl&&<a className="extraction-download-icon" href={downloadUrl} download aria-label="원본 파일 다운로드" title="원본 파일 다운로드"><Download size={18} aria-hidden="true"/></a>}</p><span className="extraction-status" data-status={run.status}>{runStatuses[run.status]}</span>{active&&<p>5초마다 처리 상태를 확인합니다.</p>}</header>
   {error&&<p role="alert" className="extraction-error">{error}</p>}
   <div className="extraction-grid">
@@ -63,8 +62,5 @@ function ExtractionDetail({initial}:{initial:HistoryDetail}){
   </section>
   <section className="extraction-card" style={{marginTop:24}}><h2>재시도 흐름</h2><ol>{detail.chain.map(item=><li key={item.id}><a href={`/admin/document-extractions/${item.id}`} aria-current={item.id===run.id?'page':undefined}>{item.attempt_number}차 · {runStatuses[item.status]}</a> · {documentTime(item.requested_at)}{item.error_code&&` · ${item.error_code}`}</li>)}</ol></section>
   <section className="extraction-card" style={{marginTop:24}}><h2>단계별 처리 시간</h2><StageTimings timings={run.stage_timings}/></section>
-  <DocumentBodyViewer noticeKey={run.notice_key} documentId={run.document_id} runId={run.id} pageCount={run.has_content===true?run.page_count??0:0}
-   actions={<ManualExtractionAction noticeKey={run.notice_key} documentId={run.document_id} state={detail.requestState}/>}
-   emptyMessage={<p>같은 첨부파일은 현재 성공 본문만 보관하며 이전 실행은 처리 이력만 제공합니다. <a href={`/admin/bids/${encodeURIComponent(run.notice_key)}`}>현재 본문 확인</a></p>}/>
  </>;
 }

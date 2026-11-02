@@ -20,9 +20,9 @@ it.each(['history','documents'])('분 단위 %s 조회와 집계에 같은 UTC �
 
 it('파일별 보기에서만 미요청과 형식 미기록 필터를 허용합니다',()=>{
  expect(parseHistoryFilters(new URLSearchParams('view=documents&status=unrequested&type=__unknown__'))).toMatchObject({view:'documents',status:'unrequested',type:'__unknown__',page:1});
- expect(parseHistoryFilters(new URLSearchParams())).toMatchObject({view:'history'});
- expect(()=>parseHistoryFilters(new URLSearchParams('status=unrequested'))).toThrow();
- expect(()=>parseHistoryFilters(new URLSearchParams('type=__unknown__'))).toThrow();
+ expect(parseHistoryFilters(new URLSearchParams())).toMatchObject({view:'documents'});
+ expect(()=>parseHistoryFilters(new URLSearchParams('view=history&status=unrequested'))).toThrow();
+ expect(()=>parseHistoryFilters(new URLSearchParams('view=history&type=__unknown__'))).toThrow();
  expect(()=>parseHistoryFilters(new URLSearchParams('view=wrong'))).toThrow();
 });
 

@@ -116,10 +116,9 @@ export default async function ExtractionHistoryPage({
       </a>
       <header className="extraction-header">
         <span className="eyebrow">DOCUMENT EXTRACTIONS</span>
-        <h1>첨부파일 추출 이력</h1>
+        <h1>{documentView ? '첨부파일 추출 관리' : '전체 추출 시도 이력'}</h1>
         <p>
-          문서별 추출 시도와 오류 원인을 확인합니다. 시각과 접수일은 한국 시간
-          기준입니다.
+          {documentView ? '파일별 최신 상태를 확인하고 추출을 요청합니다.' : '추출 시도마다 한 건을 표시하는 진단용 보조 목록입니다.'} 시각과 접수일은 한국 시간 기준입니다.
         </p>
       </header>
       <DocumentExtractionOverview
@@ -147,16 +146,15 @@ export default async function ExtractionHistoryPage({
         {documentView && (
           <p className="extraction-meta">
             파일마다 최신 상태 한 건을 표시합니다.{" "}
-            <a href="/admin/document-extractions#extraction-results">
+            <a href="/admin/document-extractions?view=history#extraction-results">
               전체 추출 시도 이력 보기
             </a>
           </p>
         )}
+        {!documentView && <p><a href="/admin/document-extractions">파일별 목록으로 돌아가기</a></p>}
         <FormAccordion title="검색 필터" className="filter-accordion">
           <form method="get" className="extraction-filters">
-            {documentView && (
-              <input type="hidden" name="view" value="documents" />
-            )}
+            <input type="hidden" name="view" value={documentView ? 'documents' : 'history'} />
             <div className="extraction-filter-row">
               <label>
                 처리 상태
@@ -224,7 +222,7 @@ export default async function ExtractionHistoryPage({
             <div className="extraction-filter-actions">
               <a
                 className="extraction-filter-reset"
-                href="/admin/document-extractions"
+                href={documentView ? '/admin/document-extractions' : '/admin/document-extractions?view=history'}
               >
                 초기화
               </a>

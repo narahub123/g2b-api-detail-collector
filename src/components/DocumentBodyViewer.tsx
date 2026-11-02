@@ -7,7 +7,7 @@ type BodyError={pageNumber:number;message:string};
 type ScrollEvent={requestId:number;phase:'align'|'settled'};
 type ViewerState={displayed:PageData|null;requestedPage:number|null;error:BodyError|null;started:boolean;scrollEvent:ScrollEvent|null};
 type RequestAttempt={id:number;controller:AbortController;pending:boolean;aligned:boolean;userMoved:boolean};
-type ViewerProps={noticeKey:string;documentId:string;runId:string;pageCount:number;actions?:ReactNode;emptyMessage?:ReactNode};
+type ViewerProps={noticeKey:string;documentId:string;runId:string;pageCount:number;actions?:ReactNode;emptyMessage?:ReactNode;source?:ReactNode;currentBodyHref?:string;onReplaced?:()=>void};
 
 /** 실행별 캐시와 요청 수명이 다른 실행으로 이어지지 않도록 경계를 분리합니다. */
 export function DocumentBodyViewer(props:ViewerProps){
@@ -16,7 +16,7 @@ export function DocumentBodyViewer(props:ViewerProps){
 }
 
 /** 본문 헤더의 작업 버튼과 표시 중인 본문을 유지하며 요청·캐시·스크롤을 제어합니다. */
-function BodyViewer({noticeKey,documentId,runId,pageCount,actions,emptyMessage}:ViewerProps){
+function BodyViewer({noticeKey,documentId,runId,pageCount,actions,emptyMessage,source,currentBodyHref,onReplaced}:ViewerProps){
  const [state,setState]=useState<ViewerState>({displayed:null,requestedPage:null,error:null,started:false,scrollEvent:null});
  const [replaced,setReplaced]=useState(false);
  const sectionRef=useRef<HTMLElement>(null),textRef=useRef<HTMLPreElement>(null);
@@ -76,7 +76,7 @@ function BodyViewer({noticeKey,documentId,runId,pageCount,actions,emptyMessage}:
     if(attemptRef.current!==attempt||attempt.id!==sequence.current||attempt.controller.signal.aborted)return;
     // 서버에서 정리된 본문은 메모리 캐시를 통해서도 다시 열지 못하게 합니다.
     cache.current.clear();attempt.pending=false;attempt.controller.abort();++sequence.current;attemptRef.current=null;
-    setState({displayed:null,requestedPage:null,error:null,started:true,scrollEvent:null});setReplaced(true);return;
+    setState({displayed:null,requestedPage:null,error:null,started:true,scrollEvent:null});setReplaced(true);onReplaced?.();return;
    }
    if(!response.ok)throw new Error('저장된 본문을 조회하지 못했습니다.');
    const value=await response.json();
@@ -107,7 +107,8 @@ function BodyViewer({noticeKey,documentId,runId,pageCount,actions,emptyMessage}:
    <div className="extraction-body-heading"><h2 id={headingId}>추출 본문</h2><p>필요한 페이지의 저장된 본문만 조회합니다.</p></div>
    <div className="extraction-body-actions">{actions}{pageCount>0&&!replaced&&!state.displayed&&<button className="extraction-button" disabled={loading} onClick={()=>void readPage(1)}>{loading?'조회 중…':'본문 조회'}</button>}</div>
   </header>
-  {pageCount<=0?emptyMessage:replaced?<p role="alert">현재 성공 본문이 변경되어 이 실행의 본문은 더 이상 보관하지 않습니다. <a href={`/admin/bids/${encodeURIComponent(noticeKey)}`}>현재 본문 확인</a></p>:state.displayed?navigation('위'):null}
+  {source&&<div className="extraction-body-meta">{source}</div>}
+  {pageCount<=0?emptyMessage:replaced?<p role="alert">현재 성공 본문이 변경되어 이 실행의 본문은 더 이상 보관하지 않습니다. <a href={currentBodyHref??`/admin/bids/${encodeURIComponent(noticeKey)}`}>현재 본문 확인</a></p>:state.displayed?navigation('위'):null}
   {loading&&<p role="status" className="extraction-body-status">{state.requestedPage}페이지를 불러오는 중…</p>}
   {state.error&&<div role="alert" className="extraction-error"><p>{state.error.pageNumber}페이지 · {state.error.message}</p>
    {state.displayed&&<button className="extraction-button" onClick={()=>void readPage(state.error!.pageNumber)}>다시 시도</button>}
