@@ -18,9 +18,9 @@ on:
         options: [manual, watchdog]
         default: manual
       limit:
-        description: "수동 검증 시 최대 파일 수 (1~20)"
+        description: "수동 검증 시 최대 파일 수 (1~50)"
         type: string
-        default: "20"
+        default: "50"
       notice_key:
         description: "수동 검증용 공고 키 (비우면 전체 범위)"
         type: string

@@ -3,13 +3,13 @@ import {evaluatePdfEvent,makeWatchdogJob} from '../../../scripts/lib/pdf-automat
 const repository='narahub123/g2b-api-detail-collector';
 const base={eventName:'workflow_dispatch',ref:'refs/heads/main',repository,enabled:'false',event:{repository:{full_name:repository,default_branch:'main'},inputs:{mode:'queue-only',invocation:'manual'}}};
 it('자동 실행이 꺼져도 기본 브랜치 수동 검증은 허용하고 watchdog은 차단합니다',()=>{
- expect(evaluatePdfEvent(base)).toMatchObject({allowed:true,mode:'queue-only',limit:20});
+ expect(evaluatePdfEvent(base)).toMatchObject({allowed:true,mode:'queue-only',limit:50});
  expect(evaluatePdfEvent({...base,event:{...base.event,inputs:{mode:'queue-only',invocation:'watchdog'}}})).toMatchObject({allowed:false,reason:'disabled'});
  expect(evaluatePdfEvent({...base,ref:'refs/heads/feature'}).allowed).toBe(false);
 });
 it('독립 watchdog은 수집 이벤트 필드 없이 실행하며 허용 입력만 받습니다',()=>{
  expect(evaluatePdfEvent({...base,enabled:'true',event:{...base.event,inputs:{mode:'queue-only',invocation:'watchdog'}}}).allowed).toBe(true);
- for(const inputs of [{mode:'unknown',invocation:'manual'},{mode:'discover-and-drain',invocation:'watchdog'},{mode:'queue-only',invocation:'other'},{mode:'queue-only',invocation:'manual',limit:'21'},{mode:'queue-only',invocation:'manual',notice_key:'x;echo secret'}])expect(evaluatePdfEvent({...base,enabled:'true',event:{...base.event,inputs}}).allowed).toBe(false);
+ for(const inputs of [{mode:'unknown',invocation:'manual'},{mode:'discover-and-drain',invocation:'watchdog'},{mode:'queue-only',invocation:'other'},{mode:'queue-only',invocation:'manual',limit:'51'},{mode:'queue-only',invocation:'manual',notice_key:'x;echo secret'}])expect(evaluatePdfEvent({...base,enabled:'true',event:{...base.event,inputs}}).allowed).toBe(false);
 });
 it('신뢰하는 수집의 성공·실패·취소·시간 초과 종료만 허용합니다',()=>{
  const run={name:'G2B collection',path:'.github/workflows/collect.yml',event:'workflow_dispatch',head_branch:'main',head_repository:{full_name:repository},conclusion:'success',status:'completed'};
