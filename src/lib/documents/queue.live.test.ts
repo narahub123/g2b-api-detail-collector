@@ -1,3 +1,4 @@
+import {testAttachment} from './test-attachments';
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import pg from "pg";
@@ -27,7 +28,7 @@ it.skipIf(!process.env.LIVE_DB_TEST || !process.env.DATABASE_URL)("운영 대기
   const schema = `queue_test_${randomUUID().replaceAll("-", "")}`;
   const q = new DocumentQueue(pool, schema);
   const key = "R26BK01797756--001", fileNo = randomUUID();
-  const file = (seq: number) => ({name: `공고${seq}.pdf`,url: `/api/attachments/${key}?fileNo=${fileNo}&seq=${seq}`});
+  const file = (seq: number) => testAttachment(key,fileNo,seq,`공고${seq}.pdf`);
   try {
     await pool.query(`CREATE SCHEMA ${schema}`);
     await pool.query(`CREATE TABLE ${schema}.notices(key text PRIMARY KEY,detail jsonb)`);

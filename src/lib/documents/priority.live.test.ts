@@ -1,3 +1,4 @@
+import {testAttachment} from './test-attachments';
 import {randomUUID} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
 import pg from 'pg';
@@ -21,7 +22,7 @@ const live=!process.env.LIVE_DB_TEST||!process.env.DATABASE_URL;
 it.skipIf(live)('기존 체인 분류를 복구하고 재추출보다 신규·수동을 먼저 선점합니다',async()=>{
  await isolated(async(pool,schema,migrate)=>{
   const key='R26BK01800322--000',file=randomUUID(),doc=randomUUID(),old=randomUUID(),retry=randomUUID(),again=randomUUID(),token=randomUUID();
-  const files=Array.from({length:4},(_,i)=>({name:`자료${i+1}.pdf`,url:`/api/attachments/${key}?fileNo=${file}&seq=${i+1}`}));
+  const files=Array.from({length:4},(_,i)=>testAttachment(key,file,i+1,`자료${i+1}.pdf`));
   await pool.query(`INSERT INTO ${schema}.notices VALUES($1,$2)`,[key,JSON.stringify({attachments:files})]);
   await pool.query(`INSERT INTO ${schema}.attachment_documents(id,notice_key,file_no,seq,filename,attachment_url) VALUES($1,$2,$3,1,'자료1.pdf',$4)`,[doc,key,file,files[0].url]);
   await pool.query(`INSERT INTO ${schema}.attachment_extraction_runs(id,document_id,chain_id,source,status,filename,attachment_url,extractor_version,requested_at)
@@ -58,10 +59,10 @@ it.skipIf(live)('대량의 이전 PDF보다 신규 후보를 먼저 최대20건 
  await isolated(async(pool,schema,migrate)=>{
   await migrate('0012-extraction-priority.sql');
   const key='R26BK01800322--000',file=randomUUID();
-  const attachments=Array.from({length:45},(_,i)=>({name:`자료${i+1}.pdf`,url:`/api/attachments/${key}?fileNo=${file}&seq=${i+1}`}));
+  const attachments=Array.from({length:45},(_,i)=>testAttachment(key,file,i+1,`자료${i+1}.pdf`));
   await pool.query(`INSERT INTO ${schema}.notices VALUES($1,$2)`,[key,JSON.stringify({attachments})]);
   await pool.query(`INSERT INTO ${schema}.attachment_documents(notice_key,file_no,seq,filename,attachment_url)
-   SELECT $1,$2::text::uuid,g,'자료.pdf','/api/attachments/'||$1||'?fileNo='||$2::text||'&seq='||g FROM generate_series(1,30) g`,[key,file]);
+   SELECT $1,$2::text::uuid,(a->>'seq')::int,a->>'name',a->>'url' FROM jsonb_array_elements($3::jsonb) a`,[key,file,JSON.stringify(attachments.slice(0,30))]);
   await pool.query(`INSERT INTO ${schema}.attachment_extraction_runs(id,document_id,chain_id,source,status,filename,attachment_url,extractor_version,purpose)
    SELECT id,document_id,id,'automatic','failed','자료.pdf',attachment_url,'v1','initial' FROM (SELECT gen_random_uuid() id,d.id document_id,d.attachment_url FROM ${schema}.attachment_documents d) s`);
   const queue=new DocumentQueue(pool,schema);

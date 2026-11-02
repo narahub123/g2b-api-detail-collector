@@ -1,7 +1,8 @@
+import {testAttachment} from './test-attachments';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {DocumentHistoryStore,parseHistoryFilters} from './history-store';
 import {createFileDetailApi} from './file-detail-api';
-const id='12345678-1234-1234-1234-123456789012',key='notice--001';
+const id='12345678-1234-1234-1234-123456789012',key='R26BK01797756--001';
 beforeEach(()=>{vi.stubEnv('PDF_EXTRACTION_ENABLED','true');vi.stubEnv('NODE_ENV','development');});
 afterEach(()=>vi.unstubAllEnvs());
 it('기본 조회는 파일 단위이며 전체 실행 조회는 명시적으로 선택합니다',()=>{
@@ -10,7 +11,7 @@ it('기본 조회는 파일 단위이며 전체 실행 조회는 명시적으로
 });
 it('최신 실패와 현재 성공 본문을 독립적으로 반환하며 원문이나 내부 식별자를 노출하지 않습니다',async()=>{
  const query=vi.fn().mockResolvedValue({rows:[{id,notice_key:key,filename:'자료.pdf',document_type:'pdf',attachment_url:'url',file_no:id,seq:1,
-  attachments:[{name:'자료.pdf',url:`/api/attachments/${key}?fileNo=${id}&seq=1`}],latest:{id:'failed',status:'failed'},content:{run_id:'success',page_count:2,finished_at:'2026-11-02T00:00:00Z'},active:null}]});
+  attachments:[testAttachment(key,id,1)],latest:{id:'failed',status:'failed'},content:{run_id:'success',page_count:2,finished_at:'2026-11-02T00:00:00Z'},active:null}]});
  const result=await new DocumentHistoryStore({query} as never).file(id);
  expect(result).toMatchObject({latest:{status:'failed'},content:{run_id:'success'},requestState:{canRequest:true}});
  expect(JSON.stringify(result)).not.toMatch(/attachments|file_no/);

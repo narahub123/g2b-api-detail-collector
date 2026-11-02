@@ -77,7 +77,7 @@ it("href 없는 모달 파일 셀도 공통 첨부 식별자로 저장한다", a
       </script>`);
     const result = await collectModalContents(page, "R26BK1--000");
     expect(result.captures[0].modal.attachments).toEqual([{ name: "규격서.hwp",
-      url: "/api/attachments/R26BK1--000?fileNo=de557b90-5d96-430d-9dd4-06b2d7b3627c&seq=2&modal=0" }]);
+      url: null,fileNo:'de557b90-5d96-430d-9dd4-06b2d7b3627c',seq:2 }]);
     expect(result.captures[0].trigger.path).toMatchObject([{ id: "open" }]);
     await replayModalPath(page, result.captures[0].trigger.path || []);
     expect(await collectClickDownloads(page, page.locator("#specDialog"))).toMatchObject([

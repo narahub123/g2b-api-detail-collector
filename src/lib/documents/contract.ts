@@ -1,4 +1,4 @@
-import { attachmentDownloadUrl, parseAttachmentDownloadUrl } from "../g2b/attachment-links";
+import {directAttachmentIdentity} from '../g2b/attachment-direct';
 
 export type PdfPage = { pageNumber: number; text: string };
 export type PdfResult = { pages: PdfPage[]; pageCount: number; characterCount: number; extractorVersion: string; fileHash: string };
@@ -11,14 +11,12 @@ export class DocumentError extends Error {
 }
 
 /** 공고에 실제 저장된 직접 첨부 PDF만 선택하고 임의 URL·모달 첨부를 거부합니다. */
-export function pickPdfAttachment(key: unknown, fileNo: unknown, seq: unknown, files: { name: string; url: string | null }[]) {
+export function pickPdfAttachment(key: unknown, fileNo: unknown, seq: unknown, files: { name: string; url: string | null;fileNo?:string;seq?:number }[]) {
   if (typeof key !== "string" || typeof fileNo !== "string" || typeof seq !== "number") throw new DocumentError("첨부 식별자가 올바르지 않습니다.");
-  let url: string;
-  try { url = attachmentDownloadUrl(key, fileNo, seq); } catch { throw new DocumentError("첨부 식별자가 올바르지 않습니다."); }
-  const matches = files.filter(file => file.url === url && /\.pdf$/i.test(file.name.trim()));
-  if (matches.length !== 1 || parseAttachmentDownloadUrl(url)?.modalIndex !== undefined)
+  const matches = files.filter(file => file.fileNo===fileNo&&file.seq===seq&&/\.pdf$/i.test(file.name.trim()));
+  if (matches.length !== 1 || !directAttachmentIdentity(key,matches[0]))
     throw new DocumentError("해당 공고의 직접 첨부 PDF를 찾을 수 없습니다.", 404);
-  return { ...matches[0], url, key, fileNo, seq };
+  return { ...matches[0], url:matches[0].url!, key, fileNo, seq };
 }
 
 /** 좌표 보정이 어려운 경우 파서의 원래 줄 끝과 단어 경계를 유지합니다. */

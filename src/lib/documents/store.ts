@@ -1,6 +1,6 @@
 import type pg from 'pg';
 import {DocumentError,pickPdfAttachment} from './contract';
-import {parseAttachmentDownloadUrl} from '../g2b/attachment-links';
+import {directAttachmentIdentity} from '../g2b/attachment-direct';
 import type {DocumentList,DocumentSummary,RunMetadata} from './model';
 
 const metadata=['id','filename','status','source','purpose','requested_at','started_at','finished_at','next_attempt_at','error','error_code','attempt_number','page_count','character_count','elapsed_ms','extractor_version','file_hash','peak_memory_bytes','stage_timings'];
@@ -27,10 +27,11 @@ export class DocumentStore {
    const current:string[]=[];
    for(const file of files){
     if(typeof file?.name!=='string'||!/\.pdf$/i.test(file.name.trim()))continue;
-    const identity=typeof file.url==='string'?parseAttachmentDownloadUrl(file.url):null;
-    if(!identity||identity.key!==key||identity.modalIndex!==undefined){unsupported.push({name:file.name,reason:'현재 지원하지 않는 PDF 다운로드 링크입니다.'});continue;}
+    // 별도 변환 대상으로 남긴 첨부도 기존 현재 상태를 바꾸지 않습니다.
+    if(typeof file.url==='string')current.push(file.url);
+    const identity=directAttachmentIdentity(key,file);
+    if(!identity){unsupported.push({name:file.name,reason:'직접 다운로드 주소 변환 또는 식별 정보 확인이 필요합니다.'});continue;}
     try{pickPdfAttachment(key,identity.fileNo,identity.seq,files);}catch{unsupported.push({name:file.name,reason:'직접 첨부 식별자가 중복되어 확인이 필요합니다.'});continue;}
-    current.push(file.url);
     await db.query(`INSERT INTO ${this.schema}.attachment_documents AS d(notice_key,file_no,seq,filename,attachment_url)
       VALUES($1,$2,$3,$4,$5) ON CONFLICT(notice_key,file_no,seq) DO UPDATE SET filename=EXCLUDED.filename,attachment_url=EXCLUDED.attachment_url,is_current=true,updated_at=now()
       WHERE (d.filename,d.attachment_url,d.is_current) IS DISTINCT FROM (EXCLUDED.filename,EXCLUDED.attachment_url,true)`,[key,identity.fileNo,identity.seq,file.name,file.url]);

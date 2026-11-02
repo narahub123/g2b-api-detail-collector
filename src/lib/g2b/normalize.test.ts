@@ -136,7 +136,7 @@ describe("normalizeNotice", () => {
     expect(notice.servicePeriod.value).toBeNull();
   });
 
-  it("keeps G2B direct links and distinct internal downloads with the same filename", () => {
+  it("직접 주소를 유지하고 미변환 내부 주소를 다운로드 목록에서 제외합니다", () => {
     const base = "/api/attachments/R26BK1--000?fileNo=de557b90-5d96-430d-9dd4-06b2d7b3627c&seq=";
     const notice = normalizeNotice(api, { sourceUrl: "https://www.g2b.go.kr/", sections: [], links: [], attachments: [
       { name: "같은 이름.hwpx", url: `${base}1` },
@@ -146,8 +146,6 @@ describe("normalizeNotice", () => {
       { name: "다른경로.pdf", url: "/api/other/file" }
     ] });
     expect(notice.attachments).toEqual([
-      { name: "같은 이름.hwpx", url: `${base}1` },
-      { name: "같은 이름.hwpx", url: `${base}2` },
       { name: "공고문.pdf", url: "http://www.g2b.go.kr/file.pdf" }
     ]);
   });

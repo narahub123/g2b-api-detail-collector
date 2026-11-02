@@ -1,8 +1,9 @@
 import type { ClickDownload } from "./detail-page";
+import {attachmentContext} from './attachment-context';
 
 /** 상세페이지나 모달의 href 없는 WebSquare 파일 셀에서 파일 번호와 순서를 읽습니다. */
 export async function collectClickDownloads(page: import("playwright-core").Page, scope?: import("playwright-core").Locator): Promise<ClickDownload[]> {
-  return (scope || page).locator("td[col_id='orgnlAtchFileNm']").evaluateAll((cells) => {
+  const files=await (scope || page).locator("td[col_id='orgnlAtchFileNm']").evaluateAll((cells) => {
     const results: ClickDownload[] = [];
     for (const cell of cells) {
       if (!(cell instanceof HTMLElement) || !cell.id) continue;
@@ -32,5 +33,9 @@ export async function collectClickDownloads(page: import("playwright-core").Page
     }
     return results;
   });
+  return Promise.all(files.map(async file=>{
+    const context=await attachmentContext(page,file.fileNo);
+    return context?{...file,context}:file;
+  }));
 }
 

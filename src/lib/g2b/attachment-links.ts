@@ -25,8 +25,9 @@ export function parseAttachmentDownloadUrl(value: string): AttachmentIdentity | 
   } catch { return null; }
 }
 
+/** 실제 다운로드 주소만 표시하며 미변환 내부 주소는 별도 처리 대상으로 남깁니다. */
 export function safeAttachmentLink(value: string): string | null {
-  if (value.startsWith("/")) return parseAttachmentDownloadUrl(value) ? value : null;
+  if (value.startsWith("/")) return null;
   try {
     const url = new URL(value);
     if (!["http:", "https:"].includes(url.protocol) || url.username || url.password ||

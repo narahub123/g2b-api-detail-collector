@@ -12,9 +12,9 @@ describe("attachment download links", () => {
     expect(parseAttachmentDownloadUrl(url.replace("seq=1", "seq=2"))).toEqual({ key, fileNo, seq: 2 });
   });
 
-  it("allows only G2B direct URLs and canonical internal attachment routes", () => {
+  it("변환되지 않은 내부 주소를 새 다운로드 링크로 표시하지 않습니다", () => {
     const internal = attachmentDownloadUrl(key, fileNo, 1);
-    expect(safeAttachmentLink(internal)).toBe(internal);
+    expect(safeAttachmentLink(internal)).toBeNull();
     expect(safeAttachmentLink("https://www.g2b.go.kr/pn/file.do")).toBe("https://www.g2b.go.kr/pn/file.do");
     for (const unsafe of ["/other/path", `${internal}&extra=1`, `${internal}#fragment`,
       internal.replace("seq=1", "seq=01"), "//evil.example/file", "javascript:alert(1)",

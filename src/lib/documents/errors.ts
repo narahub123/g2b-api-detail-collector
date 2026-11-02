@@ -5,7 +5,8 @@ import {ExtractionError} from './diagnostics';
 export function classifyExtractionError(error: unknown): Failure {
   if(error instanceof ExtractionError){
     const known:Record<string,[string,boolean]>={download_timeout:['첨부파일 다운로드 시간이 초과되었습니다.',true],connection_failed:['첨부파일 다운로드 연결에 실패했습니다.',true],process_exit:['추출 작업 프로세스가 비정상 종료되었습니다.',true],time_limit:['문서 처리 시간이 제한을 초과했습니다.',false],size_limit:['문서 크기가 제한을 초과했습니다.',false]};
-    const entry=known[error.code];if(entry)return {code:error.code,message:entry[0],retry:entry[1]};
+    const direct:Record<string,[string,boolean]>={download_http_retry:['첨부파일 서버가 일시적인 오류를 반환했습니다.',true],download_response:['첨부파일 서버가 정상 파일을 반환하지 않았습니다.',false],attachment_unavailable:['현재 공고의 직접 첨부를 확인할 수 없습니다.',false],download_cancelled:['다운로드 요청이 취소되었습니다.',false]};
+    const entry=known[error.code]??direct[error.code];if(entry)return {code:error.code,message:entry[0],retry:entry[1]};
   }
   const message=error instanceof Error?error.message:"";
   const fixed: [RegExp,string,string][]=[
