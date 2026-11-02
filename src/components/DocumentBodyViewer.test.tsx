@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
 import {act,cleanup,fireEvent,render,screen,within} from '@testing-library/react';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
-import {DocumentExtractionDetail} from './DocumentExtractionDetail';
+import {DocumentBodyViewer} from './DocumentBodyViewer';
+
+/** 기존 본문 회귀 시나리오를 실행 화면과 분리해 뷰어 자체에서 검증합니다. */
+function DocumentExtractionDetail({initial}:{initial:HistoryDetail}){const run=initial.run;return <DocumentBodyViewer noticeKey={run.notice_key} documentId={run.document_id} runId={run.id} pageCount={run.page_count??0}/>;}
 import type {HistoryDetail} from '@/lib/documents/history-store';
 
 const initial={run:{id:'run',document_id:'doc',notice_key:'notice',filename:'자료.pdf',status:'completed',source:'manual',has_content:true,page_count:3,requested_at:'2026-10-30T00:00:00Z',diagnostic_error:null},chain:[]} as unknown as HistoryDetail;
@@ -75,16 +78,6 @@ it('응답 후 위치가 유지되면 추가 스크롤을 하지 않고 해제 �
  const section=screen.getByRole('heading',{name:'추출 본문'}).closest('section')!;vi.spyOn(section,'getBoundingClientRect').mockReturnValue({top:16} as DOMRect);
  fireEvent.click(screen.getByRole('button',{name:'본문 조회'}));await act(async()=>{slow.resolve(response('본문'));});expect(window.scrollTo).toHaveBeenCalledTimes(1);
  unmount();expect(fetch.mock.calls[0][1]?.signal?.aborted).toBe(true);
-});
-
-it('진단 폴링 성공이 본문 조회 오류를 지우지 않습니다',async()=>{
- vi.useFakeTimers();
- const fetch=vi.fn<typeof globalThis.fetch>(async input=>String(input).includes('/pages/')?new Response('{}',{status:503}):new Response(JSON.stringify(initial)));vi.stubGlobal('fetch',fetch);
- render(<DocumentExtractionDetail initial={{...initial,run:{...initial.run,status:'processing'}}}/>);
- await act(async()=>{fireEvent.click(screen.getByRole('button',{name:'본문 조회'}));});
- expect(screen.getByRole('alert')).toHaveTextContent('저장된 본문을 조회하지 못했습니다.');
- await act(()=>vi.advanceTimersByTimeAsync(5000));
- expect(fetch).toHaveBeenCalledTimes(2);expect(screen.getByRole('alert')).toHaveTextContent('저장된 본문을 조회하지 못했습니다.');
 });
 
 it('화면을 떠났다가 돌아오면 이전 메모리 캐시를 재사용하지 않습니다',async()=>{

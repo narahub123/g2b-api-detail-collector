@@ -317,11 +317,11 @@
   min-height: calc(100dvh - var(--extraction-scroll-offset));
 }
 .extraction-body-header {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: flex-start;
   justify-content: space-between;
   gap: 24px;
-  flex-wrap: wrap;
 }
 .extraction-body-heading { flex: 1 1 260px; }
 .extraction-body-heading h2 { margin-top: 0; }
@@ -332,6 +332,11 @@
 .extraction-body-actions .extraction-button:disabled {
   opacity: 0.5;
   cursor: default;
+}
+.extraction-body-meta { margin-top: 16px; }
+.extraction-body-meta p { margin: 8px 0 0; }
+@media (max-width: 600px) {
+  .extraction-body-header { grid-template-columns: minmax(0, 1fr); gap: 16px; }
 }
 .extraction-body-status {
   color: #60777c;
@@ -363,3 +368,6 @@
 .extraction-selectable-title input { flex: 0 0 auto; margin: 0; }
 .extraction-selectable-title a { min-width: 0; overflow-wrap: anywhere; }
 .extraction-request-actions { margin: 16px 0; }
+.extraction-history-table { overflow-x: auto; margin-bottom: 16px; }
+.extraction-history-table table { width: 100%; border-collapse: collapse; text-align: left; }
+.extraction-history-table th, .extraction-history-table td { padding: 12px 10px; border-bottom: 1px solid #dbe5e8; white-space: nowrap; }

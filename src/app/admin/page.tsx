@@ -51,7 +51,7 @@ export default async function AdminPage({
       <CollectionManager />
       <nav className="admin-history-links" aria-label="작업 이력과 진단">
         <AdminHistoryCard href="/admin/collections" title="수집 작업 이력" description="공고 수집 결과와 오류·경고·재시도를 확인합니다." icon="collection"/>
-        <AdminHistoryCard href="/admin/document-extractions" title="첨부파일 추출 이력" description="문서별 추출 결과와 처리 과정·오류 원인을 확인합니다." icon="document"/>
+        <AdminHistoryCard href="/admin/document-extractions" title="첨부파일 추출 관리" description="파일별 추출 상태·본문·전체 이력을 확인하고 추출을 요청합니다." icon="document"/>
       </nav>
 
       <section className="results-section">

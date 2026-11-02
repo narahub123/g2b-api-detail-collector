@@ -13,6 +13,8 @@ export type HistoryDetail={run:HistoryRun & {diagnostic_error:DiagnosticError|nu
 export type HistoryList={items:HistoryRun[];hasNext:boolean;page:number;totalCount:number;totalPages:number};
 export type DocumentFile={document_id:string;notice_key:string;filename:string;document_type:string|null;created_at:string;latest:HistoryRun|null;requestState?:DocumentRequestState};
 export type DocumentFileList=Omit<HistoryList,'items'>&{items:DocumentFile[]};
+export type DocumentFileDetail={id:string;notice_key:string;filename:string;document_type:string|null;attachment_url:string|null;
+ latest:RunMetadata|null;content:{run_id:string;page_count:number;finished_at:string|null}|null;requestState:DocumentRequestState};
 const columns=['id','filename','status','source','purpose','requested_at','started_at','finished_at','next_attempt_at','error','error_code','attempt_number','page_count','character_count','elapsed_ms','extractor_version','file_hash','peak_memory_bytes',
  'document_id','document_type','chain_id','retry_of','retry_eligible','stage','stage_started_at','last_progress_at','current_page','completed_pages','total_pages','stage_timings'].map(c=>`r.${c}`).join(',');
 export const runIdPattern=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -20,7 +22,7 @@ export const runIdPattern=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9
 /** 잘못된 필터로 전체 이력을 과도하게 조회하지 않도록 입력을 검증합니다. */
 export function parseHistoryFilters(params:URLSearchParams):HistoryFilters{
  const value=(name:string,max=200)=>{const v=(params.get(name)||'').trim();if(v.length>max)throw new DocumentError('검색어가 너무 깁니다.');return v;};
- const status=value('status'),type=value('type',30),from=value('from',16),to=value('to',16),view=value('view',20)||'history';
+ const status=value('status'),type=value('type',30),from=value('from',16),to=value('to',16),view=value('view',20)||'documents';
  if(view!=='history'&&view!=='documents')throw new DocumentError('조회 기준을 확인하세요.');
  if(status&&!Object.hasOwn(runStatuses,status)&&!(view==='documents'&&status==='unrequested'))throw new DocumentError('추출 상태를 확인하세요.');
  if(type&&!/^[a-z0-9][a-z0-9_-]*$/.test(type)&&!(view==='documents'&&type==='__unknown__'))throw new DocumentError('문서 형식을 확인하세요.');
@@ -88,6 +90,23 @@ export class DocumentHistoryStore{
  }
  /** 실제 저장된 형식만 필터 선택지로 제공해 추출기 추가 시 화면 수정을 줄입니다. */
  async types():Promise<string[]>{return (await this.pool.query(`SELECT DISTINCT document_type FROM ${this.schema}.attachment_extraction_runs WHERE document_type IS NOT NULL ORDER BY document_type`)).rows.map(r=>r.document_type);}
+ /** 최신 실행과 현재 성공 본문을 분리해 미요청 파일도 변경 없이 조회합니다. */
+ async file(id:string):Promise<DocumentFileDetail|null>{
+  if(!runIdPattern.test(id))return null;
+  const row=(await this.pool.query(`SELECT d.id,d.notice_key,d.filename,d.document_type,d.attachment_url,d.file_no,d.seq,
+   n.detail->'attachments' AS attachments,
+   (SELECT row_to_json(m) FROM (SELECT ${columns} FROM ${this.schema}.attachment_extraction_runs r WHERE r.id=d.latest_run_id AND r.document_id=d.id) m) AS latest,
+   (SELECT json_build_object('run_id',c.run_id,'page_count',jsonb_array_length(c.pages),'finished_at',s.finished_at)
+    FROM ${this.schema}.attachment_document_contents c JOIN ${this.schema}.attachment_extraction_runs s ON s.id=c.run_id AND s.document_id=d.id
+    WHERE c.document_id=d.id) AS content,
+   (SELECT json_build_object('id',a.id,'status',a.status) FROM ${this.schema}.attachment_extraction_runs a
+    WHERE a.document_id=d.id AND a.status IN ('queued','processing') LIMIT 1) AS active
+   FROM ${this.schema}.attachment_documents d LEFT JOIN ${this.schema}.notices n ON n.key=d.notice_key WHERE d.id=$1`,[id])).rows[0];
+  if(!row)return null;
+  // 접수 검증에 필요한 내부 필드와 공고 원문은 클라이언트 응답에서 제외합니다.
+  return {id:row.id,notice_key:row.notice_key,filename:row.filename,document_type:row.document_type,attachment_url:row.attachment_url,
+   latest:row.latest,content:row.content,requestState:documentRequestState(row.notice_key,row.file_no,row.seq,row.attachments,row.active)};
+ }
  /** 단일 시도의 원본 다운로드 주소와 같은 재시도 묶음을 조회합니다. */
  async detail(id:string):Promise<HistoryDetail|null>{
   if(!runIdPattern.test(id))return null;

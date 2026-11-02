@@ -16,5 +16,5 @@ export default async function ExtractionDetailPage({params}:{params:Promise<{run
  try{detail=await new DocumentHistoryStore(getDocumentPool()).detail(runId);}
  catch{return <main className="site-shell"><a className="back-link" href="/admin/document-extractions">← 첨부파일 추출 이력</a><p role="alert" className="extraction-error">추출 이력을 조회하지 못했습니다. DB 설정과 마이그레이션 적용 여부를 확인하세요.</p></main>;}
  if(!detail)notFound();
- return <main className="site-shell" style={{paddingBottom:70}}><a className="back-link" href="/admin/document-extractions">← 첨부파일 추출 이력</a><DocumentExtractionDetail initial={detail}/></main>;
+ return <main className="site-shell" style={{paddingBottom:70}}><DocumentExtractionDetail initial={detail}/></main>;
 }
