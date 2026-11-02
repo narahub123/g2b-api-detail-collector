@@ -84,7 +84,7 @@ export async function superviseExtraction(id: string, key: string, signal: Abort
       if(maintenance)throw maintenance;
       // 사람이 읽는 안내로 재분류하면 연결 오류가 영구 실패로 바뀌므로 원래 코드를 유지합니다.
       const errorCode=typeof saved?.code==='string'&&/^[a-z_]{1,80}$/.test(saved.code)?saved.code:saved?'child_error':'process_exit';
-      const error=new ExtractionError(errorCode,saved?.error??'PDF 작업 프로세스가 종료되었습니다.',{exitCode:code,signal:exitSignal});
+      const error=new ExtractionError(errorCode,saved?.error??'PDF 작업 프로세스가 종료되었습니다.',{cause:saved?.diagnostic,exitCode:code,signal:exitSignal});
       if(saved?.diagnostic)error.diagnostic={...saved.diagnostic,exitCode:code,signal:exitSignal};
       throw error;
     }

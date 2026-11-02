@@ -3,7 +3,7 @@
 import {useEffect,useState} from 'react';
 import {Download} from 'lucide-react';
 import type {HistoryDetail} from '@/lib/documents/history-store';
-import {extractionStages} from '@/lib/documents/diagnostics';
+import {extractionStages} from '@/lib/documents/extraction-stages';
 import {isActive,runStatuses} from '@/lib/documents/model';
 import {documentDuration,documentWorkLabel,documentTime} from '@/lib/documents/display';
 import {StageTimings} from './StageTimings';
@@ -58,7 +58,7 @@ function ExtractionDetail({initial}:{initial:HistoryDetail}){
   </div>
   <section className="extraction-card" style={{marginTop:24}}><h2>오류 진단</h2>
    {run.error?<p className="extraction-diagnostic"><strong>{run.error_code}</strong><br/>{run.error}</p>:<p>저장된 오류 안내가 없습니다.</p>}
-   {run.diagnostic_error?<details className="extraction-diagnostic"><summary>기술 정보 펼쳐보기</summary><pre>{JSON.stringify(run.diagnostic_error,null,2)}</pre></details>:<p className="extraction-meta">상세 진단 정보가 기록되지 않았습니다.</p>}
+   {run.diagnostic_error?<details className="extraction-diagnostic"><summary>기술 정보 펼쳐보기</summary><pre>{JSON.stringify(run.diagnostic_error,null,2)}</pre></details>:<p className="extraction-meta">원인 진단 미기록</p>}
   </section>
   <section className="extraction-card" style={{marginTop:24}}><h2>재시도 흐름</h2><ol>{detail.chain.map(item=><li key={item.id}><a href={`/admin/document-extractions/${item.id}`} aria-current={item.id===run.id?'page':undefined}>{item.attempt_number}차 · {runStatuses[item.status]}</a> · {documentTime(item.requested_at)}{item.error_code&&` · ${item.error_code}`}</li>)}</ol></section>
   <section className="extraction-card" style={{marginTop:24}}><h2>단계별 처리 시간</h2><StageTimings timings={run.stage_timings}/></section>

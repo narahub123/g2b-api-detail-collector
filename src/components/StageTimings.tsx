@@ -1,7 +1,7 @@
 'use client';
 
 import {useEffect,useState} from 'react';
-import {extractionStages} from '@/lib/documents/diagnostics';
+import {extractionStages} from '@/lib/documents/extraction-stages';
 import type {StageTiming} from '@/lib/documents/stage-timings';
 import {documentTime} from '@/lib/documents/display';
 import {downloadSteps} from '@/lib/documents/download-timings';

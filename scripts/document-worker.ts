@@ -1,3 +1,4 @@
+import {diagnosticError} from '../src/lib/documents/diagnostics';
 import { createServer } from "node:http";
 import { timingSafeEqual } from "node:crypto";
 import { chromium } from "playwright-core";
@@ -13,7 +14,7 @@ const pool=getDocumentPool(),store=new DocumentQueue(pool),shutdown=new AbortCon
 let last:unknown=null;
 const wake=new LocalWake(async()=>{
   try { last=await runBatch(store,{mode:"local",signal:shutdown.signal});console.log(JSON.stringify({operation:"pdf-local-batch",...last as object})); }
-  catch { last={error:"PDF 배치가 실패했습니다. 미완료 실행은 임대 복구 대상입니다."};console.error(JSON.stringify(last)); }
+  catch(error) { last={error:"PDF 배치가 실패했습니다. 미완료 실행은 임대 복구 대상입니다."};console.error(JSON.stringify({...last as object,diagnostic:diagnosticError(error)})); }
 });
 const server=createServer((request,response)=>{
   /** 토큰·본문·DB 연결 정보는 응답과 로그에 포함하지 않습니다. */

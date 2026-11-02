@@ -1,3 +1,4 @@
+import {serializeError,type SerializedError} from '../error-diagnostics';
 import { deferCollection, maintenanceFromError } from "./maintenance";
 import { randomUUID } from "node:crypto";
 import { ApiPageError, fetchNoticeByKey, prepareServiceNoticesByMinute, type PostedTimeRange } from "./api-client";
@@ -14,7 +15,7 @@ import { structureNoticeDetail, type StructuredNoticeDetail } from "./structured
 import type { ApiNotice } from "./types";
 import { getIncrementalCheckpoint, getNoticeAttempt, listFailedNoticeAttempts, saveNoticeAttempt } from "./incremental-store";
 
-export type NoticeAttempt = { key: string; attempts: number; status: "failed" | "succeeded"; error: string | null };
+export type NoticeAttempt = { key: string; attempts: number; status: "failed" | "succeeded"; error: string | null; diagnostic?: SerializedError | null };
 export type IncrementalStore = {
   getCheckpoint(activationId?: string): Promise<string | null>;
   acquire(job: CollectionJob): Promise<string>;
@@ -173,8 +174,10 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
       if (pendingInThisRun || previous?.status === "failed") {
         // 상세 저장과 시도 기록 사이에 오류가 났다면 이미 저장된 성공을 확정합니다.
         await ensureLease();
+        record.detailError=null;record.detailDiagnostic=null;
+        await store.saveNotice(key,record);
         await store.saveAttempt({ key, attempts: Math.min(3, (previous?.attempts || 0) +
-          (pendingInThisRun ? 1 : 0)) || 1, status: "succeeded", error: null });
+          (pendingInThisRun ? 1 : 0)) || 1, status: "succeeded", error: null, diagnostic:null });
         // 기존 상세와 성공 시도 기록이 모두 확인된 뒤에만 복구를 확정합니다.
         if (previous?.status === "failed") addDiagnostic(job, { severity: "retry", stage: "detail",
           operation: "scrape-detail", target: { key }, attempt: (previous.attempts || 0) + (pendingInThisRun ? 1 : 0),
@@ -204,15 +207,17 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
     } catch (error) {
       observation.assert();
       if (maintenanceFromError(error)) throw error;
-      const message = redactDiagnostic(error instanceof Error ? error.message : String(error));
+      const diagnostic=serializeError(error);
+      const message=redactDiagnostic(typeof diagnostic.message==='string'?diagnostic.message:'오류 객체의 세부 속성을 확인하세요.');
       addDiagnostic(job, { severity: "failure", stage: "detail", operation: "scrape-detail", target: { key },
         attempt: (previous?.attempts || 0) + 1, outcome: (previous?.attempts || 0) < 2 ? "retrying" : "failed", error });
       record.detailError = message;
+      record.detailDiagnostic=diagnostic;
       await observation.progress("saving", noticeResult);
       await ensureLease();
       await store.saveNotice(key, record);
       const attempts = (previous?.attempts || 0) + 1;
-      await store.saveAttempt({ key, attempts, status: "failed", error: message });
+      await store.saveAttempt({ key, attempts, status: "failed", error: message, diagnostic });
       if (attempts === 1) firstFailures.add(key);
       results.set(key, "failed");
       job.errors.push(`${key}: ${message}`);
@@ -228,6 +233,7 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
     for (const warning of extracted.structured.warnings)
       addDiagnostic(job, { severity: "warning", stage: "transform", operation: "structure-detail", target: { key }, error: warning });
     record.detailError = null;
+    record.detailDiagnostic=null;
     record.orderPlanNumbers = extracted.structured.orderPlanNumbers;
     record.preSpecificationNumbers = extracted.structured.preSpecificationNumbers;
     record.otherDetailNumbers = extracted.structured.otherDetailNumbers;
@@ -236,7 +242,7 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
     await ensureLease();
     await observation.progress("saving", noticeResult);
     await store.saveNotice(key, record, extracted.structured);
-    await store.saveAttempt({ key, attempts: (previous?.attempts || 0) + 1, status: "succeeded", error: null });
+    await store.saveAttempt({ key, attempts: (previous?.attempts || 0) + 1, status: "succeeded", error: null, diagnostic:null });
     // 상세와 시도 기록 저장이 끝난 후 복구 성공을 작업 진단에 반영합니다.
     if (previous?.status === "failed" || retry)
       addDiagnostic(job, { severity: "retry", stage: "detail", operation: "scrape-detail", target: { key },

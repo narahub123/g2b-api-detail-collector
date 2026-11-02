@@ -143,3 +143,13 @@ describe("DB 수집 작업 잠금", () => {
     expect(statements[0]).toContain("expires_at>now()");
   });
 });
+
+it('작업 SQL 저장에서도 진단 스택과 중첩 원인을 요약 길이로 자르지 않습니다',async()=>{
+ const {addDiagnostic}=await import('./collection-diagnostics');
+ process.env.DATABASE_URL='postgres://test';let saved:CollectionJob|undefined;
+ runtime.__g2bPgPool={query:async(_sql:string,values:unknown[])=>{saved=JSON.parse(values[0] as string);return {rowCount:1,rows:[]};}};
+ const value=job('11111111-1111-4111-8111-111111111111');
+ addDiagnostic(value,{severity:'failure',stage:'detail',operation:'scrape-detail',error:{message:'failed',stack:'s'.repeat(5000),cause:{code:'ETIMEDOUT',extra:{status:502}}}});
+ await saveDbJob(value,'token');
+ expect(saved?.diagnostics?.events[0].diagnostic).toMatchObject({stack:'s'.repeat(5000),cause:{code:'ETIMEDOUT',extra:{status:502}}});
+});

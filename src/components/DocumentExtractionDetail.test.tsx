@@ -19,3 +19,17 @@ it('5초마다 해당 실행의 진행을 확인하고 완료되면 폴링을 �
  await act(()=>vi.advanceTimersByTimeAsync(5000));expect(fetcher).toHaveBeenCalledTimes(1);
  await act(()=>vi.advanceTimersByTimeAsync(15000));expect(fetcher).toHaveBeenCalledTimes(1);
 });
+
+it('저장된 원인과 하위 오류 및 스택을 접힌 기술 정보로 표시합니다',()=>{
+ const diagnostic={name:'Error',message:'failed',stack:'Error: failed\n at parser.ts:42:1',cause:{name:'NetworkError',message:'reset',code:'ECONNRESET'},errors:[{code:'ETIMEDOUT'}]};
+ const {container}=render(<DocumentExtractionDetail initial={{...initial,run:{...initial.run,status:'failed',diagnostic_error:diagnostic}}}/>);
+ expect(screen.getByText('기술 정보 펼쳐보기')).toBeInTheDocument();
+ expect(container.querySelector('details')).not.toHaveAttribute('open');
+ expect(container.querySelector('pre')?.textContent).toContain('ECONNRESET');
+ expect(container.querySelector('pre')?.textContent).toContain('ETIMEDOUT');
+ expect(container.querySelector('pre')?.textContent).toContain('parser.ts:42:1');
+});
+it('진단이 없는 과거 실행에는 원인 진단 미기록을 표시합니다',()=>{
+ render(<DocumentExtractionDetail initial={{...initial,run:{...initial.run,status:'failed',error:'기존 오류',diagnostic_error:null}}}/>);
+ expect(screen.getByText('원인 진단 미기록')).toBeInTheDocument();
+});

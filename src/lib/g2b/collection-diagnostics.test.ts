@@ -26,3 +26,13 @@ it("비밀값과 URL 쿼리의 인증값을 제거합니다", () => {
   expect(JSON.stringify(state)).not.toContain("pass@host");
   delete process.env.G2B_SERVICE_KEY;
 });
+
+it('요약 외에도 원인 객체를 보존하며 한도 이후 대표 진단에도 남깁니다',()=>{
+ const state:DiagnosticState={};
+ for(let i=0;i<500;i++)addDiagnostic(state,{severity:'warning',stage:'api',operation:'repeat',error:'repeat'});
+ const entry=addDiagnostic(state,{severity:'failure',stage:'detail',operation:'scrape-detail',error:{message:'failed',cause:{code:'ECONNRESET',status:502},errors:[{code:'ETIMEDOUT'}],token:'hidden-value'}});
+ expect(entry).toMatchObject({diagnostic:{cause:{code:'ECONNRESET',status:502},errors:[{code:'ETIMEDOUT'}]}});
+ expect(JSON.stringify(state)).not.toContain('hidden-value');
+ expect(Object.values(state.diagnostics!.types).some(type=>(type.representative as typeof entry).diagnostic===entry.diagnostic)).toBe(true);
+ expect(state.diagnostics?.overflowCount).toBe(1);
+});

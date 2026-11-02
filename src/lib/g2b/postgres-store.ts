@@ -1,3 +1,4 @@
+import {serializeError} from '../error-diagnostics';
 import pg from "pg";
 import { noticeKeyFromParts } from "./identity";
 import { normalizeNotice } from "./normalize";
@@ -11,7 +12,7 @@ import { shouldReplacePaginatedDetail } from "./pagination-coverage";
 type Category = "order-plan" | "pre-specification" | "other" | "opening";
 type Queryable = Pick<pg.PoolClient, "query">;
 type StoredRow = { key: string; api: StoredNotice["api"]; detail: StoredNotice["detail"];
-  detail_error: string | null };
+  detail_error: string | null; detail_diagnostic: StoredNotice["detailDiagnostic"] };
 export type StoredNoticeListRow = { key: string; notice_number: string; notice_order: string;
   title: string | null; demand_agency: string | null; notice_agency: string | null;
   posted_at: string | null; deadline_at: string | null; amount: string | null;
@@ -63,10 +64,10 @@ async function upsertNotice(db: Queryable, key: string, record: StoredNotice): P
   const summary = noticeSummary(key, record);
   await db.query(`INSERT INTO ${table("notices")}
     (key, notice_number, notice_order, api, detail, detail_error, title, demand_agency, notice_agency, posted_at, deadline_at,
-     amount, region, description, service_period, qualifications)
-    VALUES ($1,$2,$3,$4::jsonb,$5::jsonb,$6,$7,$8,$9,$10::timestamp,$11::timestamp,$12::numeric,$13,$14,$15,$16)
+     amount, region, description, service_period, qualifications, detail_diagnostic)
+    VALUES ($1,$2,$3,$4::jsonb,$5::jsonb,$6,$7,$8,$9,$10::timestamp,$11::timestamp,$12::numeric,$13,$14,$15,$16,$17::jsonb)
     ON CONFLICT (key) DO UPDATE SET api=EXCLUDED.api, detail=EXCLUDED.detail,
-      detail_error=EXCLUDED.detail_error, title=EXCLUDED.title,
+      detail_error=EXCLUDED.detail_error, detail_diagnostic=EXCLUDED.detail_diagnostic, title=EXCLUDED.title,
       demand_agency=EXCLUDED.demand_agency, notice_agency=EXCLUDED.notice_agency,
       posted_at=EXCLUDED.posted_at, deadline_at=EXCLUDED.deadline_at, amount=EXCLUDED.amount,
       region=EXCLUDED.region, description=EXCLUDED.description,
@@ -74,7 +75,8 @@ async function upsertNotice(db: Queryable, key: string, record: StoredNotice): P
     [key, summary.number, summary.order, record.api ? JSON.stringify(record.api) : null,
       record.detail ? JSON.stringify(record.detail) : null, record.detailError || null,
       summary.title, summary.demandAgency, summary.noticeAgency, summary.postedAt, summary.deadlineAt, summary.amount,
-      summary.region, summary.description, summary.servicePeriod, summary.qualifications]);
+      summary.region, summary.description, summary.servicePeriod, summary.qualifications,
+      record.detailError&&record.detailDiagnostic?JSON.stringify(serializeError(record.detailDiagnostic)):null]);
 }
 
 /** 트랜잭션 안에서 여러 저장 단계를 원자적으로 처리합니다. */
@@ -150,14 +152,14 @@ export async function saveNoticeRelation(source: string, related: string): Promi
 
 /** DB에서 공고 원본과 직접 관계·독립 상세 참조를 읽습니다. */
 export async function getStoredNotice(key: string): Promise<StoredNotice | null> {
-  const result = await getPool().query<StoredRow>(`SELECT key,api,detail,detail_error FROM ${table("notices")} WHERE key=$1`, [key]);
+  const result = await getPool().query<StoredRow>(`SELECT key,api,detail,detail_error,detail_diagnostic FROM ${table("notices")} WHERE key=$1`, [key]);
   const row = result.rows[0];
   if (!row) return null;
   const [relations, refs] = await Promise.all([
     getPool().query<{ related_key: string }>(`SELECT related_key FROM ${table("notice_relations")} WHERE source_key=$1 ORDER BY related_key`, [key]),
     getPool().query<ReferenceRow>(`SELECT detail_key,category,triggers FROM ${table("notice_independent_refs")} WHERE notice_key=$1 ORDER BY category,position`, [key])
   ]);
-  return { key, api: row.api, detail: row.detail, detailError: row.detail_error,
+  return { key, api: row.api, detail: row.detail, detailError: row.detail_error, detailDiagnostic:row.detail_diagnostic??null,
     relatedNoticeKeys: relations.rows.map((item) => item.related_key),
     orderPlanNumbers: refs.rows.filter((item) => item.category === "order-plan").map((item) => item.detail_key),
     preSpecificationNumbers: refs.rows.filter((item) => item.category === "pre-specification").map((item) => item.detail_key),

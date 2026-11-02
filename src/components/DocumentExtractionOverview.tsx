@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { FormAccordion } from "./FormAccordion";
 import { runStatuses } from "@/lib/documents/model";
-import { extractionStages } from "@/lib/documents/diagnostics";
+import { extractionStages } from "@/lib/documents/extraction-stages";
 import { documentTime } from "@/lib/documents/display";
 import type {
   DocumentCounts,

@@ -189,8 +189,8 @@ it("재수집 실패 시 DB의 기존 상세를 유지합니다", async () => {
   expect((await getCollectionJob(job.id))?.results).toMatchObject([
     { key, status: "failed", error: "상세 접근 실패", startedAt: expect.any(String), finishedAt: expect.any(String) }
   ]);
-  expect(db.notices.get(key)).toMatchObject({ detail });
-  expect(db.saveStoredNotice).not.toHaveBeenCalled();
+  expect(db.notices.get(key)).toMatchObject({ detail,detailError:"상세 접근 실패",detailDiagnostic:{message:"상세 접근 실패"} });
+  expect(db.saveStoredNotice).toHaveBeenCalled();
 });
 
 it("수동 부모 종료는 관련 공고 API와 자식 실패 전에 고정됩니다", async () => {
@@ -310,4 +310,19 @@ it("상세 실패 정보 저장까지 실패해도 종료 시각을 남기고 �
   const saved = await getCollectionJob(job.id);
   expect(saved).toMatchObject({ status: "failed", detailFailed: 1 });
   expect(saved?.results?.[0]).toMatchObject({ status: "failed", finishedAt: expect.any(String) });
+});
+
+it('전체 수집과 선택 재수집 실패에 원인 진단을 남기고 성공 시 현재 진단을 비웁니다',async()=>{
+ process.env.G2B_SERVICE_KEY='test-key';const key='R26BK1--000';
+ const failure={message:'failed',cause:{code:'ECONNRESET',status:502},errors:[{code:'ETIMEDOUT'}]};
+ const first=await startCollection({start:'2026-10-28',end:'2026-10-28'},{fetcher:async()=>Response.json({response:{body:{totalCount:1,numOfRows:100,pageNo:1,items:[{bidNtceNo:'R26BK1',bidNtceOrd:'000'}]}}}),scrape:async()=>{throw failure;}});
+ await vi.waitFor(()=>expect(db.releaseDbLease).toHaveBeenCalledWith(first.id,'lease-token'));
+ expect(db.notices.get(key)).toMatchObject({detailDiagnostic:failure});
+ expect((await getCollectionJob(first.id))?.diagnostics?.events).toContainEqual(expect.objectContaining({diagnostic:failure}));
+ const refresh=await startRefresh([key],{scrape:async()=>{throw failure;}});
+ await vi.waitFor(()=>expect(db.releaseDbLease).toHaveBeenCalledWith(refresh.id,'lease-token'));
+ expect(db.notices.get(key)).toMatchObject({detailDiagnostic:failure});
+ const success=await startRefresh([key],{scrape:async(url)=>({detail:{sourceUrl:url,sections:[],attachments:[],links:[]},relatedNoticeKeys:[]})});
+ await vi.waitFor(()=>expect(db.releaseDbLease).toHaveBeenCalledWith(success.id,'lease-token'));
+ expect(db.notices.get(key)).toMatchObject({detailError:null,detailDiagnostic:null});
 });
