@@ -1,3 +1,4 @@
+import {diagnosticError} from '../src/lib/documents/diagnostics';
 import {appendFile} from 'node:fs/promises';
 import {getDocumentPool} from '../src/lib/documents/pool';
 import {probePdfWork} from '../src/lib/documents/preflight';
@@ -10,4 +11,4 @@ async function main(){
  if(process.env.GITHUB_OUTPUT)await appendFile(process.env.GITHUB_OUTPUT,`needed=${result.needed}\n`);
  console.log(JSON.stringify({operation:'pdf-preflight',...result}));
 }
-main().catch(()=>{console.error(JSON.stringify({operation:'pdf-preflight',error:'사전 조회가 실패했습니다. DB 설정을 확인하세요.'}));process.exitCode=1;}).finally(()=>getDocumentPool().end());
+main().catch(error=>{console.error(JSON.stringify({operation:'pdf-preflight',error:'사전 조회가 실패했습니다. DB 설정을 확인하세요.',diagnostic:diagnosticError(error)}));process.exitCode=1;}).finally(()=>getDocumentPool().end());

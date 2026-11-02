@@ -1,19 +1,18 @@
 import {expect,it} from 'vitest';
-import {sanitizeDiagnostic,diagnosticError,ExtractionError} from './diagnostics';
+import {sanitizeDiagnostic,diagnosticError,sanitizeStoredDiagnostic,ExtractionError} from './diagnostics';
 import {classifyExtractionError} from './errors';
 
-it('원본 연결 오류의 속성만 기존 메시지에 보존하고 접속 완료 IP로 해석하지 않습니다',()=>{
+it('연결 속성을 메시지에 섞지 않고 원인 객체에 보존합니다',()=>{
  const cause=Object.assign(new Error('연결 실패'),{code:'ETIMEDOUT',errno:-1,syscall:'connect',address:'192.0.2.1',port:443});
  const value=diagnosticError(new ExtractionError('connection_failed','다운로드 연결 실패',{cause}));
- expect(value.cause?.message).toContain('address=192.0.2.1');
- expect(value.cause?.message).toContain('code=ETIMEDOUT');
- expect(value.cause?.message).toContain('원본 오류의 연결 대상');
- expect(Object.keys(value.cause!)).not.toContain('address');
+ expect(value).toMatchObject({code:'connection_failed',message:'다운로드 연결 실패',cause:{message:'연결 실패',code:'ETIMEDOUT',address:'192.0.2.1',port:443}});
 });
-it('원본에 IP가 없으면 별도 DNS 주소로 보충하지 않고 미확인으로 표시합니다',()=>{
- expect(diagnosticError(new ExtractionError('connection_failed','연결 실패')).message).toContain('원래 요청의 접속 IP 미확인');
+it('객체와 복수 하위 오류를 프로세스 JSON과 저장 정제 후에도 보존합니다',()=>{
+ const value=diagnosticError({name:'DownloadError',message:'failed',code:'connection_failed',cause:{code:'ECONNRESET',status:502,extra:{attempt:2}},errors:[{code:'EHOSTUNREACH',address:'192.0.2.2'}]});
+ const result=sanitizeStoredDiagnostic(JSON.parse(JSON.stringify(value)));
+ expect(result).toMatchObject({cause:{code:'ECONNRESET',status:502,extra:{attempt:2}},errors:[{code:'EHOSTUNREACH',address:'192.0.2.2'}]});
+ expect(JSON.stringify(sanitizeStoredDiagnostic({...value,token:'private-value'}))).not.toContain('private-value');
 });
-
 it('URL 인증·쿼리와 연결 문자열·토큰을 오류에서 제거하고 길이를 제한합니다',()=>{
  const value=sanitizeDiagnostic('https://alice:password@example.com/file?token=secret#private postgres://u:pass@db/name Authorization: Bearer abc123 Cookie: session=private');
  expect(value).not.toMatch(/password|secret|private|abc123|session=|u:pass/);

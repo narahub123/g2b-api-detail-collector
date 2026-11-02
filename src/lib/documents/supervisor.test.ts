@@ -35,7 +35,11 @@ describe("PDF 작업 프로세스 경계", () => {
   it("시간 초과로 멈춘 프로세스를 종료하고 임시 경로를 지웁니다", async () => {
     const before = (await readdir(tmpdir())).filter(name => name.startsWith("g2b-pdf-worker-"));
     const path = await script("setInterval(()=>{},1000);");
-    await expect(superviseExtraction("id", "key", new AbortController().signal, { script: path, timeoutMs: 800 })).rejects.toThrow("시간");
+    const error=await superviseExtraction("id", "key", new AbortController().signal, { script: path, timeoutMs: 800 }).catch(error=>error);
+    expect(error).toMatchObject({code:'time_limit',message:expect.stringContaining('시간')});
+    expect(Object.hasOwn(error,'exitCode')).toBe(true);
+    expect(Object.hasOwn(error,'signal')).toBe(true);
+    expect(error.cause).toBeUndefined();
     expect((await readdir(tmpdir())).filter(name => name.startsWith("g2b-pdf-worker-"))).toEqual(before);
   });
   it("다운로드가 끝나기 전에도 크기를 제한합니다", async () => {
@@ -52,4 +56,38 @@ describe("PDF 작업 프로세스 경계", () => {
     const stat = await readFile(`/proc/${pid}/stat`, "utf8").catch(() => "");
     expect(!stat || stat.slice(stat.lastIndexOf(")") + 2).startsWith("Z ")).toBe(true);
   });
+});
+
+it('실제 자식 오류가 작업기와 SQL 저장 인자까지 확장 속성을 유지합니다',async()=>{
+ const {pathToFileURL}=await import('node:url');
+ const {resolve}=await import('node:path');
+ const {DocumentQueue}=await import('./queue');
+ const {runBatch}=await import('./worker');
+ const moduleUrl=pathToFileURL(resolve('src/lib/documents/diagnostics.ts')).href;
+ const path=await script(`const {diagnosticError,ExtractionError}=await import(${JSON.stringify(moduleUrl)});
+ const cause=Object.assign(new AggregateError([{code:'EHOSTUNREACH',address:'192.0.2.2'}],'network'),{code:'ETIMEDOUT',errno:-1,syscall:'connect',address:'192.0.2.1',port:443,status:502,extra:{attempt:2},token:'private-token'});
+ const error=new ExtractionError('connection_failed','download failed',{cause});
+ await writeFile(join(dir,'error.json'),JSON.stringify({code:error.code,error:error.message,diagnostic:diagnosticError(error)}));process.exitCode=1;`);
+ let owner='';
+ const query=vi.fn(async(sql:string,_params?:unknown[])=>{
+  if(sql.includes(' valid FROM'))return {rows:[{valid:true}]};
+  if(sql.includes('SELECT d.*'))return {rows:[{id:'doc',active_chain_id:'chain',current_run_id:'run'}]};
+  if(sql.includes('SELECT * FROM'))return {rows:[{id:'run',status:'processing',owner_token:owner,chain_id:'chain',attempt_number:3}]};
+  return {rows:[]};
+ });
+ const queue=new DocumentQueue({connect:async()=>({query,release:vi.fn()})} as never);
+ const store={acquire:async(token:string)=>{owner=token;return true;},release:async()=>{},renew:async()=>true,
+  recover:async()=>({checked:0,recovered:0,exhausted:0}),claim:async()=>({id:'run',notice_key:'key',source:'manual',attempt_number:3}),
+  readyCounts:async()=>({manual:0,initial:0,reextract:0}),fail:queue.fail.bind(queue)};
+ let received:unknown;
+ await runBatch(store as never,{mode:'local',limit:1,extract:async()=>{
+  try{return await superviseExtraction('run','key',new AbortController().signal,{script:path});}catch(error){received=error;throw error;}
+ }});
+ expect(received).toMatchObject({code:'connection_failed',cause:{cause:{code:'ETIMEDOUT'}},diagnostic:{exitCode:1,signal:null}});
+ const update=query.mock.calls.find(([sql])=>sql.includes('diagnostic_error=$6'))!;
+ expect(update[1]?.[2]).toBe('connection_failed');
+ const stored=JSON.parse(update[1]?.[5] as string);
+ expect(stored).toMatchObject({code:'connection_failed',exitCode:1,signal:null,cause:{code:'ETIMEDOUT',errno:-1,syscall:'connect',address:'192.0.2.1',port:443,status:502,extra:{attempt:2},errors:[{code:'EHOSTUNREACH',address:'192.0.2.2'}]}});
+ expect(stored.cause.stack).toContain('AggregateError');
+ expect(JSON.stringify(stored)).not.toContain('private-token');
 });
