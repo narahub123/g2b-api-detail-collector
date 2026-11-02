@@ -6,12 +6,14 @@ import type { PdfResult } from "./contract";
 import { parseAttachmentDownloadUrl } from "../g2b/attachment-links";
 import {sanitizeStoredDiagnostic} from './diagnostics';
 import type {DiagnosticError,ExtractionProgress} from './diagnostics';
+import { advanceStageTimings, finishStageTimings } from './stage-timings';
+import type { StageTiming, StageOutcome } from './stage-timings';
 
 import { EXTRACTOR_VERSION } from "./extractor-version";
 export { EXTRACTOR_VERSION } from "./extractor-version";
 export type Failure = { code: string; message: string; retry: boolean; status?: "failed" | "interrupted" | "unsupported"; diagnostic?:DiagnosticError };
 export type QueueRun = { id: string; document_id: string; chain_id: string; source: string; status: string;
-  attempt_number: number; retry_eligible: boolean; finished_at: Date; notice_key: string; file_no: string; seq: number };
+  attempt_number: number; retry_eligible: boolean; finished_at: Date; notice_key: string; file_no: string; seq: number; stage_timings?:StageTiming[] };
 
 /** 짧은 트랜잭션으로 작업기 소유권과 문서 단위 배타성을 보장합니다. */
 export class DocumentQueue {
@@ -102,6 +104,15 @@ export class DocumentQueue {
     if(!run || run.status!=="processing" || run.owner_token!==token || doc.active_chain_id!==run.chain_id || doc.current_run_id!==id) throw new Error("PDF 실행 소유권이 올바르지 않습니다.");
     return {doc,run:run as QueueRun};
   }
+  /** 마지막 단계는 DB 종료 시각으로 마감하고 강제 중단은 마지막 관측 시각까지만 추정합니다. */
+  private async finishTimings(db:pg.PoolClient,id:string,outcome:StageOutcome,estimated=false){
+    const row=(await db.query(`SELECT stage_timings,last_progress_at,clock_timestamp() AS at FROM ${this.schema}.attachment_extraction_runs WHERE id=$1`,[id])).rows[0];
+    if(!row)return;
+    const at=estimated?row.last_progress_at:row.at;
+    if(!at)return;
+    const timings=finishStageTimings(row.stage_timings??[],new Date(at).toISOString(),outcome,estimated);
+    await db.query(`UPDATE ${this.schema}.attachment_extraction_runs SET stage_timings=$2::jsonb WHERE id=$1`,[id,JSON.stringify(timings)]);
+  }
   /** 준비된 수동 요청을 먼저 선점하며 실행 중 파일은 건드리지 않습니다. */
   async claim(token: string, manualOnly=false, noticeKey?: string): Promise<QueueRun | null> {
     return this.transaction(async db=>{
@@ -121,8 +132,11 @@ export class DocumentQueue {
     await this.transaction(async db=>{
       const {doc}=await this.processing(db,token,id);
       const status=result.characterCount?"completed":"no_text";
-      await db.query(`UPDATE ${this.schema}.attachment_extraction_runs SET status=$2,pages=$3::jsonb,page_count=$4,character_count=$5,extractor_version=$6,file_hash=$7,peak_memory_bytes=$8,
-        finished_at=clock_timestamp(),elapsed_ms=extract(epoch FROM(clock_timestamp()-started_at))*1000 WHERE id=$1`,[id,status,JSON.stringify(result.pages),result.pageCount,result.characterCount,result.extractorVersion,result.fileHash,peakMemory]);
+      if(status==='completed')await db.query(`INSERT INTO ${this.schema}.attachment_document_contents(document_id,run_id,pages)
+        VALUES($1,$2,$3::jsonb) ON CONFLICT(document_id) DO UPDATE SET run_id=EXCLUDED.run_id,pages=EXCLUDED.pages,updated_at=clock_timestamp()`,[doc.id,id,JSON.stringify(result.pages)]);
+      await this.finishTimings(db,id,'completed');
+      await db.query(`UPDATE ${this.schema}.attachment_extraction_runs SET status=$2,page_count=$3,character_count=$4,extractor_version=$5,file_hash=$6,peak_memory_bytes=$7,
+        finished_at=clock_timestamp(),elapsed_ms=COALESCE(elapsed_ms,0)+extract(epoch FROM(clock_timestamp()-started_at))*1000 WHERE id=$1`,[id,status,result.pageCount,result.characterCount,result.extractorVersion,result.fileHash,peakMemory]);
       await db.query(`UPDATE ${this.schema}.attachment_documents SET current_run_id=NULL,last_success_run_id=CASE WHEN $3='completed' THEN $2::uuid ELSE last_success_run_id END,updated_at=now() WHERE id=$1`,[doc.id,id,status]);
       await this.owned(db,token);
     });
@@ -130,12 +144,14 @@ export class DocumentQueue {
   /** 현재 실행 소유권과 진행 시각을 확인해 지연된 메시지의 덮어쓰기를 막습니다. */
   async progress(token:string,id:string,value:ExtractionProgress){
     await this.transaction(async db=>{
-      await this.processing(db,token,id);
+      const {run}=await this.processing(db,token,id);
+      const previous=run.stage_timings?.at(-1);
+      if(previous&&Date.parse(value.at)<Date.parse(previous.endedAt??previous.startedAt))return;
       await db.query(`UPDATE ${this.schema}.attachment_extraction_runs SET
         stage_started_at=CASE WHEN stage IS DISTINCT FROM $3 THEN $4::timestamptz ELSE stage_started_at END,
-        stage=$3,last_progress_at=$4,current_page=COALESCE($5,current_page),completed_pages=COALESCE($6,completed_pages),total_pages=COALESCE($7,total_pages)
+        stage=$3,last_progress_at=$4,current_page=COALESCE($5,current_page),completed_pages=COALESCE($6,completed_pages),total_pages=COALESCE($7,total_pages),stage_timings=$8::jsonb
         WHERE id=$1 AND owner_token=$2 AND status='processing' AND (last_progress_at IS NULL OR last_progress_at<=$4::timestamptz)`,
-        [id,token,value.stage,value.at,value.currentPage??null,value.completedPages??null,value.totalPages??null]);
+        [id,token,value.stage,value.at,value.currentPage??null,value.completedPages??null,value.totalPages??null,JSON.stringify(advanceStageTimings(run.stage_timings??[],value))]);
     });
   }
   /** 결과 저장 실패는 추출 실패로 바꾸지 않고 복구할 실행에 기술 정보만 남깁니다. */
@@ -149,7 +165,8 @@ export class DocumentQueue {
   async deferClaim(token:string,id:string,maintenance?:MaintenanceInfo){
     await this.transaction(async db=>{
       await this.processing(db,token,id);
-      await db.query(`UPDATE ${this.schema}.attachment_extraction_runs SET status='queued',owner_token=NULL,started_at=NULL,stage=NULL,stage_started_at=NULL,last_progress_at=NULL,current_page=NULL,completed_pages=NULL,total_pages=NULL,error_code=$2,error=$3,diagnostic_error=NULL WHERE id=$1`,[id,maintenance?.code??null,maintenance?.message??null]);
+      await this.finishTimings(db,id,'deferred');
+      await db.query(`UPDATE ${this.schema}.attachment_extraction_runs SET status='queued',owner_token=NULL,elapsed_ms=COALESCE(elapsed_ms,0)+extract(epoch FROM(clock_timestamp()-started_at))*1000,started_at=NULL,stage=NULL,stage_started_at=NULL,last_progress_at=NULL,current_page=NULL,completed_pages=NULL,total_pages=NULL,error_code=$2,error=$3,diagnostic_error=NULL WHERE id=$1`,[id,maintenance?.code??null,maintenance?.message??null]);
       await this.owned(db,token);
     });
   }
@@ -170,7 +187,8 @@ export class DocumentQueue {
   async fail(token:string,id:string,failure:Failure) {
     await this.transaction(async db=>{
       const {doc,run}=await this.processing(db,token,id);
-      await db.query(`UPDATE ${this.schema}.attachment_extraction_runs SET status=$2,error_code=$3,error=$4,retry_eligible=$5,diagnostic_error=$6::jsonb,finished_at=clock_timestamp(),elapsed_ms=extract(epoch FROM(clock_timestamp()-started_at))*1000 WHERE id=$1`,[id,failure.status??"failed",failure.code,failure.message.slice(0,1000),failure.retry,failure.diagnostic?JSON.stringify(sanitizeStoredDiagnostic(failure.diagnostic)):null]);
+      await this.finishTimings(db,id,failure.status==='interrupted'?'interrupted':'failed');
+      await db.query(`UPDATE ${this.schema}.attachment_extraction_runs SET status=$2,error_code=$3,error=$4,retry_eligible=$5,diagnostic_error=$6::jsonb,finished_at=clock_timestamp(),elapsed_ms=COALESCE(elapsed_ms,0)+extract(epoch FROM(clock_timestamp()-started_at))*1000 WHERE id=$1`,[id,failure.status??"failed",failure.code,failure.message.slice(0,1000),failure.retry,failure.diagnostic?JSON.stringify(sanitizeStoredDiagnostic(failure.diagnostic)):null]);
       await db.query(`UPDATE ${this.schema}.attachment_documents SET current_run_id=NULL,updated_at=now() WHERE id=$1`,[doc.id]);
       await this.retry(db,{...run,retry_eligible:failure.retry});
       await this.owned(db,token);
@@ -190,7 +208,8 @@ export class DocumentQueue {
         if(run.status==='processing') {
           const owner=(await db.query(`SELECT owner_token FROM ${this.schema}.attachment_extraction_runs WHERE id=$1`,[run.id])).rows[0].owner_token;
           if(owner===token) continue;
-          await db.query(`UPDATE ${this.schema}.attachment_extraction_runs SET status='interrupted',retry_eligible=true,error_code='worker_interrupted',error='이전 작업기의 임대가 만료되었습니다.',finished_at=clock_timestamp(),elapsed_ms=extract(epoch FROM(clock_timestamp()-started_at))*1000 WHERE id=$1`,[run.id]);
+          await this.finishTimings(db,run.id,'interrupted',true);
+          await db.query(`UPDATE ${this.schema}.attachment_extraction_runs SET status='interrupted',retry_eligible=true,error_code='worker_interrupted',error='이전 작업기의 임대가 만료되었습니다.',finished_at=clock_timestamp(),elapsed_ms=COALESCE(elapsed_ms,0)+extract(epoch FROM(clock_timestamp()-started_at))*1000 WHERE id=$1`,[run.id]);
           run.retry_eligible=true; recovered++;
           await db.query(`UPDATE ${this.schema}.attachment_documents SET current_run_id=NULL,updated_at=now() WHERE id=$1`,[doc.id]);
         }

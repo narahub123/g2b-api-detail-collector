@@ -33,6 +33,8 @@ it.skipIf(!process.env.LIVE_DB_TEST || !process.env.DATABASE_URL)("운영 대기
     await pool.query(`CREATE TABLE ${schema}.notices(key text PRIMARY KEY,detail jsonb)`);
     await pool.query((await readFile("db/migrations/0006-document-extraction.sql", "utf8")).replaceAll("public.",`${schema}.`));
     await pool.query((await readFile('db/migrations/0008-extraction-diagnostics.sql','utf8')).replaceAll('public.',`${schema}.`));
+  await pool.query((await readFile('db/migrations/0010-single-document-content.sql','utf8')).replaceAll('public.',`${schema}.`));
+  await pool.query((await readFile('db/migrations/0011-stage-timings.sql','utf8')).replaceAll('public.',`${schema}.`));
     await pool.query(`INSERT INTO ${schema}.notices VALUES($1,$2)`,[key,JSON.stringify({attachments:[file(1),file(2)]})]);
     const requests = await Promise.all([q.enqueue(key,fileNo,1,"automatic"),q.enqueue(key,fileNo,1,"manual")]);
     expect(requests[0].id).toBe(requests[1].id);
@@ -62,6 +64,7 @@ it.skipIf(!process.env.LIVE_DB_TEST || !process.env.DATABASE_URL)("운영 대기
     }
     await expect(failingQueue(pool,schema,/last_success_run_id=CASE/).complete(token,fresh.id,{pages:[{pageNumber:1,text:"실패한 저장"}],pageCount:1,characterCount:6,extractorVersion:"test",fileHash:"new"},null)).rejects.toThrow("주입한");
     expect((await pool.query(`SELECT last_success_run_id FROM ${schema}.attachment_documents WHERE id=$1`,[fresh.document_id])).rows[0].last_success_run_id).toBe(second.id);
+    expect((await pool.query(`SELECT run_id,pages FROM ${schema}.attachment_document_contents WHERE document_id=$1`,[fresh.document_id])).rows[0]).toEqual({run_id:second.id,pages:[{pageNumber:1,text:'원문'}]});
     // 커밋 후 응답이 유실돼도 이미 만든 후속 요청을 복구가 복제하지 않습니다.
     await expect(failingQueue(pool,schema,/^COMMIT$/,true).fail(token,fresh.id,{code:"network",message:"일시 오류",retry:true})).rejects.toThrow("주입한");
     let rows=(await pool.query(`SELECT * FROM ${schema}.attachment_extraction_runs WHERE document_id=$1 ORDER BY requested_at,attempt_number`,[fresh.document_id])).rows;
