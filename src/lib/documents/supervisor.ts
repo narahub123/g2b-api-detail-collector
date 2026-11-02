@@ -21,7 +21,7 @@ async function directoryBytes(path: string): Promise<number> {
   return bytes;
 }
 
-/** 파서가 멈춰도 브라우저 자식 프로세스까지 강제 종료하고 임시 자료를 정리합니다. */
+/** 자식의 오류 분류를 보존하며 제한 초과 시 하위 프로세스와 임시 자료를 정리합니다. */
 export async function superviseExtraction(id: string, key: string, signal: AbortSignal,
   options: { timeoutMs?: number; script?: string; maxBytes?: number; ownerToken?: string; onProgress?:(value:ExtractionProgress)=>void } = {}): Promise<{ result: PdfResult; peakMemory: number | null }> {
   const directory = await mkdtemp(join(tmpdir(), "g2b-pdf-worker-"));
@@ -79,10 +79,12 @@ export async function superviseExtraction(id: string, key: string, signal: Abort
     });
     if (failure) throw new ExtractionError(/시간/.test(failure)?'time_limit':/크기|50MiB/.test(failure)?'size_limit':'process_exit',failure,{exitCode:code,signal:exitSignal});
     if (code !== 0) {
-      const saved = await readFile(join(directory, "error.json"), "utf8").then(value => JSON.parse(value) as {error:string;diagnostic?:DiagnosticError;maintenance?:unknown}).catch(() => null);
+      const saved = await readFile(join(directory, "error.json"), "utf8").then(value => JSON.parse(value) as {code?:unknown;error:string;diagnostic?:DiagnosticError;maintenance?:unknown}).catch(() => null);
       const maintenance=restoreMaintenance(saved?.maintenance);
       if(maintenance)throw maintenance;
-      const error=new ExtractionError(saved?'child_error':'process_exit',saved?.error??'PDF 작업 프로세스가 종료되었습니다.',{exitCode:code,signal:exitSignal});
+      // 사람이 읽는 안내로 재분류하면 연결 오류가 영구 실패로 바뀌므로 원래 코드를 유지합니다.
+      const errorCode=typeof saved?.code==='string'&&/^[a-z_]{1,80}$/.test(saved.code)?saved.code:saved?'child_error':'process_exit';
+      const error=new ExtractionError(errorCode,saved?.error??'PDF 작업 프로세스가 종료되었습니다.',{exitCode:code,signal:exitSignal});
       if(saved?.diagnostic)error.diagnostic={...saved.diagnostic,exitCode:code,signal:exitSignal};
       throw error;
     }
