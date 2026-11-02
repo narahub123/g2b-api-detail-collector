@@ -1,4 +1,4 @@
-import type { StructuredField, StructuredSection } from "./detail-page";
+import type { Attachment, StructuredField, StructuredSection } from "./detail-page";
 import type { StructuredTable } from "./structured-table";
 
 type ModalContent = {
@@ -7,7 +7,7 @@ type ModalContent = {
   fields: StructuredField[];
   tables: StructuredTable[];
   sections?: StructuredSection[];
-  attachments?: { name: string; url: string }[];
+  attachments?: Attachment[];
 };
 
 /**

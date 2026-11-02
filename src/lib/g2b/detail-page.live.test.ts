@@ -6,8 +6,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { NoticeComparison } from "../../components/NoticeComparison";
 import { extractDetailPage, scrapeDetailPage, serviceDetailUrl } from "./detail-page";
-import { handleAttachmentRequest, openG2bDownload } from "./attachment-download";
-import { attachmentDownloadUrl } from "./attachment-links";
+import {openHttpDownload} from './attachment-download';
 import { tableForUserDisplay } from "./structured-table";
 
 it.skipIf(!process.env.LIVE_G2B)("aligns the live attachment grid using colgroup widths", async () => {
@@ -28,25 +27,23 @@ it.skipIf(!process.env.LIVE_G2B)("실제 R26BK01784794 사전규격 모달의 �
   const { detail } = await scrapeDetailPage(serviceDetailUrl("R26BK01784794", "000"));
   const capture = detail.modalCaptures?.find((item) => item.modal.title === "사전규격상세조회");
   const attachment = capture?.modal.attachments?.find((item) => item.name.includes("제안요청서.hwpx"));
-  expect(attachment?.url).toMatch(/^\/api\/attachments\/R26BK01784794--000\?fileNo=[0-9a-f-]+&seq=1&modal=\d+$/);
-  expect(detail.modalAttachmentSources).toContainEqual({ url: attachment?.url, path: capture?.trigger.path });
+  expect(attachment?.url).toContain('/pn/pnz/pnza/UntyAtchFile/downloadFile.do?bfSpecRegNo=R26BD00281109');
+  expect(attachment?.url).toContain('fileType=BFDTL');
+  expect(attachment?.seq).toBe(1);
+  expect(detail.modalAttachmentSources).toContainEqual(expect.objectContaining({url:attachment?.url,fileNo:attachment?.fileNo,seq:1,path:capture?.trigger.path}));
 }, 180_000);
 
-it.skipIf(!process.env.LIVE_G2B)("resolves the R26BK01765444 proposal document and downloads it through the app", async () => {
-  const key = "R26BK01765444--000";
-  const fileNo = "de557b90-5d96-430d-9dd4-06b2d7b3627c";
+it.skipIf(!process.env.LIVE_G2B)("수집한 직접 공고 첨부 주소로 브라우저 재접속 없이 파일을 받습니다", async () => {
   const { detail } = await scrapeDetailPage(serviceDetailUrl("R26BK01765444", "000"));
-  expect(detail.attachments.find((file) => file.name.includes("제안요청서_업무용"))?.url)
-    .toBe(attachmentDownloadUrl(key, fileNo, 1));
   expect(detail.attachments.filter((file) => file.name.includes("입찰공고서_국가_일반"))
     .map((file) => file.url)).toEqual([
     expect.stringContaining("fileSeq=1"), expect.stringContaining("fileSeq=2")
   ]);
-  const request = new Request(`http://localhost${attachmentDownloadUrl(key, fileNo, 1)}`);
-  const response = await handleAttachmentRequest(request, key, { load: async () => ({ detail }),
-    open: (noticeKey, fileId, seq, signal) => openG2bDownload(noticeKey, fileId, seq, signal) });
-  expect(response.status).toBe(200);
-  expect((await response.arrayBuffer()).byteLength).toBeGreaterThan(0);
+  const file=detail.attachments.find(file=>file.name.includes('입찰공고서_국가_일반')&&file.name.endsWith('.pdf'))!;
+  expect(file.fileNo).toBeTruthy();expect(file.seq).toBe(2);
+  const opened=await openHttpDownload(file.url!,new AbortController().signal);
+  try{let size=0;for await(const chunk of opened.stream)size+=chunk.length;expect(size).toBeGreaterThan(0);}
+  finally{await opened.cleanup();}
 }, 180_000);
 
 const tableShape = (element: Element) => {

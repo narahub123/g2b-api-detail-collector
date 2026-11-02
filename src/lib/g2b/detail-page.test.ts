@@ -3,6 +3,8 @@ import { extractDetailPage, extractModalStructure, extractRelatedNoticeKeys } fr
 import { fieldText } from "./field-value";
 
 const url = "https://www.g2b.go.kr/link/PNPE027_01/single/?bidPbancNo=R26BK1&bidPbancOrd=000";
+const attachmentContext={kind:'notice' as const,number:'R26BK1',order:'000',businessCode:'03'};
+const attachmentFileNo='de557b90-5d96-430d-9dd4-06b2d7b3627c';
 const heading = (title: string, tag = "h4") =>
   `<div class="w2group dfbox"><div class="w2group fl"><${tag} class="w2textbox df_tit fl">${title}</${tag}></div></div>`;
 const simpleTable = (columns: string[], rows: (string | null)[][]) => ({
@@ -524,7 +526,7 @@ describe("extractDetailPage", () => {
 
   it("uses the attachment sequence returned by the page instead of its row position", () => {
     const html = `<table><tr><th>공고명</th><td>용역</td></tr></table><table><tr><td col_id="orgnlAtchFileNm">공고문.pdf</td></tr></table>`;
-    const result = extractDetailPage(html, url, [{ orgnlAtchFileNm: "공고문.pdf", atchFileSqno: 7 }]);
+    const result = extractDetailPage(html, url, [{ orgnlAtchFileNm: "공고문.pdf", atchFileSqno: 7,untyAtchFileNo:attachmentFileNo,context:attachmentContext }]);
     expect(result.sections?.[0]).not.toHaveProperty("visible");
     expect(result.sections?.[0].fields[0]).toEqual({ label: "공고명", value: [{ text: "용역", visible: true }], visible: true });
     expect(result.attachments[0].url).toContain("fileSeq=7");
@@ -539,25 +541,25 @@ describe("extractDetailPage", () => {
       { cellId: "file_b", name: "같은 이름.hwpx", fileNo: "de557b90-5d96-430d-9dd4-06b2d7b3627d", seq: 1 }
     ]);
     expect(result.attachments).toHaveLength(2);
-    expect(result.attachments[0].url).toContain("fileNo=de557b90-5d96-430d-9dd4-06b2d7b3627c");
-    expect(result.attachments[1].url).toContain("fileNo=de557b90-5d96-430d-9dd4-06b2d7b3627d");
+    expect(result.attachments[0].fileNo).toBe("de557b90-5d96-430d-9dd4-06b2d7b3627c");
+    expect(result.attachments[1].fileNo).toBe("de557b90-5d96-430d-9dd4-06b2d7b3627d");
   });
 
   it("does not borrow a bid attachment URL for an unidentified clickable file of the same name", () => {
     const html = `<table><tr><th>공고명</th><td>용역</td></tr></table>
       <table><tr><td id="click_file" col_id="orgnlAtchFileNm"><a>같은 이름.hwpx</a></td></tr>
       <tr><td id="bid_file" col_id="orgnlAtchFileNm">같은 이름.hwpx</td></tr></table>`;
-    const result = extractDetailPage(html, url, [{ orgnlAtchFileNm: "같은 이름.hwpx", atchFileSqno: 2 }]);
+    const result = extractDetailPage(html, url, [{ orgnlAtchFileNm: "같은 이름.hwpx", atchFileSqno: 2,untyAtchFileNo:attachmentFileNo,context:attachmentContext }]);
     expect(result.attachments).toEqual([
       { name: "같은 이름.hwpx", url: null },
-      { name: "같은 이름.hwpx", url: expect.stringContaining("fileSeq=2") }
+      { name: "같은 이름.hwpx", url: expect.stringContaining("fileSeq=2"),fileNo:attachmentFileNo,seq:2 }
     ]);
   });
 
   it("matches HTML-encoded metadata filenames to rendered attachment names", () => {
     const html = `<table><tr><th>공고명</th><td>용역</td></tr></table>
       <table><tr><td col_id="orgnlAtchFileNm">(공고문) 유가공업 실태조사 용역.hwpx</td></tr></table>`;
-    const result = extractDetailPage(html, url, [{ orgnlAtchFileNm: "&#40;공고문&#41; 유가공업 실태조사 용역.hwpx", atchFileSqno: 1 }]);
+    const result = extractDetailPage(html, url, [{ orgnlAtchFileNm: "&#40;공고문&#41; 유가공업 실태조사 용역.hwpx", atchFileSqno: 1,untyAtchFileNo:attachmentFileNo,context:attachmentContext }]);
     expect(result.attachments[0].url).toContain("fileSeq=1");
   });
 
@@ -565,10 +567,10 @@ describe("extractDetailPage", () => {
     const html = `<table><tr><th>공고명</th><td>용역</td></tr></table>
       <table><tr><td col_id="orgnlAtchFileNm">2. 공고문(최종).pdf</td></tr></table>`;
     const result = extractDetailPage(html, url, [
-      { orgnlAtchFileNm: "2. 공고문&#40;최종&#41;.pdf", atchFileSqno: 1, scrnIndtYn: "Y" },
-      { orgnlAtchFileNm: "3. 제안요청서.hwp", atchFileSqno: 2, scrnIndtYn: "Y" },
-      { orgnlAtchFileNm: "긴급입찰사유서.hwp", atchFileSqno: 3, scrnIndtYn: "Y" },
-      { orgnlAtchFileNm: "숨긴 파일.hwp", atchFileSqno: 4, scrnIndtYn: "N" },
+      { orgnlAtchFileNm: "2. 공고문&#40;최종&#41;.pdf", atchFileSqno: 1, scrnIndtYn: "Y",untyAtchFileNo:attachmentFileNo,context:attachmentContext },
+      { orgnlAtchFileNm: "3. 제안요청서.hwp", atchFileSqno: 2, scrnIndtYn: "Y",untyAtchFileNo:attachmentFileNo,context:attachmentContext },
+      { orgnlAtchFileNm: "긴급입찰사유서.hwp", atchFileSqno: 3, scrnIndtYn: "Y",untyAtchFileNo:attachmentFileNo,context:attachmentContext },
+      { orgnlAtchFileNm: "숨긴 파일.hwp", atchFileSqno: 4, scrnIndtYn: "N",untyAtchFileNo:attachmentFileNo,context:attachmentContext },
     ]);
     expect(result.attachments.map((item) => item.name)).toEqual([
       "2. 공고문(최종).pdf", "3. 제안요청서.hwp", "긴급입찰사유서.hwp"
@@ -606,7 +608,7 @@ describe("extractModalStructure", () => {
       <td col_id="orgnlAtchFileNm"><a href="/pn/file.do?seq=1">계획서.hwp</a></td>
       <td col_id="orgnlAtchFileNm"><a href="javascript:void(0)">미확인.hwp</a></td>
     </tr></table></div>`, "https://www.g2b.go.kr/");
-    expect(modal.attachments).toEqual([{ name: "계획서.hwp", url: "https://www.g2b.go.kr/pn/file.do?seq=1" }]);
+    expect(modal.attachments).toEqual([{ name: "계획서.hwp", url: "https://www.g2b.go.kr/pn/file.do?seq=1" },{name:'미확인.hwp',url:null}]);
   });
   it("같은 WebSquare 표에 상세페이지와 모달의 열·표시 규칙을 동일하게 적용한다", () => {
     const grid = `<table id="amount_grid"><colgroup><col style="width:0px"><col style="width:120px"></colgroup>

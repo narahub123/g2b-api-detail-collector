@@ -1,9 +1,11 @@
+import {testAttachment} from './test-attachments';
 import {randomUUID} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
 import pg from 'pg';
 import {expect,it} from 'vitest';
 import {probePdfWork} from './preflight';
 import {EXTRACTOR_VERSION} from './extractor-version';
+import {DocumentQueue} from './queue';
 it.skipIf(!process.env.LIVE_DB_TEST||!process.env.DATABASE_URL)('읽기 전용 사전 조회는 대기·만료·후속 누락·새 PDF를 구분하고 DB를 변경하지 않습니다',async()=>{
  const pool=new pg.Pool({connectionString:process.env.DATABASE_URL,max:5}),schema=`pdf_probe_${randomUUID().replaceAll('-','')}`;
  const key='R26BK01797756--001',file=randomUUID(),doc=randomUUID(),run=randomUUID();
@@ -14,11 +16,24 @@ it.skipIf(!process.env.LIVE_DB_TEST||!process.env.DATABASE_URL)('읽기 전용 �
   await pool.query((await readFile('db/migrations/0010-single-document-content.sql','utf8')).replaceAll('public.',`${schema}.`));
   await pool.query((await readFile('db/migrations/0011-stage-timings.sql','utf8')).replaceAll('public.',`${schema}.`));
   await pool.query((await readFile('db/migrations/0012-extraction-priority.sql','utf8')).replaceAll('public.',`${schema}.`));
-  await pool.query(`INSERT INTO ${schema}.notices VALUES($1,$2)`,[key,JSON.stringify({attachments:[{name:'공고.pdf',url:`/api/attachments/${key}?fileNo=${file}&seq=1`} ]})]);
+  await pool.query(`INSERT INTO ${schema}.notices VALUES($1,$2)`,[key,JSON.stringify({attachments:[testAttachment(key,file,1,'공고.pdf') ]})]);
   expect((await probePdfWork(pool,schema,{discover:false})).needed).toBe(false);
   expect((await probePdfWork(pool,schema,{discover:true})).discovery).toBe(true);
-  await pool.query(`INSERT INTO ${schema}.attachment_documents(id,notice_key,file_no,seq,filename,attachment_url) VALUES($1,$2,$3,1,'공고.pdf','url')`,[doc,key,file]);
-  await pool.query(`INSERT INTO ${schema}.attachment_extraction_runs(id,document_id,chain_id,source,status,filename,attachment_url,next_attempt_at) VALUES($1,$2,$1,'manual','queued','공고.pdf','url',now()+interval '1 hour')`,[run,doc]);
+  // 보류 파일의 주소가 이미 직접 형식이어도 자동 실행·선점 대상에 포함하지 않습니다.
+  const heldNo='b0de33f9-8021-4b13-8b5c-8e000a9cc20a',heldDoc=randomUUID(),heldRun=randomUUID();
+  await pool.query(`UPDATE ${schema}.notices SET detail=jsonb_set(detail,'{attachments}',(detail->'attachments')||$2::jsonb) WHERE key=$1`,[key,JSON.stringify([testAttachment(key,heldNo,1,'보류.pdf')])]);
+  await pool.query(`INSERT INTO ${schema}.attachment_documents(id,notice_key,file_no,seq,filename,attachment_url,active_chain_id,current_run_id)
+   VALUES($1,$2,$3,1,'보류.pdf',$4,NULL,NULL)`,[heldDoc,key,heldNo,testAttachment(key,heldNo,1).url]);
+  await pool.query(`INSERT INTO ${schema}.attachment_extraction_runs(id,document_id,chain_id,source,status,filename,attachment_url)
+   VALUES($1,$2,$1,'manual','queued','보류.pdf',$3)`,[heldRun,heldDoc,testAttachment(key,heldNo,1).url]);
+  await pool.query(`UPDATE ${schema}.attachment_documents SET active_chain_id=$2,current_run_id=$2 WHERE id=$1`,[heldDoc,heldRun]);
+  const queue=new DocumentQueue(pool,schema),heldToken=randomUUID();expect(await queue.acquire(heldToken)).toBe(true);
+  expect(await queue.claim(heldToken)).toBeNull();expect(await queue.readyCounts()).toEqual({manual:0,initial:0,reextract:0});
+  await queue.release(heldToken);
+  expect((await probePdfWork(pool,schema,{discover:false})).needed).toBe(false);
+  expect((await pool.query(`SELECT status FROM ${schema}.attachment_extraction_runs WHERE id=$1`,[heldRun])).rows[0].status).toBe('queued');
+  await pool.query(`INSERT INTO ${schema}.attachment_documents(id,notice_key,file_no,seq,filename,attachment_url) VALUES($1,$2,$3,1,'공고.pdf',$4)`,[doc,key,file,testAttachment(key,file,1).url]);
+  await pool.query(`INSERT INTO ${schema}.attachment_extraction_runs(id,document_id,chain_id,source,status,filename,attachment_url,next_attempt_at) VALUES($1,$2,$1,'manual','queued','공고.pdf',$3,now()+interval '1 hour')`,[run,doc,testAttachment(key,file,1).url]);
   await pool.query(`UPDATE ${schema}.attachment_documents SET active_chain_id=$2,current_run_id=$2,latest_run_id=$2 WHERE id=$1`,[doc,run]);
   expect((await probePdfWork(pool,schema,{discover:false})).needed).toBe(false);
   await pool.query(`UPDATE ${schema}.attachment_extraction_runs SET next_attempt_at=now()-interval '1 second' WHERE id=$1`,[run]);
@@ -38,5 +53,7 @@ it.skipIf(!process.env.LIVE_DB_TEST||!process.env.DATABASE_URL)('읽기 전용 �
   // 이전 버전 성공은 새 버전의 자동 발견을 막지 않습니다.
   await pool.query(`UPDATE ${schema}.attachment_extraction_runs SET extractor_version='6.4.299 / reading-order-v1' WHERE id=$1`,[run]);
   expect((await probePdfWork(pool,schema,{discover:true})).discovery).toBe(true);
+  await queue.discover(key);
+  expect((await pool.query(`SELECT is_current FROM ${schema}.attachment_documents WHERE id=$1`,[heldDoc])).rows[0].is_current).toBe(true);
  }finally{await pool.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);await pool.end();}
 },60000);

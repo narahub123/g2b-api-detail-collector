@@ -65,9 +65,9 @@ it('1000페이지를 넘어도 전체 건수에 따른 마지막 페이지로 �
 });
 
 it('현재 페이지의 요청 가능 상태만 일괄 조회하며 내부 첨부 원문은 반환하지 않습니다',async()=>{
- const id='12345678-1234-1234-1234-123456789012',key='notice--001';
+ const id='12345678-1234-1234-1234-123456789012',key='R26BK01784794--001';
  const query=vi.fn().mockResolvedValueOnce({rows:[{document_id:id,latest:null}]}).mockResolvedValueOnce({rows:[{total_count:'1'}]})
-  .mockResolvedValueOnce({rows:[{id,notice_key:key,file_no:id,seq:1,attachments:[{name:'자료.pdf',url:`/api/attachments/${key}?fileNo=${id}&seq=1`}],active:null}]});
+  .mockResolvedValueOnce({rows:[{id,notice_key:key,file_no:id,seq:1,attachments:[{name:'자료.pdf',url:'https://www.g2b.go.kr/pn/pnp/pnpe/UntyAtchFile/downloadFile.do?bidPbancNo=R26BK01784794&bidPbancOrd=001&fileSeq=1&fileType=&prcmBsneSeCd=03',fileNo:id,seq:1}],active:null}]});
  const result=await new DocumentHistoryStore({query} as never).listDocuments(parseHistoryFilters(new URLSearchParams('view=documents')));
  expect(result.items[0].requestState).toEqual({canRequest:true,reason:null,active:null});
  expect(query.mock.calls[2][1]).toEqual([[id]]);

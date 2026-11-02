@@ -6,6 +6,7 @@ import * as cheerio from "cheerio";
 import { extractCommonSections } from "./common-content-extractor";
 import { collectAttachments } from "./attachment-collector";
 import { collectClickDownloads } from "./attachment-identity";
+import {observeAttachmentContexts} from './attachment-context';
 import { tableHasValue } from "./structured-table";
 import { createModalDeduplication } from "./modal-deduplication";
 import type { StructuredTable } from "./structured-table";
@@ -17,6 +18,7 @@ import type {
   StructuredField,
   StructuredSection,
   ClickDownload,
+  Attachment,
   ModalTriggerStep,
 } from "./detail-page";
 
@@ -40,14 +42,13 @@ export function extractModalStructure(html: string, baseUrl?: string,
   sections: StructuredSection[];
   fields: StructuredField[];
   tables: StructuredTable[];
-  attachments: { name: string; url: string }[];
+  attachments: Attachment[];
 } {
   const $ = cheerio.load(html);
   const root = $("[role='dialog']").first().length ? $("[role='dialog']").first() : $("body");
   const title = nonempty(root.find("[id$='_header_title'],.w2window_header_title,h1,h2,h3").first().text());
   const sections = extractCommonSections(html, "modal");
-  const attachments = collectAttachments(html, { baseUrl, includeOtherLinks: true, ...attachmentOptions })
-    .filter((item): item is { name: string; url: string } => Boolean(item.url));
+  const attachments = collectAttachments(html, { baseUrl, includeOtherLinks: true, ...attachmentOptions });
   return { title, sections, fields: sections.flatMap((section) => section.fields),
     tables: sections.flatMap((section) => section.tables), attachments };
 }
@@ -420,6 +421,7 @@ export async function collectModalContents(
 }> {
   // captures에는 저장 기준을 통과한 모달만 담고, failures에는 개별 탐색 오류를 누적합니다.
   const captures: ModalCapture[] = [];
+  observeAttachmentContexts(page);
   const failures: string[] = [];
   // 같은 모달 단계의 클릭 요소를 반복 시도하지 않기 위한 방문 기록입니다.
   const visited = new Set<string>();
@@ -509,6 +511,8 @@ export async function collectModalContents(
             fresh.id ? page.locator(`[id=${JSON.stringify(fresh.id)}]`) : page.locator(MODAL_SELECTOR).last()));
           const structured = extractModalStructure(fresh.html, page.url(),
             { noticeKey, clickDownloads, modalIndex });
+          for(const attachment of structured.attachments)if(!attachment.url)
+            failures.push(`직접 다운로드 문맥을 확인하지 못했습니다: ${attachment.name}`);
           structured.sections = applyPaginatedTables(structured.sections, pagedTables);
           structured.tables = structured.sections.flatMap((section) => section.tables);
           structured.fields = structured.sections.flatMap((section) => section.fields);

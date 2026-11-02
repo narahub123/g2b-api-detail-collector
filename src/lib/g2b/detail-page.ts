@@ -10,6 +10,8 @@ import type { StructuredTable } from "./structured-table";
 import { collectAttachments } from "./attachment-collector";
 import { collectModalContents } from "./modal-collector";
 import { collectClickDownloads } from "./attachment-identity";
+import {attachmentContext,observeAttachmentContexts} from './attachment-context';
+import type {DownloadContext} from './attachment-direct';
 import { fieldText } from "./field-value";
 import { applyPaginatedTables, collectPaginatedTables } from "./table-pagination";
 import type { FieldValuePart } from "./field-value";
@@ -19,9 +21,9 @@ export { collectClickDownloads } from "./attachment-identity";
 
 export type { StructuredTable, StructuredTableCell, StructuredTableContent } from "./structured-table";
 
-export type Attachment = { name: string; url: string | null };
-export type AttachmentMetadata = { orgnlAtchFileNm: string; atchFileSqno: number; scrnIndtYn?: string };
-export type ClickDownload = { cellId: string; name: string; fileNo: string; seq: number };
+export type Attachment = { name: string; url: string | null;fileNo?:string;seq?:number };
+export type AttachmentMetadata = { orgnlAtchFileNm: string; atchFileSqno: number; scrnIndtYn?: string;untyAtchFileNo?:string;context?:DownloadContext };
+export type ClickDownload = { cellId: string; name: string; fileNo: string; seq: number;context?:DownloadContext };
 export type ModalTriggerStep = { id: string; index: number; label: string; value: string };
 export type StructuredField = { label: string; value: FieldValuePart[]; visible?: boolean; tables?: StructuredTable[] };
 export type StructuredSection = { title: string; fields: StructuredField[]; tables: StructuredTable[];
@@ -46,7 +48,7 @@ export type ScrapedDetail = {
   baseAmountCaptures?: ModalCapture[];
   changeNoticeCaptures?: ModalCapture[];
   modalDiscovery?: { candidates: number; attempted: number; captured: number; skipped: number; failures: string[] };
-  modalAttachmentSources?: { url: string; path: ModalTriggerStep[] }[];
+  modalAttachmentSources?: { url: string;fileNo?:string;seq?:number;modalIndex?:number; path: ModalTriggerStep[] }[];
   summary?: { sectionCount: number; fieldCount: number; nonemptyFieldCount: number; tableCount: number; tableRowCount: number; attachmentCount: number; linkCount: number };
   attachments: Attachment[];
   links: { label: string; url: string }[];
@@ -129,6 +131,7 @@ export async function scrapeDetailPage(url: string, options?: { onProgress?: (st
   const browser = await measure("browser.launch", () => chromium.launch({ channel: "chrome", executablePath: process.env.G2B_CHROME_PATH || undefined, headless: true }));
   try {
     const page = await measure("browser.page", () => browser.newPage({ locale: "ko-KR", acceptDownloads: false }));
+    observeAttachmentContexts(page);
     const warnings: NonNullable<ScrapeResult["warnings"]> = [];
     const responses: Promise<AttachmentMetadata[]>[] = [];
     page.on("response", (response) => {
@@ -149,6 +152,7 @@ export async function scrapeDetailPage(url: string, options?: { onProgress?: (st
     await options?.onProgress?.("opening");
     await options?.onProgress?.("extracting");
     const metadata = (await measure("attachment.join", () => Promise.all(responses))).flat();
+    for(const file of metadata)if(file.untyAtchFileNo)file.context=await attachmentContext(page,file.untyAtchFileNo);
     const clickDownloads = await measure("attachment.click-metadata", () => collectClickDownloads(page));
     const html = await measure("page.html", () => page.evaluate(() => {
       document.querySelectorAll("input,textarea,select").forEach((element) => {
@@ -157,6 +161,7 @@ export async function scrapeDetailPage(url: string, options?: { onProgress?: (st
       return document.documentElement.outerHTML;
     }));
     const detail = measureSync("detail.extract", () => extractDetailPage(html, url, metadata, clickDownloads));
+    for(const file of detail.attachments)if(!file.url)warnings.push({stage:'attachment',operation:'resolve-download-url',message:`직접 다운로드 문맥을 확인하지 못했습니다: ${file.name}`});
     await options?.onProgress?.("extracting");
     await options?.onProgress?.("tables");
     const pagedTables = await measure("table.collect", () => collectPaginatedTables(page, page.locator("body")));
@@ -173,9 +178,9 @@ export async function scrapeDetailPage(url: string, options?: { onProgress?: (st
       const { captures, discovery } = await measure("modal.collect", () => collectModalContents(page, detail.noticeKey));
       detail.modalCaptures = captures;
       detail.modalDiscovery = discovery;
-      detail.modalAttachmentSources = captures.flatMap((capture) =>
-        (capture.modal.attachments || []).filter((attachment) => attachment.url?.includes("&modal="))
-          .map((attachment) => ({ url: attachment.url!, path: capture.trigger.path || [] })));
+      detail.modalAttachmentSources = captures.flatMap((capture,modalIndex) =>
+        (capture.modal.attachments || []).filter((attachment) => attachment.url&&attachment.fileNo&&attachment.seq)
+          .map((attachment) => ({url:attachment.url!,fileNo:attachment.fileNo,seq:attachment.seq,modalIndex,path:capture.trigger.path||[]})));
     } catch (error) {
       detail.modalCaptures = [];
       detail.modalDiscovery = { candidates: 0, attempted: 0, captured: 0, skipped: 0,

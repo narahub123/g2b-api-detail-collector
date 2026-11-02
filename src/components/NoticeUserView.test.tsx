@@ -223,7 +223,7 @@ describe("NoticeUserView", () => {
   it("links visible attachment names to their saved download URLs", () => {
     const withFiles: ScrapedDetail = { ...detail,
       attachments: [
-        { name: "공고문.pdf", url: "/api/attachments/R26BK1--000?fileNo=123e4567-e89b-12d3-a456-426614174000&seq=1" },
+        { name: "공고문.pdf", url: "https://www.g2b.go.kr/pn/pnp/pnpe/UntyAtchFile/downloadFile.do?bidPbancNo=R26BK1&bidPbancOrd=000&fileSeq=1&fileType=&prcmBsneSeCd=03",fileNo:'123e4567-e89b-12d3-a456-426614174000',seq:1 },
         { name: "제안요청서.hwp", url: "https://www.g2b.go.kr/downloadFile.do?fileSeq=2" }
       ],
       sections: [{ ...detail.sections![0], fields: [

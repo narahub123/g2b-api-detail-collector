@@ -1,5 +1,6 @@
 import * as cheerio from "cheerio";
-import { attachmentDownloadUrl, resolveAttachmentHref } from "./attachment-links";
+import {resolveAttachmentHref} from './attachment-links';
+import {buildDirectAttachmentUrl} from './attachment-direct';
 import type { Attachment, AttachmentMetadata, ClickDownload } from "./detail-page";
 
 type AttachmentCollectionOptions = {
@@ -15,7 +16,7 @@ const clean = (value: string) => value.replace(/\s+/g, " ").trim();
 
 /**
  * 상세페이지와 모달의 파일 셀을 같은 우선순위로 해석해 확인된 URL을 수집합니다.
- * 직접 href, WebSquare 행 식별자, 첨부 목록 순서를 차례로 사용하며 파일명만으로 URL을 만들지 않습니다.
+ * 직접 href와 파일 묶음에 대응하는 업무 문맥을 사용하며 부모 공고나 파일명만으로 주소를 추측하지 않습니다.
  * @param html 현재 화면의 HTML
  * @param options 기준 URL과 실제 수집한 파일 식별 자료
  * @returns 파일명과 확인된 다운로드 URL
@@ -26,22 +27,12 @@ export function collectAttachments(html: string, options: AttachmentCollectionOp
   const seen = new Set<string>();
   const metadata = options.fileMetadata || [];
   const clicks = new Map((options.clickDownloads || []).map((file) => [file.cellId, file]));
-  const sequenceByName = new Map(metadata.map((file) => [clean(cheerio.load(file.orgnlAtchFileNm).text()), file.atchFileSqno]));
-  const add = (name: string, url: string | null): void => {
-    const identity = `${name}\u0000${url || ""}`;
+  /** 같은 이름의 다른 파일은 묶음 번호와 실제 순서로 구분합니다. */
+  const add = (name: string, url: string | null, fileNo?:string,seq?:number): void => {
+    const identity = `${name}\u0000${fileNo||''}\u0000${seq??''}\u0000${url || ""}`;
     if (!name || seen.has(identity)) return;
-    attachments.push({ name, url });
+    attachments.push({ name, url,...(fileNo?{fileNo}:{}),...(seq?{seq}:{}) });
     seen.add(identity);
-  };
-  const metadataUrl = (sequence: number | undefined): string | null => {
-    if (!options.noticeKey || !sequence || !Number.isSafeInteger(sequence) || sequence <= 0) return null;
-    const [number, order] = options.noticeKey.split("--");
-    const url = new URL("https://www.g2b.go.kr/pn/pnp/pnpe/UntyAtchFile/downloadFile.do");
-    url.searchParams.set("bidPbancNo", number);
-    url.searchParams.set("bidPbancOrd", order);
-    url.searchParams.set("fileSeq", String(sequence));
-    url.searchParams.set("fileType", "");
-    return url.toString();
   };
   // 동일한 파일명이라도 셀별 식별자가 다르면 별도 첨부로 유지합니다.
   $("td[col_id='orgnlAtchFileNm']").each((_, cell) => {
@@ -50,10 +41,15 @@ export function collectAttachments(html: string, options: AttachmentCollectionOp
     if (!name) return;
     const direct = resolveAttachmentHref(element.find("a[href]").first().attr("href"), options.baseUrl);
     const click = clicks.get(element.attr("id") || "");
-    const clickUrl = click && click.name === name && options.noticeKey
-      ? attachmentDownloadUrl(options.noticeKey, click.fileNo, click.seq, options.modalIndex) : null;
-    const fallback = element.find("a").length && !direct ? null : metadataUrl(sequenceByName.get(name));
-    add(name, direct || clickUrl || fallback);
+    const verifiedClick=click?.name===name?click:undefined;
+    const sameName=metadata.filter(file=>clean(cheerio.load(file.orgnlAtchFileNm).text())===name);
+    const unidentifiedClick=element.find('a,button').length>0&&!direct&&!verifiedClick;
+    const file=verifiedClick||unidentifiedClick?undefined:sameName.length===1?sameName[0]:undefined;
+    const context=verifiedClick?.context??file?.context;
+    const seq=verifiedClick?.seq??file?.atchFileSqno;
+    const fileNo=verifiedClick?.fileNo??file?.untyAtchFileNo;
+    const generated=context&&seq&&fileNo?buildDirectAttachmentUrl(context,seq):null;
+    add(name,direct||generated,fileNo,seq);
   });
   // 모달에는 표 밖에도 실제 파일 href가 있으므로 확인된 링크만 함께 담습니다.
   if (options.includeOtherLinks) $("a[href]").each((_, anchor) => {
@@ -69,7 +65,8 @@ export function collectAttachments(html: string, options: AttachmentCollectionOp
   for (const file of metadata) {
     if (file.scrnIndtYn === "N") continue;
     const name = clean(cheerio.load(file.orgnlAtchFileNm).text());
-    if (name && !attachments.some((item) => item.name === name)) add(name, metadataUrl(file.atchFileSqno));
+    if(name&&!attachments.some(item=>file.untyAtchFileNo?item.fileNo===file.untyAtchFileNo&&item.seq===file.atchFileSqno:item.name===name))
+      add(name,file.context&&file.untyAtchFileNo?buildDirectAttachmentUrl(file.context,file.atchFileSqno):null,file.untyAtchFileNo,file.atchFileSqno);
   }
   return attachments;
 }

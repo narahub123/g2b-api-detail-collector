@@ -90,14 +90,15 @@ describe("NoticeComparison", () => {
     render(<NoticeComparison api={null} detail={withSource} />);
     expect(screen.getByText("클릭 출처: 보기 · 보기 (상위 팝업에서 열림)")).toBeInTheDocument();
   });
-  it("links direct and internal attachments but not unrelated paths", () => {
+  it("직접 주소만 링크로 표시하고 변환 대상인 내부 주소는 파일명만 표시합니다", () => {
     const internal = "/api/attachments/R26BK1--000?fileNo=de557b90-5d96-430d-9dd4-06b2d7b3627c&seq=1";
     render(<NoticeComparison api={null} detail={{ ...detail, attachments: [
       { name: "내부.hwpx", url: internal },
       { name: "공고.pdf", url: "http://www.g2b.go.kr/file.pdf" },
       { name: "거부.pdf", url: "/api/other/file" }
     ] }} />);
-    expect(screen.getByRole("link", { name: "내부.hwpx" })).toHaveAttribute("href", internal);
+    expect(screen.queryByRole("link", { name: "내부.hwpx" })).not.toBeInTheDocument();
+    expect(screen.getByText('내부.hwpx')).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "공고.pdf" })).toHaveAttribute("href", "http://www.g2b.go.kr/file.pdf");
     expect(screen.queryByRole("link", { name: "거부.pdf" })).not.toBeInTheDocument();
   });

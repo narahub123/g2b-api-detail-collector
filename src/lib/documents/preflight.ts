@@ -1,6 +1,7 @@
 import type pg from 'pg';
 import {EXTRACTOR_VERSION} from './queue';
 import {discoveryCandidatesSql} from './discovery';
+import {fixedAttachmentExclusionSql} from '../g2b/attachment-exclusions';
 
 export type PdfProbe={needed:boolean;leaseBusy:boolean;ready:boolean;expired:boolean;missingRetry:boolean;discovery:boolean};
 /** 유효 임대·즉시 대기·만료 처리·재시도 누락·새 PDF를 읽기 전용으로 검사합니다. */
@@ -13,7 +14,7 @@ export async function probePdfWork(pool:pg.Pool,schema:string,options:{discover:
   if(!result.leaseBusy){
    const row=(await db.query(`SELECT
     EXISTS(SELECT 1 FROM ${schema}.attachment_extraction_runs r JOIN ${schema}.attachment_documents d ON d.current_run_id=r.id
-      WHERE r.status='queued' AND r.chain_id=d.active_chain_id AND (r.next_attempt_at IS NULL OR r.next_attempt_at<=clock_timestamp()) AND ($1::text IS NULL OR d.notice_key=$1)) ready,
+      WHERE r.status='queued' AND r.chain_id=d.active_chain_id AND d.attachment_url LIKE 'https://www.g2b.go.kr/%/downloadFile.do?%' AND ${fixedAttachmentExclusionSql('d.file_no::text','d.seq')} AND (r.next_attempt_at IS NULL OR r.next_attempt_at<=clock_timestamp()) AND ($1::text IS NULL OR d.notice_key=$1)) ready,
     EXISTS(SELECT 1 FROM ${schema}.attachment_extraction_runs r JOIN ${schema}.attachment_documents d ON d.id=r.document_id AND d.active_chain_id=r.chain_id
       WHERE r.status='processing' AND ($1::text IS NULL OR d.notice_key=$1)) expired,
     EXISTS(SELECT 1 FROM ${schema}.attachment_extraction_runs r JOIN ${schema}.attachment_documents d ON d.id=r.document_id AND d.active_chain_id=r.chain_id

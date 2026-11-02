@@ -2,8 +2,8 @@ import type { MaintenanceInfo } from "../g2b/maintenance";
 import { randomUUID } from "node:crypto";
 import type pg from "pg";
 import { pickPdfAttachment } from "./contract";
+import {fixedAttachmentExclusionSql} from '../g2b/attachment-exclusions';
 import type { PdfResult } from "./contract";
-import { parseAttachmentDownloadUrl } from "../g2b/attachment-links";
 import {sanitizeStoredDiagnostic} from './diagnostics';
 import type {DiagnosticError,ExtractionProgress} from './diagnostics';
 import { advanceStageTimings, finishStageTimings } from './stage-timings';
@@ -83,7 +83,11 @@ export class DocumentQueue {
     const sql=discoveryCandidatesSql(this.schema),parameters=[noticeKey??null,EXTRACTOR_VERSION];
     // 대기열을 만들지 않는 단일 갱신으로 이름 변경과 사라진 첨부 상태도 계속 반영합니다.
     await this.pool.query(`${sql}, checked AS (
-      SELECT d.id,a.filename,a.attachment_url,a.key IS NOT NULL AS present
+      SELECT d.id,a.filename,a.attachment_url,(a.key IS NOT NULL OR EXISTS(
+       SELECT 1 FROM ${this.schema}.notices n CROSS JOIN LATERAL
+        jsonb_array_elements(CASE WHEN jsonb_typeof(n.detail->'attachments')='array' THEN n.detail->'attachments' ELSE '[]'::jsonb END) raw
+       WHERE n.key=d.notice_key AND (raw->>'url'=d.attachment_url OR
+        (lower(raw->>'fileNo')=d.file_no::text AND raw->>'seq'=d.seq::text)))) AS present
       FROM ${this.schema}.attachment_documents d LEFT JOIN attachments a
        ON a.key=d.notice_key AND a.file_no::uuid=d.file_no AND a.seq=d.seq
       WHERE ($1::text IS NULL OR d.notice_key=$1)
@@ -92,13 +96,11 @@ export class DocumentQueue {
      FROM checked c WHERE c.id=d.id AND (d.filename,d.attachment_url,d.is_current)
       IS DISTINCT FROM (COALESCE(c.filename,d.filename),COALESCE(c.attachment_url,d.attachment_url),c.present)`,parameters);
     if(stop())return 0;
-    const rows=(await this.pool.query(`${sql} SELECT key,attachment_url FROM candidates ORDER BY has_history,key,seq,file_no LIMIT 20`,parameters)).rows;
+    const rows=(await this.pool.query(`${sql} SELECT key,file_no,seq,attachment_url FROM candidates ORDER BY has_history,key,seq,file_no LIMIT 20`,parameters)).rows;
     let found=0;
     for(const row of rows){
       if(stop())break;
-      const identity=parseAttachmentDownloadUrl(row.attachment_url);
-      if(!identity||identity.key!==row.key||identity.modalIndex!==undefined)continue;
-      const run=await this.enqueue(identity.key,identity.fileNo,identity.seq,'automatic');
+      const run=await this.enqueue(row.key,row.file_no,row.seq,'automatic');
       if(!run.reused)found++;
     }
     return found;
@@ -127,6 +129,8 @@ export class DocumentQueue {
       const doc=(await db.query(`SELECT d.* FROM ${this.schema}.attachment_documents d JOIN ${this.schema}.attachment_extraction_runs r ON r.id=d.current_run_id
         WHERE r.status='queued' AND r.chain_id=d.active_chain_id AND (r.next_attempt_at IS NULL OR r.next_attempt_at<=clock_timestamp())
         AND (NOT $1::boolean OR r.source='manual') AND ($2::text IS NULL OR d.notice_key=$2)
+        AND d.attachment_url LIKE 'https://www.g2b.go.kr/%/downloadFile.do?%'
+        AND ${fixedAttachmentExclusionSql('d.file_no::text','d.seq')}
         ORDER BY CASE WHEN r.source='manual' THEN 0 WHEN r.purpose='initial' THEN 1 ELSE 2 END,r.requested_at,r.id LIMIT 1 FOR UPDATE OF d`,[manualOnly,noticeKey??null])).rows[0];
       if(!doc)return null;
       const r=(await db.query(`UPDATE ${this.schema}.attachment_extraction_runs SET status='processing',owner_token=$2,extractor_version=$3,started_at=clock_timestamp(),error=NULL,error_code=NULL,diagnostic_error=NULL WHERE id=$1 AND status='queued' RETURNING *`,[doc.current_run_id,token,EXTRACTOR_VERSION])).rows[0];
@@ -240,6 +244,8 @@ export class DocumentQueue {
     const rows=(await this.pool.query(`SELECT CASE WHEN r.source='manual' THEN 'manual' WHEN r.purpose='initial' THEN 'initial' ELSE 'reextract' END AS kind,count(*)::int AS n
       FROM ${this.schema}.attachment_extraction_runs r JOIN ${this.schema}.attachment_documents d ON d.current_run_id=r.id AND d.active_chain_id=r.chain_id
       WHERE r.status='queued' AND (r.next_attempt_at IS NULL OR r.next_attempt_at<=clock_timestamp())
+       AND d.attachment_url LIKE 'https://www.g2b.go.kr/%/downloadFile.do?%'
+       AND ${fixedAttachmentExclusionSql('d.file_no::text','d.seq')}
        AND (NOT $1::boolean OR r.source='manual') AND ($2::text IS NULL OR d.notice_key=$2) GROUP BY 1`,[manualOnly,noticeKey??null])).rows;
     const counts:ReadyCounts={manual:0,initial:0,reextract:0};
     for(const row of rows)counts[row.kind as keyof ReadyCounts]=Number(row.n);

@@ -1,3 +1,4 @@
+import {testAttachment} from './test-attachments';
 import {randomUUID} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
 import pg from 'pg';
@@ -8,7 +9,7 @@ import {DocumentQueue} from './queue';
 it.skipIf(!process.env.LIVE_DB_TEST||!process.env.DATABASE_URL)('조회는 문서·실행 소속과 이력 경계·페이지 분리를 보장하고 목록 방문으로 추출하지 않습니다',async()=>{
  const pool=new pg.Pool({connectionString:process.env.DATABASE_URL,max:5});const schema=`document_read_${randomUUID().replaceAll('-','')}`;
  const key='R26BK01797756--001',other='R26BK01787632--000',fileNo=randomUUID();
- const attachment=(seq:number)=>({name:'동일이름.pdf',url:`/api/attachments/${key}?fileNo=${fileNo}&seq=${seq}`});
+ const attachment=(seq:number)=>testAttachment(key,fileNo,seq,'동일이름.pdf');
  try{
   await pool.query(`CREATE SCHEMA ${schema}`);await pool.query(`CREATE TABLE ${schema}.notices(key text PRIMARY KEY,detail jsonb)`);
   await pool.query((await readFile('db/migrations/0006-document-extraction.sql','utf8')).replaceAll('public.',`${schema}.`));

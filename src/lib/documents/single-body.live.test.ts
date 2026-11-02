@@ -1,3 +1,4 @@
+import {testAttachment} from './test-attachments';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import pg from 'pg';
@@ -16,7 +17,7 @@ it.skipIf(!process.env.LIVE_DB_TEST||!process.env.DATABASE_URL)('중복 본문�
  try{
   await pool.query(`CREATE SCHEMA ${schema}; CREATE TABLE ${schema}.notices(key text PRIMARY KEY,detail jsonb)`);
   await migrate('0006-document-extraction.sql'); await migrate('0008-extraction-diagnostics.sql');
-  await pool.query(`INSERT INTO ${schema}.notices VALUES($1,$2)`,[key,JSON.stringify({attachments:[{name:'자료.pdf',url:`/api/attachments/${key}?fileNo=${file}&seq=1`}]})]);
+  await pool.query(`INSERT INTO ${schema}.notices VALUES($1,$2)`,[key,JSON.stringify({attachments:[testAttachment(key,file,1)]})]);
   await pool.query(`INSERT INTO ${schema}.attachment_documents(id,notice_key,file_no,seq,filename,attachment_url) VALUES($1,$2,$3,1,'자료.pdf','url')`,[doc,key,file]);
   for(const [id,text] of [[old,'이전 본문'],[current,'현재 본문']])await pool.query(`INSERT INTO ${schema}.attachment_extraction_runs(id,document_id,chain_id,source,status,filename,attachment_url,pages,page_count,character_count) VALUES($1,$2,$1,'manual','completed','자료.pdf','url',$3,1,5)`,[id,doc,JSON.stringify([{pageNumber:1,text}])]);
   await pool.query(`UPDATE ${schema}.attachment_documents SET last_success_run_id=$2,latest_run_id=$2 WHERE id=$1`,[doc,current]);
