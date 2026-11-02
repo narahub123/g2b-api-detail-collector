@@ -12,8 +12,10 @@ export function discoveryCandidatesSql(schema:string):string{
    AND (a->>'fileNo')~*'^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$'
    AND jsonb_typeof(a->'seq')='number' AND (a->>'seq')~'^[1-9][0-9]{0,8}$'
    AND ${fixedAttachmentExclusionSql("a->>'fileNo'","a->>'seq'")}
-   AND (a->>'url') LIKE 'https://www.g2b.go.kr/pn/pnp/pnpe/UntyAtchFile/downloadFile.do?%'
-   AND substring(a->>'url' from '[?&]bidPbancNo=([^&]+)')||'--'||substring(a->>'url' from '[?&]bidPbancOrd=([^&]+)')=n.key
+   AND (((a->>'url') LIKE 'https://www.g2b.go.kr/pn/pnp/pnpe/UntyAtchFile/downloadFile.do?%'
+    AND substring(a->>'url' from '[?&]bidPbancNo=([^&]+)')||'--'||substring(a->>'url' from '[?&]bidPbancOrd=([^&]+)')=n.key)
+    OR ((a->>'url') LIKE 'https://www.g2b.go.kr/fs/fsc/fsca/fileUpload.do?k00=%&fileNo=%&fileSeq=%'
+    AND substring(a->>'url' from '[?&]fileNo=([^&]+)')=a->>'fileNo'))
    AND substring(a->>'url' from '[?&]fileSeq=([^&]+)')=a->>'seq'
    AND n.key~'^[A-Za-z0-9_.%~-]+--[A-Za-z0-9_.%~-]+$' AND strpos(n.key,'..')=0
  ), attachments AS (SELECT * FROM matched WHERE copies=1), candidates AS (

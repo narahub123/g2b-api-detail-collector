@@ -6,7 +6,8 @@ import {gzip} from 'node:zlib';
 import {promisify} from 'node:util';
 import {fileURLToPath} from 'node:url';
 import {createMigrationRuntime,migrationTimeouts,type MigrationRuntime} from './lib/attachment-migration-runtime';
-import {planAttachmentMigration,type AttachmentMapping,type MigrationNotice,type MigrationIndependent} from '../src/lib/g2b/attachment-migration';
+import {planAttachmentMigration,proposalMigrationCandidates,type ProposalResolution,type AttachmentMapping,type MigrationNotice,type MigrationIndependent} from '../src/lib/g2b/attachment-migration';
+import {createProposalResolver} from '../src/lib/g2b/attachment-proposal-resolver';
 import {sanitizeDiagnostic} from '../src/lib/documents/diagnostics';
 
 type UrlChange={table:'attachment_documents'|'attachment_extraction_runs';id:string;documentId?:string;before:string;after:string};
@@ -40,9 +41,10 @@ async function applyUrlChanges(db:MigrationRuntime,schema:string,changes:UrlChan
 }
 
 /** 원본 자료와 실행이 변경되지 않는 정지 구간에서만 적용을 허용합니다. */
-async function assertIdle(db:MigrationRuntime,schema:string){
+export async function assertIdle(db:MigrationRuntime,schema:string){
  await db.query('lock.pdf_lease',`SELECT id FROM ${schema}.attachment_extraction_worker_lease WHERE id=1 FOR UPDATE`);
- await db.query('lock.tables',`LOCK TABLE ${schema}.collection_lock,${schema}.collection_jobs,${schema}.notices,${schema}.independent_details,${schema}.attachment_documents,${schema}.attachment_extraction_runs IN SHARE ROW EXCLUSIVE MODE`);
+ // 화면의 FOR SHARE 진입도 먼저 대기시켜 공고 행과 문서 테이블의 잠금 역전을 방지합니다.
+ await db.query('lock.tables',`LOCK TABLE ${schema}.collection_lock,${schema}.collection_jobs,${schema}.notices,${schema}.independent_details,${schema}.attachment_documents,${schema}.attachment_extraction_runs IN EXCLUSIVE MODE`);
  const state=(await db.query('check.idle',`SELECT
   EXISTS(SELECT 1 FROM ${schema}.collection_jobs WHERE status='running') AS collection_busy,
   EXISTS(SELECT 1 FROM ${schema}.attachment_extraction_worker_lease WHERE owner_token IS NOT NULL AND expires_at>clock_timestamp()) AS lease_busy,
@@ -65,7 +67,7 @@ async function urlChanges(db:MigrationRuntime,schema:string,mappings:AttachmentM
  });
 }
 
-/** DB 자료만으로 주소 변환을 계획하고 명시적 적용 시에만 원본 비교 후 갱신합니다. */
+/** 제안요청 메타데이터를 잠금 전에 확인하고 명시적 적용 시 원본 비교 후 갱신합니다. */
 export async function main(args=process.argv.slice(2)){
  const apply=args.includes('--apply');
  const directoryArg=args.find(arg=>arg.startsWith('--report-dir='));
@@ -86,10 +88,25 @@ export async function main(args=process.argv.slice(2)){
   await db.query('configure.statement_timeout',`SET LOCAL statement_timeout='${timeouts.statementMs}ms'`);
   // 변환 계획과 압축 백업을 만드는 동안에도 무기한 잠금을 유지하지 않습니다.
   await db.query('configure.idle_timeout',`SET LOCAL idle_in_transaction_session_timeout='${timeouts.idleMs}ms'`);
-  if(apply)await assertIdle(db,schema);
   const notices=(await db.query('read.notices',`SELECT key,notice_number,notice_order,jsonb_build_object('srvceDivNm',api->>'srvceDivNm') AS api,detail FROM ${schema}.notices WHERE detail IS NOT NULL ORDER BY key`)).rows as MigrationNotice[];
   const independent=(await db.query('read.independent',`SELECT detail_key,category,payload FROM ${schema}.independent_details ORDER BY detail_key`)).rows as MigrationIndependent[];
-  const plan=await db.step('plan',async()=>planAttachmentMigration(notices,independent)),urls=await urlChanges(db,schema,plan.mappings);
+  const proposals=new Map<string,ProposalResolution>(),candidates=proposalMigrationCandidates(notices);
+  if(candidates.length){
+   // 외부 서버 대기 중에는 DB 트랜잭션과 쓰기 잠금을 유지하지 않습니다.
+   await db.query('transaction.before_metadata','COMMIT');inTransaction=false;
+   const resolveProposal=createProposalResolver();
+   await db.step('read.proposal_metadata',async()=>{
+    for(let offset=0;offset<candidates.length;offset+=4){
+     await Promise.all(candidates.slice(offset,offset+4).map(async file=>proposals.set(file.oldUrl,await resolveProposal(file))));
+    }
+   },{rows:candidates.length});
+   await db.query('transaction.after_metadata',apply?'BEGIN':'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');inTransaction=true;
+   await db.query('configure.lock_timeout',`SET LOCAL lock_timeout='${timeouts.lockMs}ms'`);
+   await db.query('configure.statement_timeout',`SET LOCAL statement_timeout='${timeouts.statementMs}ms'`);
+   await db.query('configure.idle_timeout',`SET LOCAL idle_in_transaction_session_timeout='${timeouts.idleMs}ms'`);
+  }
+  if(apply)await assertIdle(db,schema);
+  const plan=await db.step('plan',async()=>planAttachmentMigration(notices,independent,proposals)),urls=await urlChanges(db,schema,plan.mappings);
   const report={version:1,createdAt:new Date().toISOString(),mode:apply?'apply':'dry-run',schema,notices:plan.notices,independent:plan.independent,urls,mappings:plan.mappings,excluded:plan.excluded};
   const directory=resolve(directoryArg?.slice('--report-dir='.length)||'data/attachment-url-migrations');
   await db.step('backup.directory',()=>mkdir(directory,{recursive:true,mode:0o700}));
@@ -104,7 +121,7 @@ export async function main(args=process.argv.slice(2)){
    await applyUrlChanges(db,schema,urls);
    // 재계획 결과가 비어 있어야 같은 자료를 다시 실행해도 변경하지 않습니다.
    await db.step('verify.idempotence',async()=>{
-    const verification=planAttachmentMigration(notices.map(row=>({...row,detail:plan.notices.find(change=>change.key===row.key)?.after??row.detail})),independent.map(row=>({...row,payload:plan.independent.find(change=>change.key===row.detail_key)?.after??row.payload})));
+    const verification=planAttachmentMigration(notices.map(row=>({...row,detail:plan.notices.find(change=>change.key===row.key)?.after??row.detail})),independent.map(row=>({...row,payload:plan.independent.find(change=>change.key===row.detail_key)?.after??row.payload})),proposals);
     if(verification.notices.length||verification.independent.length){
      // 백업과 대조할 수 있도록 재계획 대상과 최초 제외 사유를 본문 없이 남깁니다.
      const exclusions=new Map(plan.excluded.map(item=>[item.url,item.reason]));

@@ -23,7 +23,7 @@ export type { StructuredTable, StructuredTableCell, StructuredTableContent } fro
 
 export type Attachment = { name: string; url: string | null;fileNo?:string;seq?:number };
 export type AttachmentMetadata = { orgnlAtchFileNm: string; atchFileSqno: number; scrnIndtYn?: string;untyAtchFileNo?:string;context?:DownloadContext };
-export type ClickDownload = { cellId: string; name: string; fileNo: string; seq: number;context?:DownloadContext };
+export type ClickDownload = { cellId: string; name: string; fileNo: string; seq: number;context?:DownloadContext;downloadUrl?:string };
 export type ModalTriggerStep = { id: string; index: number; label: string; value: string };
 export type StructuredField = { label: string; value: FieldValuePart[]; visible?: boolean; tables?: StructuredTable[] };
 export type StructuredSection = { title: string; fields: StructuredField[]; tables: StructuredTable[];

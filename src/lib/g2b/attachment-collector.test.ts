@@ -1,7 +1,13 @@
 import {expect,it} from 'vitest';
 import {collectAttachments} from './attachment-collector';
+import {buildProposalUrl} from './attachment-proposal';
 
 const fileNo='3224071e-f945-4588-8a83-df90a6394deb';
+it('제안요청 셀의 확인된 외부 GET 주소를 화면과 같은 첨부 URL에 저장합니다',()=>{
+ const url=buildProposalUrl({untyAtchFileNo:fileNo,atchFileSqno:1,orgnlAtchFileNm:'제안.pdf',atchFilePathNm:'/data/Attachfiles/prpc/2026/10/27/file.pdf'})!;
+ const result=collectAttachments('<table><td id="rfp" col_id="orgnlAtchFileNm"><a>제안.pdf</a></td></table>',{noticeKey:'R26BK01800675--000',clickDownloads:[{cellId:'rfp',name:'제안.pdf',fileNo,seq:1,downloadUrl:url}]});
+ expect(result[0]).toEqual({name:'제안.pdf',fileNo,seq:1,url});
+});
 const html='<table><tr><td id="file1" col_id="orgnlAtchFileNm">같은이름.pdf</td><td id="file2" col_id="orgnlAtchFileNm">같은이름.pdf</td></tr></table>';
 
 it('동일 파일명도 셀 식별자와 실제 순서로 직접 URL을 구성합니다',()=>{

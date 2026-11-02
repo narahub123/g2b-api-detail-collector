@@ -1,10 +1,11 @@
 import type { ClickDownload } from "./detail-page";
 import {attachmentContext} from './attachment-context';
+import {createProposalResolver} from './attachment-proposal-resolver';
 
 /** 상세페이지나 모달의 href 없는 WebSquare 파일 셀에서 파일 번호와 순서를 읽습니다. */
 export async function collectClickDownloads(page: import("playwright-core").Page, scope?: import("playwright-core").Locator): Promise<ClickDownload[]> {
   const files=await (scope || page).locator("td[col_id='orgnlAtchFileNm']").evaluateAll((cells) => {
-    const results: ClickDownload[] = [];
+    const results: (ClickDownload&{proposal?:boolean})[] = [];
     for (const cell of cells) {
       if (!(cell instanceof HTMLElement) || !cell.id) continue;
       const action = cell.querySelector("a,button");
@@ -28,12 +29,14 @@ export async function collectClickDownloads(page: import("playwright-core").Page
         if (typeof fileNo !== "string" || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(fileNo) ||
             !Number.isSafeInteger(number) || number <= 0) continue;
         const name = cell.textContent?.replace(/\s+/g, " ").trim() || "";
-        if (name) results.push({ cellId: cell.id, name, fileNo, seq: number });
+        if (name) results.push({ cellId: cell.id, name, fileNo, seq: number,proposal:/(?:^|_)grdPrpsDmndInfoView_body_table$/.test(table.id) });
       }
     }
     return results;
   });
-  return Promise.all(files.map(async file=>{
+  const resolveProposal=createProposalResolver();
+  return Promise.all(files.map(async ({proposal,...file})=>{
+    if(proposal){const resolved=await resolveProposal(file);return resolved.url?{...file,downloadUrl:resolved.url}:file;}
     const context=await attachmentContext(page,file.fileNo);
     return context?{...file,context}:file;
   }));

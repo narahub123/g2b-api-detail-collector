@@ -47,7 +47,7 @@ it('단일 트랜잭션의 잠금·원본 비교·백업·커밋 순서를 유�
  expect(sql.filter(value=>value==='BEGIN')).toHaveLength(1);expect(sql.filter(value=>value==='COMMIT')).toHaveLength(1);
  expect(sql).not.toContain('ROLLBACK');
  expect(sql.indexOf(sql.find(value=>value.startsWith('LOCK TABLE'))!)).toBeLessThan(sql.indexOf(sql.find(value=>value.startsWith('UPDATE'))!));
- expect(sql.find(value=>value.startsWith('LOCK TABLE'))).toContain('SHARE ROW EXCLUSIVE MODE');
+ expect(sql.find(value=>value.startsWith('LOCK TABLE'))).toContain('IN EXCLUSIVE MODE');
  expect(sql.find(value=>value.startsWith('UPDATE migration_test.notices'))).toContain('n.detail=c.before');
  expect(sql).toContain("SET LOCAL statement_timeout='300000ms'");
  expect(mocks.Client.mock.calls[0][0]).toMatchObject({query_timeout:330000,connectionTimeoutMillis:10000});
@@ -55,6 +55,22 @@ it('단일 트랜잭션의 잠금·원본 비교·백업·커밋 순서를 유�
  expect(logs).toContainEqual(expect.objectContaining({stage:'apply.notices.batch',event:'complete',batch:1,batches:1,rows:1,rowCount:1}));
  expect(JSON.stringify(logs)).not.toMatch(/private|secret|postgresql|SQL/);
  expect(vi.mocked(console.log).mock.calls).toHaveLength(1);
+});
+
+it('제안요청 HTTP 조회는 읽기 트랜잭션을 마친 뒤 쓰기 잠금 없이 수행합니다',async()=>{
+ const proposalNotice={...notice,detail:{attachments:[{name:'공고.pdf',url:legacy}],sections:[{title:'제안요청정보',tables:[{sourceId:'grdPrpsDmndInfoView_body_table',bodyRows:[[{value:'공고.pdf'}]]}]}]}};
+ const original=mocks.client.query.getMockImplementation()!;
+ mocks.client.query.mockImplementation(async(sql:string,...rest:unknown[])=>sql.includes('SELECT key,notice_number')?{rows:[proposalNotice],rowCount:1}:original(sql,...rest));
+ vi.stubGlobal('fetch',vi.fn(async()=>{
+  const sql=mocks.client.query.mock.calls.map(([value])=>String(value));
+  expect(sql.at(-1)).toBe('COMMIT');expect(sql.some(value=>value.startsWith('LOCK TABLE'))).toBe(false);
+  return Response.json({ErrorCode:0,dlUntyAtchFileL:[{untyAtchFileNo:fileNo,atchFileSqno:1,orgnlAtchFileNm:'공고.pdf',atchFilePathNm:'/data/Attachfiles/prpc/2026/10/27/file.pdf'}]});
+ }));
+ try{
+  await main([`--report-dir=${directory}`]);
+  const summary=JSON.parse(String(vi.mocked(console.log).mock.calls.at(-1)![0]));
+  expect(summary).toMatchObject({mode:'dry-run',mappings:1,documentUrls:1});
+ }finally{vi.unstubAllGlobals();}
 });
 
 it('읽기 제한 실패는 해당 조회 단계에 기록하고 롤백하며 백업·갱신을 시작하지 않습니다',async()=>{

@@ -4,6 +4,7 @@ import {openHttpDownload,handleAttachmentRequest} from './attachment-download';
 import {attachmentDownloadUrl} from './attachment-links';
 import type {ExtractionProgress} from '../documents/diagnostics';
 import {createDownloadMeasure} from '../documents/download-timings';
+import {buildProposalUrl} from './attachment-proposal';
 
 const key='R26BK01796488--000',fileNo='357b884e-1fd9-4613-bdaf-49be5a5d1ff2';
 const url='https://www.g2b.go.kr/pn/pnp/pnpe/UntyAtchFile/downloadFile.do?bidPbancNo=R26BK01796488&bidPbancOrd=000&fileSeq=4&prcmBsneSeCd=03&fileType=';
@@ -13,6 +14,13 @@ function response(body:BodyInit='%PDF-test',headers:HeadersInit={}){return new R
 /** 반환한 스트림을 실제 소비해 전달된 바이트를 확인합니다. */
 async function bytes(opened:Awaited<ReturnType<typeof openHttpDownload>>){const chunks:Buffer[]=[];try{for await(const c of opened.stream)chunks.push(Buffer.from(c));return Buffer.concat(chunks);}finally{await opened.cleanup();}}
 afterEach(()=>vi.useRealTimers());
+
+it('제안요청 외부 주소도 기존 HTTP 스트림으로 전달합니다',async()=>{
+ const proposal=buildProposalUrl({untyAtchFileNo:fileNo,atchFileSqno:1,orgnlAtchFileNm:'제안.pdf',atchFilePathNm:'/data/Attachfiles/prpc/2026/10/27/file.pdf'})!;
+ const fetcher=vi.fn<typeof fetch>().mockResolvedValue(response());
+ expect((await bytes(await openHttpDownload(proposal,signal(),undefined,fetcher))).toString()).toBe('%PDF-test');
+ expect(fetcher).toHaveBeenCalledWith(proposal,expect.objectContaining({redirect:'manual'}));
+});
 
 it('브라우저 없이 파일을 받고 요청·수신 계측을 마감합니다',async()=>{
  const events:ExtractionProgress[]=[];

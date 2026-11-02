@@ -1,6 +1,6 @@
 import * as cheerio from "cheerio";
 import {resolveAttachmentHref} from './attachment-links';
-import {buildDirectAttachmentUrl} from './attachment-direct';
+import {buildDirectAttachmentUrl,directAttachmentIdentity} from './attachment-direct';
 import type { Attachment, AttachmentMetadata, ClickDownload } from "./detail-page";
 
 type AttachmentCollectionOptions = {
@@ -49,7 +49,8 @@ export function collectAttachments(html: string, options: AttachmentCollectionOp
     const seq=verifiedClick?.seq??file?.atchFileSqno;
     const fileNo=verifiedClick?.fileNo??file?.untyAtchFileNo;
     const generated=context&&seq&&fileNo?buildDirectAttachmentUrl(context,seq):null;
-    add(name,direct||generated,fileNo,seq);
+    const proposal=verifiedClick?.downloadUrl&&options.noticeKey&&directAttachmentIdentity(options.noticeKey,{url:verifiedClick.downloadUrl,fileNo,seq})?verifiedClick.downloadUrl:null;
+    add(name,proposal||direct||generated,fileNo,seq);
   });
   // 모달에는 표 밖에도 실제 파일 href가 있으므로 확인된 링크만 함께 담습니다.
   if (options.includeOtherLinks) $("a[href]").each((_, anchor) => {
