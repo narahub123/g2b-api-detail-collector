@@ -347,3 +347,9 @@
     width: 100%;
   }
 }
+.extraction-batch-actions { margin-bottom: 20px; }
+.extraction-batch-actions > span, .extraction-batch-actions > button { margin-left: 16px; }
+.extraction-batch-actions input, .extraction-selectable-card input { margin-right: 6px; }
+.extraction-selectable-card { min-width: 0; }
+.extraction-selectable-card > label { display: block; padding: 8px 0; }
+.extraction-request-actions { margin: 16px 0; }

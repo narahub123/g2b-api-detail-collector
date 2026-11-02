@@ -6,6 +6,7 @@ import {FormAccordion} from './FormAccordion';
 import {documentWorkLabel} from '@/lib/documents/display';
 import {isActive,runStatuses} from '@/lib/documents/model';
 import type {DocumentList,DocumentSummary,RunMetadata} from '@/lib/documents/model';
+import {requestManualExtraction,manualExtractionMessage} from '@/lib/documents/manual-request';
 
 /** 서버가 저장한 응답만 읽고 통신 실패를 표시 가능한 오류로 통일합니다. */
 async function readJson<T>(url:string,signal?:AbortSignal,init?:RequestInit):Promise<T>{
@@ -98,8 +99,8 @@ function DocumentFile({document:doc,index,noticeKey,refresh}:{document:DocumentS
  async function start(){
   setPosting(true);setError('');setNotice('');
   try{
-   const result=await readJson<{id:string;awake:boolean}>(`${base}?${query}`,undefined,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:noticeKey})});
-   setSelection('');setNotice(result.awake?'추출 요청을 접수했습니다. 작업기가 순서대로 처리합니다.':'작업기에 연결하지 못했지만 추출 요청은 저장했습니다. 작업기 시작 또는 다음 깨우기에서 처리합니다.');
+   const result=await requestManualExtraction(noticeKey,doc.id);
+   setSelection('');setNotice(manualExtractionMessage(result));
    await refresh();
   }catch(reason){setError(reason instanceof Error?reason.message:'추출 요청 실패');}finally{setPosting(false);}
  }

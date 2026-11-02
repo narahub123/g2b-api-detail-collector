@@ -4,13 +4,14 @@ import {DocumentError} from './contract';
 import {runStatuses} from './model';
 import type {RunMetadata} from './model';
 import type {DiagnosticError,ExtractionStage} from './diagnostics';
+import {documentRequestState,type DocumentRequestState} from './request-state';
 
 export type HistoryFilters={status:string;type:string;filename:string;key:string;from:string;to:string;page:number;view:'history'|'documents'};
 export type HistoryRun=RunMetadata & {document_id:string;notice_key:string;document_type:string|null;chain_id:string;retry_of:string|null;retry_eligible:boolean;
  stage:ExtractionStage|null;stage_started_at:string|null;last_progress_at:string|null;current_page:number|null;completed_pages:number|null;total_pages:number|null;has_content?:boolean};
-export type HistoryDetail={run:HistoryRun & {diagnostic_error:DiagnosticError|null;attachment_url:string|null};chain:HistoryRun[]};
+export type HistoryDetail={run:HistoryRun & {diagnostic_error:DiagnosticError|null;attachment_url:string|null};chain:HistoryRun[];requestState?:DocumentRequestState};
 export type HistoryList={items:HistoryRun[];hasNext:boolean;page:number;totalCount:number;totalPages:number};
-export type DocumentFile={document_id:string;notice_key:string;filename:string;document_type:string|null;created_at:string;latest:HistoryRun|null};
+export type DocumentFile={document_id:string;notice_key:string;filename:string;document_type:string|null;created_at:string;latest:HistoryRun|null;requestState?:DocumentRequestState};
 export type DocumentFileList=Omit<HistoryList,'items'>&{items:DocumentFile[]};
 const columns=['id','filename','status','source','purpose','requested_at','started_at','finished_at','next_attempt_at','error','error_code','attempt_number','page_count','character_count','elapsed_ms','extractor_version','file_hash','peak_memory_bytes',
  'document_id','document_type','chain_id','retry_of','retry_eligible','stage','stage_started_at','last_progress_at','current_page','completed_pages','total_pages','stage_timings'].map(c=>`r.${c}`).join(',');
@@ -73,7 +74,17 @@ export class DocumentHistoryStore{
    this.pool.query(`SELECT COUNT(*) AS total_count ${matching}`,values),
   ]);
   const totalCount=Number(count.rows[0].total_count),totalPages=Math.max(1,Math.ceil(totalCount/20));
-  return {items:list.rows as DocumentFile[],hasNext:filters.page<totalPages,page:filters.page,totalCount,totalPages};
+  const states=await this.requestStates(list.rows.map(row=>row.document_id));
+  return {items:list.rows.map(row=>({...row,requestState:states.get(row.document_id)})) as DocumentFile[],hasNext:filters.page<totalPages,page:filters.page,totalCount,totalPages};
+ }
+ /** 표시 대상 문서만 한 번에 검증하며 공고 원문과 내부 식별자는 응답에 포함하지 않습니다. */
+ private async requestStates(ids:string[]):Promise<Map<string,DocumentRequestState>>{
+  if(!ids.length)return new Map();
+  const rows=(await this.pool.query(`SELECT d.id,d.notice_key,d.file_no,d.seq,n.detail->'attachments' AS attachments,
+   (SELECT json_build_object('id',a.id,'status',a.status) FROM ${this.schema}.attachment_extraction_runs a
+    WHERE a.document_id=d.id AND a.status IN ('queued','processing') LIMIT 1) AS active
+   FROM ${this.schema}.attachment_documents d LEFT JOIN ${this.schema}.notices n ON n.key=d.notice_key WHERE d.id=ANY($1::uuid[])`,[ids])).rows;
+  return new Map(rows.map(row=>[row.id,documentRequestState(row.notice_key,row.file_no,row.seq,row.attachments,row.active)]));
  }
  /** 실제 저장된 형식만 필터 선택지로 제공해 추출기 추가 시 화면 수정을 줄입니다. */
  async types():Promise<string[]>{return (await this.pool.query(`SELECT DISTINCT document_type FROM ${this.schema}.attachment_extraction_runs WHERE document_type IS NOT NULL ORDER BY document_type`)).rows.map(r=>r.document_type);}
@@ -85,6 +96,7 @@ export class DocumentHistoryStore{
    FROM ${this.schema}.attachment_extraction_runs r JOIN ${this.schema}.attachment_documents d ON d.id=r.document_id WHERE r.id=$1`,[id])).rows[0] as HistoryDetail['run']|undefined;
   if(!run)return null;
   const chain=(await this.pool.query(`SELECT ${columns},d.notice_key FROM ${this.schema}.attachment_extraction_runs r JOIN ${this.schema}.attachment_documents d ON d.id=r.document_id WHERE r.chain_id=$1 AND r.document_id=$2 ORDER BY r.attempt_number,r.id`,[run.chain_id,run.document_id])).rows as HistoryRun[];
-  return {run,chain};
+  const states=await this.requestStates([run.document_id]);
+  return {run,chain,requestState:states.get(run.document_id)};
  }
 }

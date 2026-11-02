@@ -27,7 +27,7 @@ it('파일별 보기에서만 미요청과 형식 미기록 필터를 허용합�
 });
 
 it('파일 목록은 최신 실행 포인터와 미요청 문서를 포함해 조회합니다',async()=>{
- const query=vi.fn().mockResolvedValueOnce({rows:[{document_id:'doc',latest:null}]}).mockResolvedValueOnce({rows:[{total_count:'1'}]});
+ const query=vi.fn().mockResolvedValue({rows:[]}).mockResolvedValueOnce({rows:[{document_id:'doc',latest:null}]}).mockResolvedValueOnce({rows:[{total_count:'1'}]});
  const result=await new DocumentHistoryStore({query} as never).listDocuments(parseHistoryFilters(new URLSearchParams('view=documents&status=unrequested&type=__unknown__')));
  expect(result).toMatchObject({totalCount:1,items:[{document_id:'doc',latest:null}]});
  const [sql,values]=query.mock.calls[0];
@@ -62,4 +62,25 @@ it.each([0,20,21,40])('전체 건수 %i에 맞는 마지막 페이지를 계산�
 });
 it('1000페이지를 넘어도 전체 건수에 따른 마지막 페이지로 이동할 수 있습니다',()=>{
  expect(parseHistoryFilters(new URLSearchParams('page=1001')).page).toBe(1001);
+});
+
+it('현재 페이지의 요청 가능 상태만 일괄 조회하며 내부 첨부 원문은 반환하지 않습니다',async()=>{
+ const id='12345678-1234-1234-1234-123456789012',key='notice--001';
+ const query=vi.fn().mockResolvedValueOnce({rows:[{document_id:id,latest:null}]}).mockResolvedValueOnce({rows:[{total_count:'1'}]})
+  .mockResolvedValueOnce({rows:[{id,notice_key:key,file_no:id,seq:1,attachments:[{name:'자료.pdf',url:`/api/attachments/${key}?fileNo=${id}&seq=1`}],active:null}]});
+ const result=await new DocumentHistoryStore({query} as never).listDocuments(parseHistoryFilters(new URLSearchParams('view=documents')));
+ expect(result.items[0].requestState).toEqual({canRequest:true,reason:null,active:null});
+ expect(query.mock.calls[2][1]).toEqual([[id]]);
+ expect(query.mock.calls.every(([sql])=>! /INSERT|UPDATE|DELETE/.test(sql))).toBe(true);
+ expect(JSON.stringify(result)).not.toMatch(/attachments|file_no/);
+});
+
+it('과거 실행 상세도 다른 체인의 활성 요청을 반환합니다',async()=>{
+ const id='12345678-1234-1234-1234-123456789012',key='notice--001';
+ const active={id:'22345678-1234-1234-1234-123456789012',status:'processing'};
+ const query=vi.fn().mockResolvedValueOnce({rows:[{id,document_id:id,chain_id:id}]}).mockResolvedValueOnce({rows:[]})
+  .mockResolvedValueOnce({rows:[{id,notice_key:key,file_no:id,seq:1,attachments:[{name:'자료.pdf',url:`/api/attachments/${key}?fileNo=${id}&seq=1`}],active}]});
+ const detail=await new DocumentHistoryStore({query} as never).detail(id);
+ expect(detail?.requestState).toMatchObject({canRequest:false,active});
+ expect(query.mock.calls[2][0]).not.toContain('chain_id=');
 });

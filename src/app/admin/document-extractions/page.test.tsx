@@ -1,5 +1,6 @@
 import {beforeEach,expect,it,vi} from 'vitest';
 import {renderToStaticMarkup} from 'react-dom/server';
+vi.mock('next/navigation',()=>({useRouter:()=>({refresh:vi.fn()})}));
 const {list,listDocuments,types,detail,overview}=vi.hoisted(()=>({list:vi.fn(),listDocuments:vi.fn(),types:vi.fn(async()=>['pdf']),detail:vi.fn(),overview:vi.fn()}));
 vi.mock('@/lib/documents/overview-store',()=>({DocumentOverviewStore:class{overview=overview;}}));
 vi.mock('@/lib/documents/history-store',async original=>({...await original<object>(),DocumentHistoryStore:class{list=list;listDocuments=listDocuments;types=types;detail=detail;}}));

@@ -23,6 +23,7 @@ import { Pagination } from "@/components/Pagination";
 import { DocumentExtractionOverview } from "@/components/DocumentExtractionOverview";
 import { DocumentOverviewStore } from "@/lib/documents/overview-store";
 import { FormAccordion } from "@/components/FormAccordion";
+import { DocumentExtractionSelection } from "@/components/DocumentExtractionSelection";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -122,6 +123,7 @@ export default async function ExtractionHistoryPage({
         </p>
       </header>
       <DocumentExtractionOverview
+        key={overview.data?.generatedAt}
         initial={overview.data}
         initialError={overview.error}
         selection={
@@ -237,7 +239,7 @@ export default async function ExtractionHistoryPage({
         )}
         {listing && (
           <>
-            <div className="extraction-list">
+            <DocumentExtractionSelection documents={documents?.items} scopeKey={params.toString()}>
               {records?.map((item) => (
                 <article
                   key={documentView ? item.document_id : item.run!.id}
@@ -293,7 +295,7 @@ export default async function ExtractionHistoryPage({
                   )}
                 </article>
               ))}
-            </div>
+            </DocumentExtractionSelection>
             {!listing.items.length && (
               <p className="empty-state">
                 {documentView

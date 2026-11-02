@@ -9,6 +9,7 @@ import {documentDuration,documentWorkLabel,documentTime} from '@/lib/documents/d
 import {StageTimings} from './StageTimings';
 import {DocumentBodyViewer} from './DocumentBodyViewer';
 import {safeAttachmentLink} from '@/lib/g2b/attachment-links';
+import {ManualExtractionAction} from './ManualExtractionAction';
 
 /** 진행 중에만 갱신하며 본문은 사용자가 요청한 한 페이지만 읽습니다. */
 export function DocumentExtractionDetail({initial}:{initial:HistoryDetail}){
@@ -40,6 +41,7 @@ function ExtractionDetail({initial}:{initial:HistoryDetail}){
  },[run.id,active]);
  return <>
   <header className="extraction-header"><span className="eyebrow">EXTRACTION DIAGNOSTICS</span><h1>첨부파일 추출 진단</h1><p className="extraction-file">{run.filename}{downloadUrl&&<a className="extraction-download-icon" href={downloadUrl} download aria-label="원본 파일 다운로드" title="원본 파일 다운로드"><Download size={18} aria-hidden="true"/></a>}</p><span className="extraction-status" data-status={run.status}>{runStatuses[run.status]}</span>{active&&<p>5초마다 처리 상태를 확인합니다.</p>}</header>
+  <ManualExtractionAction noticeKey={run.notice_key} documentId={run.document_id} state={detail.requestState}/>
   {error&&<p role="alert" className="extraction-error">{error}</p>}
   <div className="extraction-grid">
    <section className="extraction-card"><h2>실행 정보</h2><dl className="extraction-data">
