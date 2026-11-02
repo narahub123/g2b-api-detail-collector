@@ -2,6 +2,8 @@ import { expect, it, vi } from "vitest";
 import { classifyExtractionError } from "./errors";
 import { runBatch, LocalWake } from "./worker";
 import type {ExtractionProgress} from './diagnostics';
+import {ExtractionError} from './diagnostics';
+vi.mock('./connection-probe',()=>({probeConnection:vi.fn(async()=>{})}));
 
 it("영구 오류와 일시 오류를 구분하고 내부 메시지는 저장하지 않습니다",()=>{
   expect(classifyExtractionError(new Error("PDF 처리 시간이 5분 제한을 초과했습니다.")).retry).toBe(false);
@@ -16,6 +18,27 @@ function batchStore(){
  recover:vi.fn(async()=>({checked:0,recovered:0,exhausted:0})),progress:vi.fn<(_token:string,_id:string,value:ExtractionProgress)=>Promise<void>>(async()=>{}),recordDiagnostic:vi.fn(async()=>{}),
  claim:vi.fn(async()=>({id:"id",notice_key:"key",source:'manual'})),complete:vi.fn(async()=>{}),fail:vi.fn(async()=>{}),readyCounts:vi.fn(async()=>({manual:0,initial:0,reextract:0}))};
 }
+it('클라우드 연결 오류는 배치당 한 번 검사하고 진단 실패에도 재시도 분류를 유지합니다',async()=>{
+ const store=batchStore();const probe=vi.fn(async()=>{throw new Error('진단 실패');});
+ const result=await runBatch(store as never,{mode:'cloud',limit:2,probe,extract:async()=>{throw new ExtractionError('connection_failed','연결 실패');}});
+ expect(result.failed).toBe(2);expect(probe).toHaveBeenCalledOnce();
+ expect(store.fail.mock.calls).toHaveLength(2);
+ expect((store.fail.mock.calls as unknown[][])[0][2]).toMatchObject({code:'connection_failed',retry:true});
+ expect(store.release).toHaveBeenCalledOnce();
+});
+it('로컬 연결 오류에서는 별도 검사를 실행하지 않습니다',async()=>{
+ const store=batchStore(),probe=vi.fn(async()=>{});
+ await runBatch(store as never,{mode:'local',limit:1,probe,extract:async()=>{throw new ExtractionError('download_timeout','시간 초과');}});
+ expect(probe).not.toHaveBeenCalled();
+});
+it('별도 검사를 기다리는 동안 임대를 갱신하고 임대 상실 시 진단을 취소합니다',async()=>{
+ const store=batchStore();store.renew.mockResolvedValue(false);
+ const result=await runBatch(store as never,{mode:'cloud',limit:2,heartbeatMs:5,
+  probe:async(_id,signal)=>{await new Promise<void>(resolve=>signal.addEventListener('abort',()=>resolve(),{once:true}));},
+  extract:async()=>{throw new ExtractionError('download_timeout','시간 초과');}});
+ expect(result.reason).toBe('lease_lost');expect(store.claim).toHaveBeenCalledOnce();
+ expect(store.fail).toHaveBeenCalledOnce();expect(store.renew).toHaveBeenCalled();expect(store.release).toHaveBeenCalledOnce();
+});
 it("임대 갱신 실패는 자식을 중단하고 결과 저장·다음 파일 선점을 막습니다",async()=>{
  const store=batchStore();store.renew.mockResolvedValue(false);
  const summary=await runBatch(store as never,{mode:"local",heartbeatMs:5,extract:async(_r,_t,signal)=>{

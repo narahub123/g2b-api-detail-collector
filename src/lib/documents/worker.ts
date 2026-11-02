@@ -7,9 +7,11 @@ import { superviseExtraction } from "./supervisor";
 import {diagnosticError,ExtractionError,sanitizeStoredDiagnostic} from './diagnostics';
 import type {ExtractionProgress} from './diagnostics';
 import {workKind,type WorkKind} from './priority';
+import {probeConnection} from './connection-probe';
 
 export type BatchOptions = { mode: "local" | "cloud"; limit?:number; budgetMinutes?:number; noticeKey?:string;
   discover?:boolean;
+  probe?:typeof probeConnection;
   signal?:AbortSignal; heartbeatMs?:number; renewalTimeoutMs?:number; now?:()=>number;
   extract?:(run:QueueRun,token:string,signal:AbortSignal,progress?:(value:ExtractionProgress)=>void)=>Promise<{result:PdfResult;peakMemory:number|null}> };
 export type BatchSummary = { startedAt:string;finishedAt:string;attempts:number;remainingReady:number;checked:number;recovered:number;exhausted:number;
@@ -34,7 +36,7 @@ export async function runBatch(store:DocumentQueue,options:BatchOptions):Promise
   const summary:BatchSummary={startedAt:new Date(start).toISOString(),finishedAt:"",attempts:0,remainingReady:0,checked:0,recovered:0,exhausted:0,
     elapsedMs:0,retries:0,completed:0,failed:0,noText:0,peakMemoryBytes:null,reason:"no_ready_request",
     byKind:{manual:{attempts:0,completed:0,failed:0,noText:0,remainingReady:0},initial:{attempts:0,completed:0,failed:0,noText:0,remainingReady:0},reextract:{attempts:0,completed:0,failed:0,noText:0,remainingReady:0}}};
-  const token=randomUUID(), abort=new AbortController(); let heartbeat:Promise<void>|undefined, lost=false;
+  const token=randomUUID(), abort=new AbortController(); let heartbeat:Promise<void>|undefined, lost=false,probed=false;
   const renewalTimeout=Math.min(options.renewalTimeoutMs??15000,15000);
   /** 갱신 실패 시 자식 작업을 중단하고 이 회차의 새 선점을 금지합니다. */
   const lose=()=>{lost=true;abort.abort();};
@@ -139,6 +141,12 @@ export async function runBatch(store:DocumentQueue,options:BatchOptions):Promise
         summary.failed++;
         kindSummary.failed++;
         if(failure.retry && run.attempt_number>=3)summary.exhausted++;
+        // 실패 기록과 재시도 접수를 먼저 확정하고 별도 검사는 회차당 한 번만 실행합니다.
+        if(!local&&!probed&&!abort.signal.aborted&&['connection_failed','download_timeout'].includes(failure.code)){
+          probed=true;
+          try{await (options.probe??probeConnection)(run.id,abort.signal,event=>console.log(JSON.stringify(event)));}
+          catch{console.warn('PDF 별도 연결 검사 경고: 진단을 완료하지 못했습니다.');}
+        }
         continue;
       }
       if(abort.signal.aborted)break;
