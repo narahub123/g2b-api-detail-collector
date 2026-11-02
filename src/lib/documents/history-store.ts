@@ -7,13 +7,13 @@ import type {DiagnosticError,ExtractionStage} from './diagnostics';
 
 export type HistoryFilters={status:string;type:string;filename:string;key:string;from:string;to:string;page:number;view:'history'|'documents'};
 export type HistoryRun=RunMetadata & {document_id:string;notice_key:string;document_type:string|null;chain_id:string;retry_of:string|null;retry_eligible:boolean;
- stage:ExtractionStage|null;stage_started_at:string|null;last_progress_at:string|null;current_page:number|null;completed_pages:number|null;total_pages:number|null};
+ stage:ExtractionStage|null;stage_started_at:string|null;last_progress_at:string|null;current_page:number|null;completed_pages:number|null;total_pages:number|null;has_content?:boolean};
 export type HistoryDetail={run:HistoryRun & {diagnostic_error:DiagnosticError|null;attachment_url:string|null};chain:HistoryRun[]};
 export type HistoryList={items:HistoryRun[];hasNext:boolean;page:number;totalCount:number;totalPages:number};
 export type DocumentFile={document_id:string;notice_key:string;filename:string;document_type:string|null;created_at:string;latest:HistoryRun|null};
 export type DocumentFileList=Omit<HistoryList,'items'>&{items:DocumentFile[]};
-const columns=['id','filename','status','source','requested_at','started_at','finished_at','next_attempt_at','error','error_code','attempt_number','page_count','character_count','elapsed_ms','extractor_version','file_hash','peak_memory_bytes',
- 'document_id','document_type','chain_id','retry_of','retry_eligible','stage','stage_started_at','last_progress_at','current_page','completed_pages','total_pages'].map(c=>`r.${c}`).join(',');
+const columns=['id','filename','status','source','purpose','requested_at','started_at','finished_at','next_attempt_at','error','error_code','attempt_number','page_count','character_count','elapsed_ms','extractor_version','file_hash','peak_memory_bytes',
+ 'document_id','document_type','chain_id','retry_of','retry_eligible','stage','stage_started_at','last_progress_at','current_page','completed_pages','total_pages','stage_timings'].map(c=>`r.${c}`).join(',');
 export const runIdPattern=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** 잘못된 필터로 전체 이력을 과도하게 조회하지 않도록 입력을 검증합니다. */
@@ -80,7 +80,9 @@ export class DocumentHistoryStore{
  /** 단일 시도의 원본 다운로드 주소와 같은 재시도 묶음을 조회합니다. */
  async detail(id:string):Promise<HistoryDetail|null>{
   if(!runIdPattern.test(id))return null;
-  const run=(await this.pool.query(`SELECT ${columns},d.notice_key,d.attachment_url,r.diagnostic_error FROM ${this.schema}.attachment_extraction_runs r JOIN ${this.schema}.attachment_documents d ON d.id=r.document_id WHERE r.id=$1`,[id])).rows[0] as HistoryDetail['run']|undefined;
+  const run=(await this.pool.query(`SELECT ${columns},d.notice_key,d.attachment_url,r.diagnostic_error,
+   EXISTS(SELECT 1 FROM ${this.schema}.attachment_document_contents c WHERE c.document_id=d.id AND c.run_id=r.id) AS has_content
+   FROM ${this.schema}.attachment_extraction_runs r JOIN ${this.schema}.attachment_documents d ON d.id=r.document_id WHERE r.id=$1`,[id])).rows[0] as HistoryDetail['run']|undefined;
   if(!run)return null;
   const chain=(await this.pool.query(`SELECT ${columns},d.notice_key FROM ${this.schema}.attachment_extraction_runs r JOIN ${this.schema}.attachment_documents d ON d.id=r.document_id WHERE r.chain_id=$1 AND r.document_id=$2 ORDER BY r.attempt_number,r.id`,[run.chain_id,run.document_id])).rows as HistoryRun[];
   return {run,chain};

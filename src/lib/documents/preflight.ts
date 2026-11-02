@@ -1,5 +1,6 @@
 import type pg from 'pg';
 import {EXTRACTOR_VERSION} from './queue';
+import {discoveryCandidatesSql} from './discovery';
 
 export type PdfProbe={needed:boolean;leaseBusy:boolean;ready:boolean;expired:boolean;missingRetry:boolean;discovery:boolean};
 /** 유효 임대·즉시 대기·만료 처리·재시도 누락·새 PDF를 읽기 전용으로 검사합니다. */
@@ -21,12 +22,7 @@ export async function probePdfWork(pool:pg.Pool,schema:string,options:{discover:
       AND NOT EXISTS(SELECT 1 FROM ${schema}.attachment_extraction_runs active WHERE active.document_id=d.id AND active.status IN('queued','processing'))) missing`,[options.noticeKey??null])).rows[0];
    result.ready=row.ready;result.expired=row.expired;result.missingRetry=row.missing;
    if(options.discover){
-    result.discovery=(await db.query(`SELECT EXISTS(
-      SELECT 1 FROM ${schema}.notices n CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(n.detail->'attachments')='array' THEN n.detail->'attachments' ELSE '[]'::jsonb END) a
-      CROSS JOIN LATERAL regexp_match(a->>'url','^/api/attachments/([^?]+)[?]fileNo=([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})&seq=([1-9][0-9]{0,8})$') m
-      WHERE ($1::text IS NULL OR n.key=$1) AND jsonb_typeof(a->'name')='string' AND (a->>'name')~*'[.]pdf[[:space:]]*$' AND m[1]=n.key
-      AND NOT EXISTS(SELECT 1 FROM ${schema}.attachment_documents d WHERE d.notice_key=n.key AND d.file_no=m[2]::uuid AND d.seq=m[3]::int
-        AND EXISTS(SELECT 1 FROM ${schema}.attachment_extraction_runs r WHERE r.document_id=d.id AND (r.status IN('queued','processing') OR r.extractor_version=$2)))) discovery`,[options.noticeKey??null,EXTRACTOR_VERSION])).rows[0].discovery;
+    result.discovery=(await db.query(`${discoveryCandidatesSql(schema)} SELECT EXISTS(SELECT 1 FROM candidates) AS discovery`,[options.noticeKey??null,EXTRACTOR_VERSION])).rows[0].discovery;
    }
    result.needed=result.ready||result.expired||result.missingRetry||result.discovery;
   }

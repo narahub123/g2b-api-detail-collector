@@ -8,6 +8,40 @@ const docs=[{id:'a',filename:'공고.pdf',seq:1,is_current:true,attachment_url:'
 {id:'b',filename:'공고.pdf',seq:2,is_current:true,attachment_url:'/original-b',latest:null,success:null}];
 afterEach(()=>{cleanup();vi.useRealTimers();vi.unstubAllGlobals();});
 
+it('현재 본문이 교체된 410 응답은 목록을 갱신하고 새 본문 첫 쪽을 표시합니다',async()=>{
+ let replaced=false;
+ const fetcher=vi.fn(async(input:string)=>{
+  if(input.includes('/a-ok/pages/2')){replaced=true;return Response.json({error:'현재 본문이 변경되었습니다.'},{status:410});}
+  if(input.includes('/pages/'))return Response.json({text:input.includes('/new-ok/')?'새 성공 본문':'이전 성공 본문'});
+  if(input.includes('/extractions/a-ok'))return Response.json(docs[0].success);
+  if(input.includes('/extractions/new-ok'))return Response.json({...docs[0].success,id:'new-ok'});
+  if(input.includes('/extractions'))return Response.json({runs:[],nextCursor:null});
+  return Response.json({documents:[{...docs[0],success:{...docs[0].success,id:replaced?'new-ok':'a-ok'}}],unsupported:[]});
+ });vi.stubGlobal('fetch',fetcher);render(<DocumentPanel noticeKey={key}/>);
+ fireEvent.click((await screen.findByText(/1\. 공고.pdf/)).closest('summary')!);
+ await screen.findByText('이전 성공 본문');fireEvent.click(screen.getByRole('button',{name:'다음'}));
+ await screen.findByText('새 성공 본문');
+ expect(screen.queryByText('이전 성공 본문')).not.toBeInTheDocument();
+ expect(screen.getByRole('combobox',{name:'페이지 첨부 1'})).toHaveValue('1');
+});
+
+it('과거 실행 선택은 현재 성공 본문과 페이지 선택을 바꾸지 않습니다',async()=>{
+ const fetcher=vi.fn(async(input:string)=>{
+  if(input.includes('/pages/'))return Response.json({text:'현재 성공 본문'});
+  if(input.includes('/extractions/old'))return Response.json({id:'old',status:'completed',page_count:5});
+  if(input.includes('/extractions/a-ok'))return Response.json(docs[0].success);
+  if(input.includes('/extractions'))return Response.json({runs:[{id:'a-ok',status:'completed',requested_at:'2026-10-30',attempt_number:2},{id:'old',status:'completed',requested_at:'2026-10-29',attempt_number:1}],nextCursor:null});
+  return Response.json({documents:[docs[0]],unsupported:[]});
+ });vi.stubGlobal('fetch',fetcher);render(<DocumentPanel noticeKey={key}/>);
+ fireEvent.click((await screen.findByText(/1\. 공고.pdf/)).closest('summary')!);
+ await screen.findByText('현재 성공 본문');fireEvent.click(screen.getByRole('button',{name:'다음'}));
+ await waitFor(()=>expect(fetcher.mock.calls.some(([url])=>url.includes('/a-ok/pages/2'))).toBe(true));
+ fireEvent.change(screen.getByRole('combobox',{name:'실행 이력 첨부 1'}),{target:{value:'old'}});
+ await screen.findByText(/페이지 5/);
+ expect(screen.getByRole('combobox',{name:'페이지 첨부 1'})).toHaveValue('2');
+ expect(fetcher.mock.calls.some(([url])=>url.includes('/old/pages/'))).toBe(false);
+});
+
 it('점검 반환 문서는 대기 상태에서 점검 사유를 표시합니다',async()=>{
  const active={id:'queued',status:'queued',error_code:'g2b_maintenance',error:'나라장터 시스템 점검으로 보류했습니다.',requested_at:'2026-01-01',next_attempt_at:null};
  vi.stubGlobal('fetch',vi.fn(async(input:string)=>input.includes('/extractions/')?Response.json(active):input.includes('/extractions')?Response.json({runs:[],nextCursor:null}):Response.json({documents:[{...docs[1],active,latest:active}],unsupported:[]})));
@@ -75,4 +109,18 @@ it('닫힌 파일은 현재 실행과 본문 폴링을 멈추고 목록 요약�
  await act(async()=>vi.advanceTimersByTimeAsync(11000));
  expect(fetcher.mock.calls.filter(([url])=>url.includes('/pages/')||url.includes('/extractions/active'))).toHaveLength(bodyCalls);
  expect(fetcher.mock.calls.filter(([url])=>url.includes('/documents?')).length).toBeGreaterThan(1);
+});
+
+it('실행 이력 선택지에서 자동 신규 추출과 재추출을 구분합니다',async()=>{
+ const runs=[{id:'initial',status:'failed',source:'automatic',purpose:'initial',requested_at:'2026-10-29',attempt_number:1},
+ {id:'repeat',status:'failed',source:'automatic',purpose:'reextract',requested_at:'2026-10-29',attempt_number:1}];
+ vi.stubGlobal('fetch',vi.fn(async(input:string)=>{
+  if(input.includes('/extractions/'))return Response.json(runs[0]);
+  if(input.includes('/extractions'))return Response.json({runs,nextCursor:null});
+  return Response.json({documents:[{...docs[0],success:null,latest:runs[0]}],unsupported:[]});
+ }));
+ render(<DocumentPanel noticeKey={key}/>);
+ fireEvent.click((await screen.findByText(/1\. 공고.pdf/)).closest('summary')!);
+ expect(await screen.findByRole('option',{name:/자동 신규 추출/})).toHaveValue('initial');
+ expect(screen.getByRole('option',{name:/자동 재추출/})).toHaveValue('repeat');
 });

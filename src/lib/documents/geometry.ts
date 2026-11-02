@@ -1,3 +1,6 @@
+import { cellsFromSegments, MAX_TABLE_SEGMENTS } from "./table-geometry";
+import type { Segment } from "./table-geometry";
+
 export type Rect = { x: number; y: number; width: number; height: number };
 export type Matrix = readonly number[];
 
@@ -20,12 +23,33 @@ export function bounds(points: [number, number][]): Rect {
   return { x, y, width: Math.max(...xs) - x, height: Math.max(...ys) - y };
 }
 
-/** 닫힌 사각형 경로만 셀 후보로 사용하고 밑줄·곡선·기울어진 도형은 제외합니다. */
-export function pathRectangles(list: { fnArray: number[]; argsArray: unknown[][] }, viewport: Matrix,
-  ops: { save: number; restore: number; transform: number; constructPath: number; paintFormXObjectBegin?: number; paintFormXObjectEnd?: number }): Rect[] {
+/** 배경 사각형과 개별 직선에서 셀 경계를 복원하며 클리핑·곡선·기울어진 도형은 제외합니다. */
+export function pathRectangles(list: { fnArray: number[]; argsArray: (unknown[] | null)[] }, viewport: Matrix,
+  ops: { save: number; restore: number; transform: number; constructPath: number; endPath?: number;
+    paintFormXObjectBegin?: number; paintFormXObjectEnd?: number }): Rect[] {
   let matrix: Matrix = [1, 0, 0, 1, 0, 0];
-  const stack: Matrix[] = [], rectangles: Rect[] = [];
-  for (let index = 0; index < list.fnArray.length && rectangles.length < 1500; index++) {
+  const stack: Matrix[] = [], segments: Segment[] = [];
+  /** 실제로 칠해진 축 평행 경로만 사용해 글리프의 클리핑 경계를 셀로 오인하지 않습니다. */
+  const append = (vertices: [number, number][], valid: boolean, closed: boolean) => {
+    if (!valid || vertices.length < 2 || vertices.some(vertex => !vertex.every(Number.isFinite))) return;
+    const edges = vertices.slice(1).map((vertex, i) => [vertices[i], vertex]);
+    if (closed) {
+      if (vertices.length !== 4) return;
+      const rect = bounds(vertices);
+      if (rect.width <= 8 || rect.height <= 6) return;
+      edges.push([vertices[vertices.length - 1], vertices[0]]);
+    }
+    if (edges.some(([a, b]) => Math.abs(a[0] - b[0]) >= 0.5 && Math.abs(a[1] - b[1]) >= 0.5)) return;
+    for (const [a, b] of edges) {
+      const horizontal = Math.abs(a[1] - b[1]) < 0.5;
+      const start = Math.min(a[horizontal ? 0 : 1], b[horizontal ? 0 : 1]);
+      const end = Math.max(a[horizontal ? 0 : 1], b[horizontal ? 0 : 1]);
+      if (end > start) segments.push({ axis: horizontal ? "x" : "y", at: a[horizontal ? 1 : 0], start, end });
+    }
+  };
+  for (let index = 0; index < list.fnArray.length; index++) {
+    // 과도하게 복잡한 페이지에서 일부 경계만 채택하지 않고 일반 좌표 정렬로 돌아갑니다.
+    if (segments.length > MAX_TABLE_SEGMENTS) return [];
     const fn = list.fnArray[index], args = list.argsArray[index];
     if (fn === ops.save) stack.push(matrix);
     else if (fn === ops.restore || fn === ops.paintFormXObjectEnd) matrix = stack.pop() ?? [1, 0, 0, 1, 0, 0];
@@ -35,6 +59,7 @@ export function pathRectangles(list: { fnArray: number[]; argsArray: unknown[][]
     }
     else if (fn === ops.transform) matrix = multiply(matrix, args as number[]);
     else if (fn === ops.constructPath) {
+      if (ops.endPath !== undefined && args?.[0] === ops.endPath) continue;
       // PDF.js 6의 DrawOPS 경로를 읽습니다. 버전은 lockfile에 고정합니다.
       const data = (args?.[1] as (ArrayLike<number> | null)[] | undefined)?.[0];
       if (!data) continue;
@@ -43,23 +68,15 @@ export function pathRectangles(list: { fnArray: number[]; argsArray: unknown[][]
       for (let offset = 0; offset < data.length;) {
         const command = data[offset++];
         if (command === 0 || command === 1) {
-          if (command === 0) { vertices = []; valid = true; }
+          if (command === 0) { append(vertices, valid, false); vertices = []; valid = true; }
           vertices.push(point(multiply(viewport, matrix), data[offset++], data[offset++]));
         } else if (command === 4) {
-          if (valid && vertices.length === 4 && vertices.every((p, i) => {
-            const next = vertices[(i + 1) % 4];
-            return Math.abs(p[0] - next[0]) < 0.5 || Math.abs(p[1] - next[1]) < 0.5;
-          })) {
-            const rect = bounds(vertices);
-            if (rect.width > 8 && rect.height > 6 && Object.values(rect).every(Number.isFinite)) rectangles.push(rect);
-          }
+          append(vertices, valid, true);
           vertices = [];
         } else { valid = false; offset += command === 2 ? 6 : command === 3 ? 4 : data.length; }
       }
+      append(vertices, valid, false);
     }
   }
-  // 같은 셀의 배경·클리핑·테두리가 중복되어도 하나의 영역으로 취급합니다.
-  return rectangles.filter((rect, i) => !rectangles.slice(0, i).some(other =>
-    Math.abs(rect.x - other.x) < 1 && Math.abs(rect.y - other.y) < 1 &&
-    Math.abs(rect.width - other.width) < 1 && Math.abs(rect.height - other.height) < 1));
+  return cellsFromSegments(segments);
 }

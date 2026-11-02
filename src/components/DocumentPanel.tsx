@@ -1,14 +1,16 @@
 "use client";
 
 import {useCallback,useEffect,useRef,useState} from 'react';
+import {StageTimings} from './StageTimings';
 import {FormAccordion} from './FormAccordion';
+import {documentWorkLabel} from '@/lib/documents/display';
 import {isActive,runStatuses} from '@/lib/documents/model';
 import type {DocumentList,DocumentSummary,RunMetadata} from '@/lib/documents/model';
 
 /** 서버가 저장한 응답만 읽고 통신 실패를 표시 가능한 오류로 통일합니다. */
 async function readJson<T>(url:string,signal?:AbortSignal,init?:RequestInit):Promise<T>{
  const response=await fetch(url,{cache:'no-store',signal,...init});const value=await response.json();
- if(!response.ok)throw new Error(typeof value.error==='string'?value.error:'PDF 정보를 조회하지 못했습니다.');return value;
+ if(!response.ok)throw Object.assign(new Error(typeof value.error==='string'?value.error:'PDF 정보를 조회하지 못했습니다.'),{status:response.status});return value;
 }
 /** 공고의 파일별 요약만 조회하고 활성 요청이 있을 때만 목록을 갱신합니다. */
 export function DocumentPanel({noticeKey}:{noticeKey:string}){
@@ -49,8 +51,10 @@ function DocumentFile({document:doc,index,noticeKey,refresh}:{document:DocumentS
  const [error,setError]=useState(''),[notice,setNotice]=useState(''),[posting,setPosting]=useState(false),[loadingHistory,setLoadingHistory]=useState(false);
  const query=`key=${encodeURIComponent(noticeKey)}`,base=`/api/admin/documents/${doc.id}/extractions`;
  const selectedId=selection||doc.success?.id||doc.latest?.id||'';
- const previousSelection=useRef(selectedId);
- useEffect(()=>{if(previousSelection.current!==selectedId){previousSelection.current=selectedId;setPage(1);setText(null);}},[selectedId]);
+ const bodyId=doc.success?.id,bodyPages=doc.success?.page_count;
+ const [bodyIdentity,setBodyIdentity]=useState(bodyId);
+ // 성공 본문이 교체되면 이전 페이지를 화면에 남기지 않습니다.
+ if(bodyIdentity!==bodyId){setBodyIdentity(bodyId);setPage(1);setText(null);}
  const status=doc.active?.status??doc.latest?.status;
  const pending=isActive(doc.active);
  useEffect(()=>{
@@ -69,12 +73,12 @@ function DocumentFile({document:doc,index,noticeKey,refresh}:{document:DocumentS
   return()=>abort.abort();
  },[open,selectedId,base,query]);
  useEffect(()=>{
-  if(!open||!selectedId||run?.id!==selectedId||!run?.page_count)return;
+  if(!open||!bodyId||!bodyPages)return;
   const abort=new AbortController();setText(null);
-  readJson<{text:string}>(`${base}/${selectedId}/pages/${page}?${query}`,abort.signal).then(value=>{if(!abort.signal.aborted){setText(value.text);setError('');}})
-   .catch(reason=>{if(!abort.signal.aborted)setError(reason.message);});
+  readJson<{text:string}>(`${base}/${bodyId}/pages/${page}?${query}`,abort.signal).then(value=>{if(!abort.signal.aborted){setText(value.text);setError('');}})
+   .catch(reason=>{if(!abort.signal.aborted){setText(null);setError(reason.message);if(reason.status===410)void refresh(abort.signal);}});
   return()=>abort.abort();
- },[open,selectedId,page,run?.page_count,base,query]);
+ },[open,bodyId,page,bodyPages,base,query,refresh]);
  useEffect(()=>{
   if(!open||!doc.active)return;const abort=new AbortController();let timer:ReturnType<typeof setTimeout>;
   /** 열린 파일의 현재 실행만 폴링하며 완료 시 목록을 다시 읽어 성공 본문을 선택합니다. */
@@ -122,19 +126,20 @@ function DocumentFile({document:doc,index,noticeKey,refresh}:{document:DocumentS
     {doc.active?.next_attempt_at&&` 재시도 예정: ${new Date(doc.active.next_attempt_at).toLocaleString('ko-KR')}`}</p>}
    {overdue&&doc.active?.error_code!=='g2b_maintenance'&&<p role="alert">실행 가능한 요청이 30분 이상 대기 중입니다. 작업기·임대·보완 실행 및 Actions 상태를 확인하세요.</p>}
    {latestIssue&&<p role="alert">최근 시도: {runStatuses[latestIssue.status]}{latestIssue.error?` · ${latestIssue.error}`:''}{doc.success?' · 마지막 성공 본문을 조회할 수 있습니다.':''}</p>}
-   {!!history.length&&<p><label>실행 이력{' '}<select aria-label={`실행 이력 첨부 ${doc.seq}`} value={selectedId} onChange={event=>{setSelection(event.target.value);setPage(1);setText(null);}}>
+   {!!history.length&&<p><label>실행 이력{' '}<select aria-label={`실행 이력 첨부 ${doc.seq}`} value={selectedId} onChange={event=>setSelection(event.target.value)}>
     {selectedId&&!history.some(item=>item.id===selectedId)&&<option value={selectedId}>선택한 저장 기록</option>}
-    {history.map(item=><option key={item.id} value={item.id}>{runStatuses[item.status]} · {new Date(item.requested_at).toLocaleString('ko-KR')} · 시도 {item.attempt_number}</option>)}
+    {history.map(item=><option key={item.id} value={item.id}>{documentWorkLabel(item)} · {runStatuses[item.status]} · {new Date(item.requested_at).toLocaleString('ko-KR')} · 시도 {item.attempt_number}</option>)}
    </select></label>{' '}{cursor&&<button disabled={loadingHistory} onClick={()=>void more()}>이전 이력 더 보기</button>}</p>}
    {run&&<div><p>{runStatuses[run.status]} · 페이지 {run.page_count??'-'} · 문자 {run.character_count??'-'} · 완료 {run.finished_at?new Date(run.finished_at).toLocaleString('ko-KR'):'-'}</p>
     {run.error&&run.id!==latestIssue?.id&&<p role="alert">{run.error}</p>}
-    {!!run.page_count&&<><label>페이지{' '}<select aria-label={`페이지 첨부 ${doc.seq}`} value={page} onChange={event=>setPage(Number(event.target.value))}>
-     {Array.from({length:run.page_count},(_,i)=><option key={i+1} value={i+1}>{i+1}쪽</option>)}</select></label>{' '}
-     <button disabled={page<=1} onClick={()=>setPage(value=>value-1)}>이전</button>{' '}<button disabled={page>=run.page_count} onClick={()=>setPage(value=>value+1)}>다음</button>
-     <pre style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere',maxHeight:'60vh',overflow:'auto',background:'#f5f7fa',padding:16}}>{text===null?'저장된 본문을 조회하고 있습니다.':text||'이 페이지에서 추출된 텍스트가 없습니다.'}</pre></>}
     {run.status==='no_text'&&<p>텍스트가 없는 PDF입니다. OCR은 실행하지 않습니다.</p>}
-    <details><summary>처리 정보</summary><p>추출기: {run.extractor_version??'-'} · 처리 시간: {run.elapsed_ms==null?'-':`${(run.elapsed_ms/1000).toFixed(1)}초`} · 최대 메모리: {run.peak_memory_bytes?`${(Number(run.peak_memory_bytes)/1024/1024).toFixed(0)}MiB`:'-'}</p></details>
+    <details><summary>처리 정보</summary><p>추출기: {run.extractor_version??'-'} · 처리 시간: {run.elapsed_ms==null?'-':`${(run.elapsed_ms/1000).toFixed(1)}초`} · 최대 메모리: {run.peak_memory_bytes?`${(Number(run.peak_memory_bytes)/1024/1024).toFixed(0)}MiB`:'-'}</p><StageTimings timings={run.stage_timings}/></details>
    </div>}
+   <p>같은 첨부파일은 현재 성공 본문만 보관하며 이전 실행은 처리 이력만 제공합니다.</p>
+    {!!bodyPages&&<><label>페이지{' '}<select aria-label={`페이지 첨부 ${doc.seq}`} value={page} onChange={event=>setPage(Number(event.target.value))}>
+     {Array.from({length:bodyPages!},(_,i)=><option key={i+1} value={i+1}>{i+1}쪽</option>)}</select></label>{' '}
+     <button disabled={page<=1} onClick={()=>setPage(value=>value-1)}>이전</button>{' '}<button disabled={page>=bodyPages!} onClick={()=>setPage(value=>value+1)}>다음</button>
+     <pre style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere',maxHeight:'60vh',overflow:'auto',background:'#f5f7fa',padding:16}}>{text===null?'저장된 본문을 조회하고 있습니다.':text||'이 페이지에서 추출된 텍스트가 없습니다.'}</pre></>}
    {!selectedId&&<p>저장된 실행 결과가 없습니다.</p>}
   </div>}
  </FormAccordion>;

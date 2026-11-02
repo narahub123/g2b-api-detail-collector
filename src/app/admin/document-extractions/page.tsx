@@ -14,7 +14,7 @@ import { DocumentError } from "@/lib/documents/contract";
 import { runStatuses } from "@/lib/documents/model";
 import {
   documentDuration,
-  documentSource,
+  documentWorkLabel,
   documentTime,
 } from "@/lib/documents/display";
 import "../../admin-history.css";
@@ -264,7 +264,7 @@ export default async function ExtractionHistoryPage({
                     {item.document_type?.toUpperCase() || "형식 기록 없음"} ·{" "}
                     {item.run ? (
                       <>
-                        {documentSource(item.run.source)} ·{" "}
+                        {documentWorkLabel(item.run)} ·{" "}
                         {item.run.attempt_number}차 시도 · 소요{" "}
                         {documentDuration(item.run.elapsed_ms)}
                       </>

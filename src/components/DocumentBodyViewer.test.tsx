@@ -4,7 +4,7 @@ import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {DocumentExtractionDetail} from './DocumentExtractionDetail';
 import type {HistoryDetail} from '@/lib/documents/history-store';
 
-const initial={run:{id:'run',document_id:'doc',notice_key:'notice',filename:'자료.pdf',status:'completed',source:'manual',page_count:3,requested_at:'2026-10-30T00:00:00Z',diagnostic_error:null},chain:[]} as unknown as HistoryDetail;
+const initial={run:{id:'run',document_id:'doc',notice_key:'notice',filename:'자료.pdf',status:'completed',source:'manual',has_content:true,page_count:3,requested_at:'2026-10-30T00:00:00Z',diagnostic_error:null},chain:[]} as unknown as HistoryDetail;
 
 /** 취소를 무시하고 도착하는 응답도 검증할 수 있도록 완료 시점을 제어합니다. */
 function deferred(){let resolve!:(value:Response)=>void;const promise=new Promise<Response>(r=>{resolve=r;});return {promise,resolve};}
@@ -92,4 +92,13 @@ it('화면을 떠났다가 돌아오면 이전 메모리 캐시를 재사용하�
  const first=render(<DocumentExtractionDetail initial={initial}/>);fireEvent.click(screen.getByRole('button',{name:'본문 조회'}));await screen.findByText('본문');first.unmount();
  render(<DocumentExtractionDetail initial={initial}/>);expect(screen.queryByText('본문')).not.toBeInTheDocument();
  fireEvent.click(screen.getByRole('button',{name:'본문 조회'}));await screen.findByText('본문');expect(fetch).toHaveBeenCalledTimes(2);
+});
+
+it('교체된 본문의 410 응답은 모든 캐시와 표시 본문을 폐기하고 현재 결과로 안내합니다',async()=>{
+ const fetch=vi.fn<typeof globalThis.fetch>().mockResolvedValueOnce(response('첫 본문')).mockResolvedValueOnce(response('둘째 본문')).mockResolvedValueOnce(new Response('{}',{status:410}));vi.stubGlobal('fetch',fetch);
+ render(<DocumentExtractionDetail initial={initial}/>);fireEvent.click(screen.getByRole('button',{name:'본문 조회'}));await screen.findByText('첫 본문');next();await screen.findByText('둘째 본문');next();
+ expect(await screen.findByRole('link',{name:'현재 본문 확인'})).toHaveAttribute('href','/admin/bids/notice');
+ expect(screen.queryByText('첫 본문')).not.toBeInTheDocument();expect(screen.queryByText('둘째 본문')).not.toBeInTheDocument();
+ expect(screen.queryByRole('button',{name:'이전 페이지'})).not.toBeInTheDocument();expect(screen.queryByRole('button',{name:'본문 조회'})).not.toBeInTheDocument();
+ expect(screen.queryByRole('button',{name:'다시 시도'})).not.toBeInTheDocument();
 });

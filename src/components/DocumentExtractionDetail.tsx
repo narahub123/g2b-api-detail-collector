@@ -5,7 +5,8 @@ import {Download} from 'lucide-react';
 import type {HistoryDetail} from '@/lib/documents/history-store';
 import {extractionStages} from '@/lib/documents/diagnostics';
 import {isActive,runStatuses} from '@/lib/documents/model';
-import {documentDuration,documentSource,documentTime} from '@/lib/documents/display';
+import {documentDuration,documentWorkLabel,documentTime} from '@/lib/documents/display';
+import {StageTimings} from './StageTimings';
 import {DocumentBodyViewer} from './DocumentBodyViewer';
 import {safeAttachmentLink} from '@/lib/g2b/attachment-links';
 
@@ -43,7 +44,7 @@ function ExtractionDetail({initial}:{initial:HistoryDetail}){
   <div className="extraction-grid">
    <section className="extraction-card"><h2>실행 정보</h2><dl className="extraction-data">
     <dt>실행 ID</dt><dd>{run.id}</dd><dt>공고</dt><dd><a href={`/admin/bids/${encodeURIComponent(run.notice_key)}`}>{run.notice_key}</a></dd>
-    <dt>문서 형식</dt><dd>{run.document_type?.toUpperCase()||'기록 없음'}</dd><dt>요청 출처</dt><dd>{documentSource(run.source)}</dd><dt>시도</dt><dd>{run.attempt_number}차 / 최대 3차</dd>
+    <dt>문서 형식</dt><dd>{run.document_type?.toUpperCase()||'기록 없음'}</dd><dt>작업 구분</dt><dd>{documentWorkLabel(run)}</dd><dt>시도</dt><dd>{run.attempt_number}차 / 최대 3차</dd>
     <dt>접수</dt><dd>{documentTime(run.requested_at)}</dd><dt>시작</dt><dd>{documentTime(run.started_at)}</dd><dt>종료</dt><dd>{documentTime(run.finished_at)}</dd>
     <dt>소요 시간</dt><dd>{documentDuration(run.elapsed_ms)}</dd><dt>추출기 버전</dt><dd>{run.extractor_version||'기록 없음'}</dd><dt>파일 해시</dt><dd>{run.file_hash||'기록 없음'}</dd>
    </dl></section>
@@ -60,6 +61,7 @@ function ExtractionDetail({initial}:{initial:HistoryDetail}){
    {run.diagnostic_error?<details className="extraction-diagnostic"><summary>기술 정보 펼쳐보기</summary><pre>{JSON.stringify(run.diagnostic_error,null,2)}</pre></details>:<p className="extraction-meta">상세 진단 정보가 기록되지 않았습니다.</p>}
   </section>
   <section className="extraction-card" style={{marginTop:24}}><h2>재시도 흐름</h2><ol>{detail.chain.map(item=><li key={item.id}><a href={`/admin/document-extractions/${item.id}`} aria-current={item.id===run.id?'page':undefined}>{item.attempt_number}차 · {runStatuses[item.status]}</a> · {documentTime(item.requested_at)}{item.error_code&&` · ${item.error_code}`}</li>)}</ol></section>
-  {!!run.page_count&&<DocumentBodyViewer noticeKey={run.notice_key} documentId={run.document_id} runId={run.id} pageCount={run.page_count}/>}
+  <section className="extraction-card" style={{marginTop:24}}><h2>단계별 처리 시간</h2><StageTimings timings={run.stage_timings}/></section>
+  {run.has_content===true&&!!run.page_count?<DocumentBodyViewer noticeKey={run.notice_key} documentId={run.document_id} runId={run.id} pageCount={run.page_count}/>:<p>같은 첨부파일은 현재 성공 본문만 보관하며 이전 실행은 처리 이력만 제공합니다. <a href={`/admin/bids/${encodeURIComponent(run.notice_key)}`}>현재 본문 확인</a></p>}
  </>;
 }

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import pg from "pg";
 import { expect, it } from "vitest";
-import { DocumentQueue } from "./queue";
+import { DocumentQueue, EXTRACTOR_VERSION } from "./queue";
 
 /** 실제 SQL 경계에서만 오류를 주입해 트랜잭션 전체의 롤백을 확인합니다. */
 function failingQueue(pool:pg.Pool,schema:string,pattern:RegExp,afterCommit=false) {
@@ -33,6 +33,9 @@ it.skipIf(!process.env.LIVE_DB_TEST || !process.env.DATABASE_URL)("운영 대기
     await pool.query(`CREATE TABLE ${schema}.notices(key text PRIMARY KEY,detail jsonb)`);
     await pool.query((await readFile("db/migrations/0006-document-extraction.sql", "utf8")).replaceAll("public.",`${schema}.`));
     await pool.query((await readFile('db/migrations/0008-extraction-diagnostics.sql','utf8')).replaceAll('public.',`${schema}.`));
+  await pool.query((await readFile('db/migrations/0010-single-document-content.sql','utf8')).replaceAll('public.',`${schema}.`));
+  await pool.query((await readFile('db/migrations/0011-stage-timings.sql','utf8')).replaceAll('public.',`${schema}.`));
+  await pool.query((await readFile('db/migrations/0012-extraction-priority.sql','utf8')).replaceAll('public.',`${schema}.`));
     await pool.query(`INSERT INTO ${schema}.notices VALUES($1,$2)`,[key,JSON.stringify({attachments:[file(1),file(2)]})]);
     const requests = await Promise.all([q.enqueue(key,fileNo,1,"automatic"),q.enqueue(key,fileNo,1,"manual")]);
     expect(requests[0].id).toBe(requests[1].id);
@@ -49,10 +52,10 @@ it.skipIf(!process.env.LIVE_DB_TEST || !process.env.DATABASE_URL)("운영 대기
     expect((await pool.query(`SELECT stage,current_page,completed_pages FROM ${schema}.attachment_extraction_runs WHERE id=$1`,[run!.id])).rows[0]).toMatchObject({stage:'extracting',current_page:2,completed_pages:1});
     await expect(q.progress(rival,run!.id,{stage:'saving',at})).rejects.toThrow();
     await expect(q.complete(rival,run!.id,{pages:[],pageCount:0,characterCount:0,extractorVersion:"test",fileHash:"hash"},null)).rejects.toThrow();
-    await q.complete(token,run!.id,{pages:[{pageNumber:1,text:"원문"}],pageCount:1,characterCount:2,extractorVersion:"6.4.299 / reading-order-v1",fileHash:"hash"},null);
+    await q.complete(token,run!.id,{pages:[{pageNumber:1,text:"원문"}],pageCount:1,characterCount:2,extractorVersion:EXTRACTOR_VERSION,fileHash:"hash"},null);
     await expect(q.progress(token,run!.id,{stage:'saving',at})).rejects.toThrow();
     expect((await q.claim(token))?.id).toBe(second.id);
-    await q.complete(token,second.id,{pages:[{pageNumber:1,text:"원문"}],pageCount:1,characterCount:2,extractorVersion:"6.4.299 / reading-order-v1",fileHash:"hash"},null);
+    await q.complete(token,second.id,{pages:[{pageNumber:1,text:"원문"}],pageCount:1,characterCount:2,extractorVersion:EXTRACTOR_VERSION,fileHash:"hash"},null);
     const fresh = await q.enqueue(key,fileNo,2,"manual");
     expect((await q.claim(token))?.id).toBe(fresh.id);
     for(const boundary of [/SET status=\$2,error_code/,/INSERT INTO .*attachment_extraction_runs/,/^COMMIT$/]) {
@@ -62,6 +65,7 @@ it.skipIf(!process.env.LIVE_DB_TEST || !process.env.DATABASE_URL)("운영 대기
     }
     await expect(failingQueue(pool,schema,/last_success_run_id=CASE/).complete(token,fresh.id,{pages:[{pageNumber:1,text:"실패한 저장"}],pageCount:1,characterCount:6,extractorVersion:"test",fileHash:"new"},null)).rejects.toThrow("주입한");
     expect((await pool.query(`SELECT last_success_run_id FROM ${schema}.attachment_documents WHERE id=$1`,[fresh.document_id])).rows[0].last_success_run_id).toBe(second.id);
+    expect((await pool.query(`SELECT run_id,pages FROM ${schema}.attachment_document_contents WHERE document_id=$1`,[fresh.document_id])).rows[0]).toEqual({run_id:second.id,pages:[{pageNumber:1,text:'원문'}]});
     // 커밋 후 응답이 유실돼도 이미 만든 후속 요청을 복구가 복제하지 않습니다.
     await expect(failingQueue(pool,schema,/^COMMIT$/,true).fail(token,fresh.id,{code:"network",message:"일시 오류",retry:true})).rejects.toThrow("주입한");
     let rows=(await pool.query(`SELECT * FROM ${schema}.attachment_extraction_runs WHERE document_id=$1 ORDER BY requested_at,attempt_number`,[fresh.document_id])).rows;

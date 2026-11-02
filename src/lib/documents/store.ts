@@ -3,7 +3,7 @@ import {DocumentError,pickPdfAttachment} from './contract';
 import {parseAttachmentDownloadUrl} from '../g2b/attachment-links';
 import type {DocumentList,DocumentSummary,RunMetadata} from './model';
 
-const metadata=['id','filename','status','source','requested_at','started_at','finished_at','next_attempt_at','error','error_code','attempt_number','page_count','character_count','elapsed_ms','extractor_version','file_hash','peak_memory_bytes'];
+const metadata=['id','filename','status','source','purpose','requested_at','started_at','finished_at','next_attempt_at','error','error_code','attempt_number','page_count','character_count','elapsed_ms','extractor_version','file_hash','peak_memory_bytes','stage_timings'];
 /** 페이지 배열이나 실행 소유 토큰을 메타데이터 응답에 포함하지 않습니다. */
 function fields(alias:string){return metadata.map(name=>name==='requested_at'
  ?`to_char(${alias}.requested_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS requested_at`
@@ -59,9 +59,15 @@ export class DocumentStore {
  async run(key:string,id:string,runId:string):Promise<RunMetadata|null>{
   return (await this.pool.query(`SELECT ${fields('r')} FROM ${this.schema}.attachment_extraction_runs r JOIN ${this.schema}.attachment_documents d ON d.id=r.document_id WHERE d.id=$1 AND d.notice_key=$2 AND r.id=$3`,[id,key,runId])).rows[0]??null;
  }
- /** JSONB 전체를 전송하지 않고 요청한 페이지 한 개만 DB에서 선택합니다. */
+ /** 현재 본문의 한 페이지만 조회하고 과거 본문 요청은 실행 소속 확인 후 구분해 거부합니다. */
  async page(key:string,id:string,runId:string,page:number):Promise<{pageNumber:number;text:string}|null>{
-  return (await this.pool.query(`SELECT r.pages->($4::int-1) page FROM ${this.schema}.attachment_extraction_runs r JOIN ${this.schema}.attachment_documents d ON d.id=r.document_id
-    WHERE d.id=$1 AND d.notice_key=$2 AND r.id=$3 AND $4::int BETWEEN 1 AND jsonb_array_length(r.pages)`,[id,key,runId,page])).rows[0]?.page??null;
+  const row=(await this.pool.query(`SELECT c.run_id AS content_run_id,
+    CASE WHEN c.run_id=r.id AND $4::int BETWEEN 1 AND jsonb_array_length(c.pages) THEN c.pages->($4::int-1) END AS page
+    FROM ${this.schema}.attachment_extraction_runs r JOIN ${this.schema}.attachment_documents d ON d.id=r.document_id
+    LEFT JOIN ${this.schema}.attachment_document_contents c ON c.document_id=d.id
+    WHERE d.id=$1 AND d.notice_key=$2 AND r.id=$3`,[id,key,runId,page])).rows[0];
+  if(!row)return null;
+  if(row.content_run_id!==runId)throw new DocumentError('해당 실행의 본문은 보관하지 않습니다. 현재 성공 결과를 확인하세요.',410);
+  return row.page??null;
  }
 }
