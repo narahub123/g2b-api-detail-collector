@@ -1,3 +1,4 @@
+import {serializeError} from '../error-diagnostics';
 import { randomUUID } from "node:crypto";
 import { getPool } from "./postgres-store";
 import type { CollectionJob } from "./collection-job";
@@ -7,7 +8,18 @@ const leaseDuration = "2 minutes";
 
 /** 기존 오류 문자열을 포함한 작업 JSON에서 비밀값을 제거합니다. */
 function safeJobJson(job: CollectionJob): string {
-  return JSON.stringify(job, (_key, value: unknown) => typeof value === "string" ? redactDiagnostic(value) : value);
+  const diagnosticObjects=new WeakSet<object>();
+  return JSON.stringify(job,function(key,value:unknown){
+    if(key==='diagnostic'&&value&&typeof value==='object'){
+      const safe=serializeError(value);diagnosticObjects.add(safe);return safe;
+    }
+    // 이미 정제된 진단의 자식은 요약용 1,000자 제한으로 다시 자르지 않습니다.
+    if(diagnosticObjects.has(this)){
+      if(value&&typeof value==='object')diagnosticObjects.add(value);
+      return value;
+    }
+    return typeof value==='string'?redactDiagnostic(value):value;
+  });
 }
 
 /** 풀러 연결에서도 안전하게 쓸 수 있도록 스키마가 지정된 작업 테이블을 반환합니다. */

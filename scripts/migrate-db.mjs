@@ -31,6 +31,7 @@ try {
   await client.query(await readFile(fileURLToPath(new URL("../db/migrations/0010-single-document-content.sql", import.meta.url)), "utf8"));
   await client.query(await readFile(fileURLToPath(new URL("../db/migrations/0011-stage-timings.sql", import.meta.url)), "utf8"));
   await client.query(await readFile(fileURLToPath(new URL("../db/migrations/0012-extraction-priority.sql", import.meta.url)), "utf8"));
+  await client.query(await readFile(fileURLToPath(new URL("../db/migrations/0013-collection-error-diagnostics.sql", import.meta.url)), "utf8"));
   await client.query("COMMIT");
   console.log("DB 스키마 적용 완료");
 } catch (error) {

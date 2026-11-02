@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS public.notices (
   detail jsonb,
   -- 마지막 상세 수집 오류이며, 오류가 나도 기존 상세는 유지될 수 있습니다.
   detail_error text,
+  detail_diagnostic jsonb,
   -- 상세 값을 우선하고 없으면 API 값으로 채우는 표시용 공고명입니다.
   title text,
   -- 상세 값을 우선하는 표시용 수요기관명입니다.
@@ -106,6 +107,7 @@ CREATE TABLE IF NOT EXISTS public.collection_notice_attempts (
   attempts integer NOT NULL CHECK (attempts BETWEEN 1 AND 3),
   status text NOT NULL CHECK (status IN ('failed', 'succeeded')),
   error text,
+  diagnostic_error jsonb,
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS collection_notice_attempts_retry_idx

@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vitest";
-import { runIncrementalCollection, type IncrementalStore } from "./incremental-collection";
+import { runIncrementalCollection, type IncrementalStore, type NoticeAttempt } from "./incremental-collection";
 import type { StoredNotice } from "./notices";
 import type { CollectionJob } from "./collection-job";
 import { G2bMaintenanceError } from "./maintenance";
@@ -112,7 +112,7 @@ it("검증 실패 후 구간 재시도 성공 시 처리 건수를 중복 집계
 /** 완료 지점과 저장 결과를 운영 DB 없이 검증할 메모리 저장소를 만듭니다. */
 function memoryStore() {
   const notices = new Map<string, StoredNotice>();
-  const attempts = new Map<string, { key: string; attempts: number; status: "failed" | "succeeded"; error: string | null }>();
+  const attempts = new Map<string, NoticeAttempt>();
   const jobs: CollectionJob[] = [];
   const store: IncrementalStore = {
     getCheckpoint: async () => [...jobs].reverse().find((job) => job.status === "completed")?.windowEnd || null,
@@ -417,4 +417,24 @@ it("증분 부모 종료와 자식 API 시작 경계를 보존하고 재시도 �
     expect(childAttempts).toBe(2);
     expect(memory.jobs.some(j => j.results?.[1]?.status === "failed" && j.results[1].finishedAt === new Date(base + 100).toISOString())).toBe(true);
   } finally { clock.mockRestore(); delete process.env.G2B_SERVICE_KEY; }
+});
+
+it('상세 실패 진단을 공고와 시도 및 작업 이벤트에 저장하고 성공 시 현재 진단을 비웁니다',async()=>{
+ vi.stubEnv('G2B_SERVICE_KEY','test-key');
+ try{
+  const memory=memoryStore();
+  const fetcher=async()=>Response.json({response:{body:{totalCount:1,numOfRows:100,pageNo:1,items:[{bidNtceNo:'R26BK1',bidNtceOrd:'000'}]}}});
+  const options={start:'2026-10-27T00:00:00Z',end:'2026-10-27T01:00:00Z',store:memory.store,fetcher};
+  const failure={message:'failed',cause:{code:'ECONNRESET',extra:{status:502}},errors:[{code:'ETIMEDOUT'}]};
+  const failed=await runIncrementalCollection({...options,scrape:async()=>{throw failure;}});
+  const key='R26BK1--000';
+  expect(memory.notices.get(key)).toMatchObject({detailDiagnostic:failure});
+  expect(memory.attempts.get(key)).toMatchObject({diagnostic:failure});
+  expect(failed.diagnostics?.events).toContainEqual(expect.objectContaining({diagnostic:failure}));
+  memory.attempts.set(key,{...memory.attempts.get(key)!,attempts:1});
+  await runIncrementalCollection({...options,scrape:async(url)=>({detail:{sourceUrl:url,sections:[],attachments:[],links:[]},relatedNoticeKeys:[]})});
+  expect(memory.notices.get(key)).toMatchObject({detailError:null,detailDiagnostic:null});
+  expect(memory.attempts.get(key)).toMatchObject({status:'succeeded',error:null,diagnostic:null});
+  expect(failed.diagnostics?.events).toContainEqual(expect.objectContaining({diagnostic:failure}));
+ }finally{vi.unstubAllEnvs();}
 });

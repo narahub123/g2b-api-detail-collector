@@ -1,3 +1,4 @@
+import type {SerializedError} from '../error-diagnostics';
 import { normalizeNotice, type NormalizedNotice } from "./normalize";
 import type { ModalCapture, ScrapedDetail } from "./detail-page";
 import type { ApiNotice } from "./types";
@@ -6,7 +7,7 @@ import { countStoredNotices, getStoredIndependentDetail, getStoredNotice, listPu
   listStoredNoticeRows, type NoticeAudience } from "./postgres-store";
 import type { NoticeFilters } from "./notice-filters";
 
-export type StoredNotice = { key?: string; api: ApiNotice | null; detail: ScrapedDetail | null; relatedNoticeKeys?: string[]; detailError?: string | null; normalized?: NormalizedNotice;
+export type StoredNotice = { key?: string; api: ApiNotice | null; detail: ScrapedDetail | null; relatedNoticeKeys?: string[]; detailError?: string | null; detailDiagnostic?: SerializedError | null; normalized?: NormalizedNotice;
   orderPlanNumbers?: string[]; preSpecificationNumbers?: string[]; otherDetailNumbers?: string[]; openingDetailKeys?: string[];
   independentTriggers?: { number: string; trigger: ModalCapture["trigger"] }[] };
 export type IndependentReference = { number: string; detail: IndependentDetail | null; noticeKey?: string;

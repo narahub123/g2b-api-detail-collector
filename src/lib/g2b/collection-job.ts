@@ -1,3 +1,4 @@
+import {serializeError} from '../error-diagnostics';
 import { deferCollection, maintenanceFromError, type MaintenanceInfo } from "./maintenance";
 import { seoulInputToUtc } from "../seoul-time";
 import { randomUUID } from "node:crypto";
@@ -162,7 +163,8 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies, l
     catch (error) {
       observation.assert();
       if (maintenanceFromError(error)) throw error;
-      record.detailError = redactDiagnostic(error instanceof Error ? error.message : "상세 수집 오류");
+      record.detailDiagnostic=serializeError(error);
+      record.detailError=redactDiagnostic(typeof record.detailDiagnostic.message==='string'?record.detailDiagnostic.message:'오류 객체의 세부 속성을 확인하세요.');
       noticeResult.status = "failed";
       noticeResult.error = record.detailError;
       job.detailFailed++;
@@ -196,6 +198,7 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies, l
     record.openingDetailKeys = structured.openingDetailKeys;
     record.independentTriggers = structured.independentTriggers;
     record.detailError = null;
+    record.detailDiagnostic=null;
     await observation.progress("saving", noticeResult);
     await saveRecord(key, record, structured);
     job.errors.push(...structured.warnings);
@@ -340,7 +343,11 @@ async function runRefresh(job: CollectionJob, deps: CollectionDependencies, leas
         observation.assert();
         if (maintenanceFromError(error)) throw error;
         result.status = "failed";
-        result.error = redactDiagnostic(error instanceof Error ? error.message : "상세 수집 오류");
+        record.detailDiagnostic=serializeError(error);
+        result.error=redactDiagnostic(typeof record.detailDiagnostic.message==='string'?record.detailDiagnostic.message:'오류 객체의 세부 속성을 확인하세요.');
+        record.detailError=result.error;
+        await ensureLease();
+        await saveStoredNotice(result.key,record);
         job.detailFailed++;
         job.errors.push(`${result.key}: ${result.error}`);
         addDiagnostic(job, { severity: "failure", stage: "detail", operation: "scrape-detail", target: { key: result.key }, error });
@@ -367,7 +374,7 @@ async function runRefresh(job: CollectionJob, deps: CollectionDependencies, leas
         otherDetailNumbers: structured.otherDetailNumbers,
         openingDetailKeys: structured.openingDetailKeys,
         independentTriggers: structured.independentTriggers,
-        detailError: null };
+        detailError: null, detailDiagnostic:null };
       updated.normalized = normalizeNotice(updated.api, updated.detail, { number, order });
       await ensureLease();
       await observation.progress("saving", result);

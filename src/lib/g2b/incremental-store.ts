@@ -1,3 +1,4 @@
+import {serializeError} from '../error-diagnostics';
 import { getPool } from "./postgres-store";
 import type { NoticeAttempt } from "./incremental-collection";
 
@@ -29,7 +30,7 @@ export async function getIncrementalCheckpoint(activationId?: string): Promise<s
 /** 다음 작업에서 재시도할 상세 실패 공고만 조회합니다. */
 export async function listFailedNoticeAttempts(): Promise<NoticeAttempt[]> {
   const result = await getPool().query<NoticeAttempt>(
-    `SELECT key,attempts,status,error FROM ${table("collection_notice_attempts")}
+    `SELECT key,attempts,status,error,diagnostic_error AS diagnostic FROM ${table("collection_notice_attempts")}
      WHERE status='failed' AND attempts<3 ORDER BY updated_at,key`);
   return result.rows;
 }
@@ -37,14 +38,15 @@ export async function listFailedNoticeAttempts(): Promise<NoticeAttempt[]> {
 /** 공고의 기존 상세 시도 횟수를 확인합니다. */
 export async function getNoticeAttempt(key: string): Promise<NoticeAttempt | null> {
   const result = await getPool().query<NoticeAttempt>(
-    `SELECT key,attempts,status,error FROM ${table("collection_notice_attempts")} WHERE key=$1`, [key]);
+    `SELECT key,attempts,status,error,diagnostic_error AS diagnostic FROM ${table("collection_notice_attempts")} WHERE key=$1`, [key]);
   return result.rows[0] || null;
 }
 
 /** 상세 추출 결과를 공고번호와 차수 키로 저장합니다. */
 export async function saveNoticeAttempt(attempt: NoticeAttempt): Promise<void> {
-  await getPool().query(`INSERT INTO ${table("collection_notice_attempts")}(key,attempts,status,error)
-    VALUES($1,$2,$3,$4) ON CONFLICT(key) DO UPDATE SET attempts=EXCLUDED.attempts,
-    status=EXCLUDED.status,error=EXCLUDED.error,updated_at=now()`,
-  [attempt.key, attempt.attempts, attempt.status, attempt.error]);
+  await getPool().query(`INSERT INTO ${table("collection_notice_attempts")}(key,attempts,status,error,diagnostic_error)
+    VALUES($1,$2,$3,$4,$5::jsonb) ON CONFLICT(key) DO UPDATE SET attempts=EXCLUDED.attempts,
+    status=EXCLUDED.status,error=EXCLUDED.error,diagnostic_error=EXCLUDED.diagnostic_error,updated_at=now()`,
+  [attempt.key, attempt.attempts, attempt.status, attempt.status==='succeeded'?null:attempt.error,
+    attempt.status==='failed'&&attempt.diagnostic?JSON.stringify(serializeError(attempt.diagnostic)):null]);
 }
