@@ -70,7 +70,9 @@ function historyRun(index:number):RunMetadata{
 
 /** 화면에 표시된 실행 ID의 순서와 중복을 함께 검증합니다. */
 function displayedRuns():string[]{
- return screen.getAllByRole('link',{name:'실행 상세',exact:true}).map(link=>link.getAttribute('href')!.split('/').at(-1)!);
+ return screen
+   .getAllByRole("link", { name: "실행 상세" })
+   .map((link) => link.getAttribute("href")!.split("/").at(-1)!);
 }
 
 it('과거 이력 40건을 펼친 상태에서 재추출을 접수해도 이력과 다음 조회 위치를 유지합니다',async()=>{

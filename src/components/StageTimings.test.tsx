@@ -15,6 +15,12 @@ it('완료와 미완료 및 추정 시간을 구분합니다',()=>{
  expect(screen.getByText(/완료 · 2.0초/)).toBeInTheDocument();
  expect(screen.getByText(/중단 · 미완료 · 추정 · 3.0초/)).toBeInTheDocument();
 });
+it('다운로드 하위 구간의 완료와 미완료를 표시합니다',()=>{
+ render(<StageTimings timings={[{stage:'download',startedAt:'2026-01-01T00:00:00Z',endedAt:null,elapsedMs:null,outcome:'running',estimated:false,
+ details:[{step:'browser',elapsedMs:100,outcome:'completed'},{step:'receive',elapsedMs:null,outcome:'running'}]}]}/>);
+ expect(screen.getByText(/브라우저 시작 · 완료 · 0.1초/)).toBeInTheDocument();
+ expect(screen.getByText(/파일 수신 · 진행 중/)).toBeInTheDocument();
+});
 it('진행 중인 단계는 현재 시각으로 경과 시간을 갱신합니다',async()=>{
  vi.useFakeTimers();vi.setSystemTime(new Date('2026-01-01T00:00:05Z'));
  render(<StageTimings timings={[{stage:'opening',startedAt:'2026-01-01T00:00:00Z',endedAt:null,elapsedMs:null,outcome:'running',estimated:false}]}/>);

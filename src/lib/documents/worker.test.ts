@@ -83,6 +83,74 @@ it('단계 변경과 마지막 페이지를 완료 저장 전에 순서대로 �
  }});
  expect(order).toEqual(['attachment:-','download:-','extracting:0','extracting:2','saving:-','complete']);
 });
+it('다운로드 마지막 세부 기록을 다음 단계가 덮어쓰지 않습니다',async()=>{
+ const store=batchStore();
+ const details=[{step:'receive' as const,elapsedMs:50,outcome:'completed' as const}];
+ await runBatch(store as never,{mode:'local',limit:1,extract:async(_r,_t,_s,progress)=>{
+  progress?.({stage:'download',at:new Date().toISOString()});
+  for(let i=0;i<28;i++)progress?.({stage:'download',at:new Date().toISOString(),details});
+  progress?.({stage:'opening',at:new Date().toISOString()});
+  return {result:{pages:[],pageCount:0,characterCount:0,extractorVersion:'test',fileHash:'hash'},peakMemory:null};
+ }});
+ expect(store.progress.mock.calls.some(call=>call[2].details?.[0]?.elapsedMs===50)).toBe(true);
+ expect(store.progress.mock.calls.filter(call=>call[2].stage==='download')).toHaveLength(2);
+});
+it('긴 수신이 끝나기 전에도 마지막 하위 구간을 저장합니다',async()=>{
+ vi.useFakeTimers();
+ try{
+  const store=batchStore();
+  await runBatch(store as never,{mode:'local',limit:1,extract:async(_r,_t,_s,progress)=>{
+   progress?.({stage:'download',at:new Date().toISOString()});
+   progress?.({stage:'download',at:new Date().toISOString(),details:[{step:'receive',elapsedMs:null,outcome:'running'}]});
+   await vi.advanceTimersByTimeAsync(2100);
+   expect(store.progress.mock.calls.some(call=>call[2].details?.[0]?.step==='receive')).toBe(true);
+   return {result:{pages:[],pageCount:0,characterCount:0,extractorVersion:'test',fileHash:'hash'},peakMemory:null};
+  }});
+ }finally{vi.useRealTimers();}
+});
+it.each(['shutdown','time_limit'] as const)('다운로드 %s 중단 시 대기 중인 마지막 details를 종료 전에 저장합니다',async(reason)=>{
+ vi.useFakeTimers();
+ try{
+  const store=batchStore(),controller=new AbortController(),order:string[]=[];
+  const details:NonNullable<ExtractionProgress['details']>=[
+   {step:'start',elapsedMs:25,outcome:'completed'},
+   {step:'receive',elapsedMs:75,outcome:'failed'},
+  ];
+  store.progress.mockImplementation(async(_token,_id,value)=>{if(value.details)order.push('details');});
+  store.fail.mockImplementation(async()=>{order.push('fail');});
+  store.release.mockImplementation(async()=>{order.push('release');});
+  const summary=await runBatch(store as never,{mode:'local',limit:1,signal:controller.signal,extract:async(_r,_t,signal,progress)=>{
+   progress?.({stage:'download',at:new Date().toISOString()});
+   // 2초 저장 주기 전에 중단해 종료 시 flush가 빠지면 마지막 기록이 사라집니다.
+   progress?.({stage:'download',at:new Date().toISOString(),details});
+   expect(store.progress.mock.calls.some(call=>call[2].details)).toBe(false);
+   if(reason==='shutdown'){controller.abort();expect(signal.aborted).toBe(true);}
+   throw new Error('PDF 처리 시간이 5분 제한을 초과했습니다.');
+  }});
+  expect(store.progress).toHaveBeenCalledWith(expect.any(String),'id',expect.objectContaining({stage:'download',details}));
+  expect(order).toEqual(reason==='shutdown'?['details','release']:['details','fail','release']);
+  expect(summary.reason).toBe(reason==='shutdown'?'shutdown':'count_limit');
+  expect(store.complete).not.toHaveBeenCalled();
+  expect(vi.getTimerCount()).toBe(0);
+ }finally{vi.useRealTimers();}
+});
+it('다운로드 중 임대를 잃으면 대기 중인 details를 이전 소유권으로 저장하지 않습니다',async()=>{
+ vi.useFakeTimers();
+ try{
+  const store=batchStore();store.renew.mockResolvedValue(false);
+  const summary=await runBatch(store as never,{mode:'local',heartbeatMs:5,extract:async(_r,_t,signal,progress)=>{
+   progress?.({stage:'download',at:new Date().toISOString()});
+   progress?.({stage:'download',at:new Date().toISOString(),details:[{step:'receive',elapsedMs:null,outcome:'running'}]});
+   await vi.advanceTimersByTimeAsync(5);
+   expect(signal.aborted).toBe(true);
+   throw new Error('임대 상실로 중단');
+  }});
+  expect(summary.reason).toBe('lease_lost');
+  expect(store.progress.mock.calls.some(call=>call[2].details)).toBe(false);
+  expect(store.complete).not.toHaveBeenCalled();expect(store.fail).not.toHaveBeenCalled();
+  expect(store.release).toHaveBeenCalledOnce();expect(vi.getTimerCount()).toBe(0);
+ }finally{vi.useRealTimers();}
+});
 it('결과 저장 단계의 진행 기록 실패도 저장 진단으로 남깁니다',async()=>{
  const store=batchStore();store.progress.mockImplementation(async(_t:string,_id:string,p:{stage:string})=>{if(p.stage==='saving')throw new Error('진행 저장 실패');});
  await expect(runBatch(store as never,{mode:'local',limit:1,extract:async()=>({result:{pages:[],pageCount:0,characterCount:0,extractorVersion:'test',fileHash:'hash'},peakMemory:null})})).rejects.toThrow('진행 저장 실패');

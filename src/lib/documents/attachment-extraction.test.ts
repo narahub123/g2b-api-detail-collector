@@ -6,6 +6,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { extractAttachmentPdf } from "./attachment-extraction";
 import { extractPdf } from "./extract";
 import { MAX_BYTES } from "./contract";
+import type {ExtractionProgress} from './diagnostics';
 
 vi.mock("./extract", () => ({ extractPdf: vi.fn() }));
 const temporary: string[] = [];
@@ -16,6 +17,7 @@ async function directory() { const path = await mkdtemp(join(tmpdir(), "document
 afterEach(async () => { vi.resetAllMocks(); await Promise.all(temporary.splice(0).map(path => rm(path, { recursive: true, force: true }))); });
 
 it("공통 파이프라인은 다운로드 자원을 닫은 뒤 파서에 바이트를 전달합니다", async () => {
+  const events:ExtractionProgress[]=[];
   const cleanup = vi.fn(async () => undefined);
   vi.mocked(extractPdf).mockImplementation(async bytes => {
     expect(cleanup).toHaveBeenCalledOnce();
@@ -23,8 +25,9 @@ it("공통 파이프라인은 다운로드 자원을 닫은 뒤 파서에 바이
     return { pages: [], pageCount: 0, characterCount: 0, extractorVersion: "test", fileHash: "hash" };
   });
   await extractAttachmentPdf(file, await directory(), new AbortController().signal,
-    async () => ({ filename: "공고.pdf", stream: Readable.from([Buffer.from("%PDF-test")]), cleanup }));
+    async () => ({ filename: "공고.pdf", stream: Readable.from([Buffer.from("%PDF-test")]), cleanup }),value=>events.push(value));
   expect(extractPdf).toHaveBeenCalledOnce();
+  expect(events.at(-1)?.details).toEqual(expect.arrayContaining([expect.objectContaining({step:'read',outcome:'completed'})]));
 });
 
 it("크기 초과와 추출 실패에서도 원본 다운로드 자원을 정리합니다", async () => {

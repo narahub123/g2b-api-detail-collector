@@ -79,6 +79,7 @@ export async function runBatch(store:DocumentQueue,options:BatchOptions):Promise
       if(run.attempt_number>1)summary.retries++;
       let extracted: {result:PdfResult;peakMemory:number|null};
       let pending:ExtractionProgress|undefined,lastStage='',lastWrite=0,progressError:unknown;
+      let progressTimer:ReturnType<typeof setTimeout>|undefined;
       let writes:Promise<void>=Promise.resolve();
       let diagnosticRecorded=false;
       /** 진단 DB도 사용할 수 없으면 정제된 오류만 작업기 로그에 남깁니다. */
@@ -90,14 +91,28 @@ export async function runBatch(store:DocumentQueue,options:BatchOptions):Promise
       };
       /** 단계 전환은 즉시, 페이지 진행은 두 초마다 합쳐 순서대로 저장합니다. */
       const progress=(value:ExtractionProgress)=>{
+        // 다음 단계가 덮어쓰기 전에 마지막 다운로드 스냅샷을 저장합니다.
+        const snapshot=pending;
+        if(snapshot?.details&&snapshot.stage!==value.stage){
+          writes=writes.then(async()=>{if(!progressError&&!abort.signal.aborted)await store.progress?.(token,run.id,snapshot);}).catch(error=>{progressError=error;lose();});
+        }
         pending=value;
-        if(value.stage===lastStage&&Date.now()-lastWrite<2000)return;
+        if(value.stage===lastStage&&Date.now()-lastWrite<2000){
+          // 긴 수신 중에도 현재 하위 구간을 남기되 초당 DB 쓰기를 제한합니다.
+          if(value.details&&!progressTimer)progressTimer=setTimeout(()=>{
+            progressTimer=undefined;
+            if(pending)progress(pending);
+          },2000-(Date.now()-lastWrite));
+          return;
+        }
+        clearTimeout(progressTimer);progressTimer=undefined;
         lastStage=value.stage;lastWrite=Date.now();pending=undefined;
         writes=writes.then(async()=>{if(!progressError&&!abort.signal.aborted)await store.progress?.(token,run.id,value);}).catch(error=>{progressError=error;lose();});
       };
-      /** 종료 직전의 마지막 페이지 진행도 완료 상태보다 먼저 반영합니다. */
+      /** 정상 종료의 취소 신호에도 소유권이 유효하면 마지막 진행 기록을 보존합니다. */
       const flush=async()=>{
-        try{await writes;if(pending&&!abort.signal.aborted)await store.progress?.(token,run.id,pending);pending=undefined;if(progressError)throw progressError;}
+        clearTimeout(progressTimer);progressTimer=undefined;
+        try{await writes;if(pending&&!lost)await store.progress?.(token,run.id,pending);pending=undefined;if(progressError)throw progressError;}
         catch(error){await recordStorageError(error);throw error;}
       };
       try {

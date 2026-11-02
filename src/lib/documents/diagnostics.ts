@@ -1,6 +1,8 @@
+import {isDownloadTimings} from './download-timings';
+
 export const extractionStages = { attachment: '첨부 확인', download: '다운로드', opening: '문서 열기', extracting: '텍스트 추출', saving: '결과 저장' } as const;
 export type ExtractionStage = keyof typeof extractionStages;
-export type ExtractionProgress = { stage: ExtractionStage; at: string; currentPage?: number; completedPages?: number; totalPages?: number };
+export type ExtractionProgress = { stage: ExtractionStage; at: string; currentPage?: number; completedPages?: number; totalPages?: number; details?: import('./download-timings').DownloadTiming[] };
 export type DiagnosticError = { name: string; message: string; stack?: string; cause?: DiagnosticError; exitCode?: number | null; signal?: string | null };
 
 /** 오류에 포함된 인증·연결 정보를 제거하고 저장 크기를 제한합니다. */
@@ -47,5 +49,6 @@ export function isExtractionProgress(value: unknown): value is ExtractionProgres
  if (!value || typeof value !== 'object') return false;
  const p = value as ExtractionProgress;
  return Object.hasOwn(extractionStages, p.stage) && typeof p.at === 'string' && Number.isFinite(Date.parse(p.at)) &&
+  (p.details===undefined||(p.stage==='download'&&isDownloadTimings(p.details))) &&
   [p.currentPage, p.completedPages, p.totalPages].every(n => n === undefined || Number.isSafeInteger(n) && n >= 0 && n <= 500);
 }
