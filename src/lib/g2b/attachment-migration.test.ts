@@ -6,6 +6,21 @@ const legacy=(seq=1,modal=false)=>`/api/attachments/${key}?fileNo=${fileNo}&seq=
 /** 주 첨부 표의 파일명을 갖춘 저장 자료를 만듭니다. */
 const fileSection=(names:string[])=>({title:'파일첨부',tables:[{sourceId:'main_grdFile_body_table',bodyRows:names.map(value=>[{value}])}]});
 
+it('변환 후에도 같은 파일명의 다른 묶음은 제외하며 재실행 때 새 변환을 만들지 않습니다',()=>{
+ const other='de557b90-5d96-430d-9dd4-06b2d7b3627c';
+ const duplicate={name:'제안요청서.hwpx',url:`/api/attachments/${key}?fileNo=${other}&seq=1`};
+ const notice={key,notice_number:'R26BK01784794',notice_order:'000',api:{srvceDivNm:'일반용역'},detail:{
+  attachments:[{name:'공고.pdf',url:legacy()},{name:duplicate.name,url:legacy(2)},duplicate],
+  sections:[fileSection(['공고.pdf',duplicate.name])],
+ }};
+ const first=planAttachmentMigration([notice],[]);
+ expect(first.mappings).toHaveLength(2);
+ expect(first.excluded).toContainEqual({url:duplicate.url,reason:'unverified_file_group'});
+ const second=planAttachmentMigration([{...notice,detail:first.notices[0].after as typeof notice.detail}],[]);
+ expect(second.notices).toEqual([]);expect(second.mappings).toEqual([]);
+ expect(second.excluded).toContainEqual({url:duplicate.url,reason:'unverified_file_group'});
+});
+
 it('기존 식별자와 중첩 첨부를 보존하며 직접 주소로 변환하고 재실행은 변경하지 않습니다',()=>{
  const detail={attachments:[{name:'공고.pdf',url:legacy()}],sections:[{...fileSection(['공고.pdf']),details:[{attachments:[{name:'공고.pdf',url:legacy()}]}]}]};
  const notices=[{key,notice_number:'R26BK01784794',notice_order:'000',api:{srvceDivNm:'일반용역'},detail}];

@@ -1,5 +1,5 @@
 import {parseAttachmentDownloadUrl} from './attachment-links';
-import {buildDirectAttachmentUrl,businessCode,type DownloadContext} from './attachment-direct';
+import {buildDirectAttachmentUrl,businessCode,directAttachmentIdentity,type DownloadContext} from './attachment-direct';
 import {isFixedAttachmentExclusion} from './attachment-exclusions';
 export {isFixedAttachmentExclusion} from './attachment-exclusions';
 
@@ -43,7 +43,7 @@ function hasFile(payload:unknown,fileNo:string,seq:number):boolean{
 }
 
 /** 공고의 주 첨부 표와 유일하게 대응한 묶음만 일반 공고 다운로드로 변환합니다. */
-function noticeFileGroups(detail:JsonObject):Set<string>{
+function noticeFileGroups(detail:JsonObject,key:string):Set<string>{
  const names=new Set<string>();
  for(const raw of array(detail.sections)){
   const section=object(raw);if(section?.title!=='파일첨부')continue;
@@ -56,7 +56,9 @@ function noticeFileGroups(detail:JsonObject):Set<string>{
   }
  }
  const files=array(detail.attachments).flatMap(raw=>{
-  const file=object(raw),id=typeof file?.url==='string'?parseAttachmentDownloadUrl(file.url):null;
+  const file=object(raw);
+  // 변환된 첨부도 비교에 남겨 같은 이름의 다른 묶음이 재실행 때 유일해지지 않게 합니다.
+  const id=file&&typeof file.url==='string'?(parseAttachmentDownloadUrl(file.url)??directAttachmentIdentity(key,file)):null;
   return file&&id&&typeof file.name==='string'?[{name:file.name.replace(/\s+/g,' ').trim(),fileNo:id.fileNo}]:[];
  });
  return new Set(files.filter(file=>names.has(file.name)&&new Set(files.filter(other=>other.name===file.name).map(other=>other.fileNo)).size===1).map(file=>file.fileNo));
@@ -88,7 +90,7 @@ export function planAttachmentMigration(notices:MigrationNotice[],independent:Mi
  for(const notice of notices){
   const detail=object(notice.detail);if(!detail)continue;
   const context=noticeContext(notice);
-  const mainGroups=noticeFileGroups(detail);
+  const mainGroups=noticeFileGroups(detail,notice.key);
   for(const item of array(detail.attachments)){
    const raw=object(item),identity=typeof raw?.url==='string'?parseAttachmentDownloadUrl(raw.url):null;
    if(identity&&context&&!isFixedAttachmentExclusion(identity.fileNo,identity.seq)&&!mainGroups.has(identity.fileNo)){
@@ -103,7 +105,7 @@ export function planAttachmentMigration(notices:MigrationNotice[],independent:Mi
    if(identity&&last){
     if(last.label==='입찰공고번호'&&typeof last.value==='string'){
      const linked=noticeByKey.get(last.value.replace(/-(\d{3})$/,'--$1'));
-     if(linked&&noticeFileGroups(object(linked.detail)??{}).has(identity.fileNo))modalContext=noticeContext(linked);
+     if(linked&&noticeFileGroups(object(linked.detail)??{},linked.key).has(identity.fileNo))modalContext=noticeContext(linked);
     }else{
      const stored=independentByNumber.get(String(last.value));const payload=object(stored?.payload);
      const code=payload?storedBusiness(payload):null;
