@@ -19,7 +19,15 @@ export function sanitizeDiagnostic(value: string, limit = 2000): string {
 export function diagnosticError(error: unknown, depth = 0, seen = new Set<unknown>()): DiagnosticError {
  if (!(error instanceof Error)) return { name: 'Error', message: sanitizeDiagnostic(typeof error === 'string' ? error : '알 수 없는 오류') };
  seen.add(error);
- const result: DiagnosticError = { name: sanitizeDiagnostic(error.name, 200), message: sanitizeDiagnostic(error.message), stack: error.stack ? sanitizeDiagnostic(error.stack, 8000) : undefined };
+ const properties=error as Error&Record<string,unknown>;
+ const fields=['code','errno','syscall','address','port'].flatMap(key=>{
+  const value=properties[key];return typeof value==='string'||typeof value==='number'&&Number.isFinite(value)?[`${key}=${sanitizeDiagnostic(String(value),150)}`]:[];
+ });
+ const network=error instanceof ExtractionError&&['connection_failed','download_timeout'].includes(error.code);
+ // 오류의 address는 연결 시도 대상이며 연결이 완료된 원격 IP라고 단정하지 않습니다.
+ const context=fields.length?` [원본 오류의 연결 대상·속성: ${fields.join(', ')}]`:'';
+ const unknown=network&&typeof properties.address!=='string'?' [원래 요청의 접속 IP 미확인; 원인 체인의 연결 시도 대상과 별도 검사 주소는 접속 완료 IP가 아님]':'';
+ const result: DiagnosticError = { name: sanitizeDiagnostic(error.name, 200), message: sanitizeDiagnostic(error.message,Math.max(0,2000-context.length-unknown.length))+context+unknown, stack: error.stack ? sanitizeDiagnostic(error.stack, 8000) : undefined };
  if (depth < 2 && error.cause && !seen.has(error.cause)) result.cause = diagnosticError(error.cause, depth + 1, seen);
  if (error instanceof ExtractionError) return { ...result, exitCode: error.exitCode, signal: error.signal };
  return result;

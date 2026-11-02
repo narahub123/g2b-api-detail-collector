@@ -85,7 +85,17 @@ jobs:
             --name "g2b-pdf-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
             --env DATABASE_URL --env G2B_DB_SCHEMA \
             g2b-pdf-extraction:local node --import tsx scripts/document-batch.ts "${args[@]}" | tee "$RUNNER_TEMP/g2b-pdf-result.jsonl"
-          node --import tsx scripts/document-batch-summary.ts "$RUNNER_TEMP/g2b-pdf-result.jsonl"
+      - name: Summarize PDF batch diagnostics
+        if: always()
+        timeout-minutes: 1
+        continue-on-error: true
+        shell: bash
+        run: |
+          if node -e "require.resolve('tsx')" >/dev/null 2>&1; then
+            node --import tsx scripts/document-batch-summary.ts "$RUNNER_TEMP/g2b-pdf-result.jsonl"
+          else
+            printf '\n진단 기록 불완전: 요약 실행 의존성을 사용할 수 없습니다.\n' >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Clean up PDF process
         if: always()
         shell: bash
