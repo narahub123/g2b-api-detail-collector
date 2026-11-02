@@ -7,7 +7,7 @@ import { EXTRACTOR_VERSION } from "./extractor-version";
 import type { PdfResult } from "./contract";
 import type {ExtractionProgress} from './diagnostics';
 
-/** 페이지·단·표 셀의 표시 위치로 본문 순서를 복원하며 이미지 인식이나 문장 교정은 하지 않습니다. */
+/** 표시 위치로 본문 순서를 복원하고 저장할 수 없는 UTF-16 문자만 대체합니다. */
 export async function extractPdf(bytes: Uint8Array, maxPages = 500, progress?: (value:ExtractionProgress)=>void): Promise<PdfResult> {
   progress?.({stage:'opening',at:new Date().toISOString()});
   if (bytes.length > MAX_BYTES) throw new Error("PDF가 50MiB 제한을 초과했습니다.");
@@ -29,7 +29,9 @@ export async function extractPdf(bytes: Uint8Array, maxPages = 500, progress?: (
       // 배경과 선 경계로 셀을 복원하며 그리기 명령을 읽지 못해도 텍스트는 보존합니다.
       const operations = await page.getOperatorList().catch(() => ({ fnArray: [], argsArray: [] }));
       const cells = pathRectangles(operations, viewport.transform, pdfjs.OPS);
-      pages.push({ pageNumber: number, text: readingOrderText(content.items.filter(item => "str" in item), viewport.transform, cells) });
+      // 일부 PDF의 잘못된 문자 매핑이 JSONB 저장과 배치 전체를 중단하지 않게 합니다.
+      const text = readingOrderText(content.items.filter(item => "str" in item), viewport.transform, cells).toWellFormed();
+      pages.push({ pageNumber: number, text });
       page.cleanup();
       progress?.({stage:'extracting',at:new Date().toISOString(),currentPage:number,completedPages:pages.length,totalPages:document.numPages});
     }
