@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { extractPdf } from "./extract";
 import { EXTRACTOR_VERSION } from "./queue";
+import * as readingOrder from "./reading-order";
 
 /** 실제 PDF 파서로 빈 페이지와 영문 본문을 검증할 최소 문서를 만듭니다. */
 function fixture(text = "Eligibility deadline", encrypted = false, customStream?: string) {
@@ -18,6 +19,15 @@ function fixture(text = "Eligibility deadline", encrypted = false, customStream?
 }
 
 describe("PDF 실제 추출", () => {
+  it("잘못된 유니코드 매핑만 대체하고 정상 한글과 보조 평면 문자를 보존합니다", async () => {
+    // 운영 PDF에서 확인한 잘못된 UTF-16 출력을 파서 경계에 재현합니다.
+    const spy = vi.spyOn(readingOrder, "readingOrderText").mockReturnValueOnce("\uD800한\uDC00😀E");
+    try {
+      const result = await extractPdf(fixture());
+      expect(result.pages[0].text).toBe("\uFFFD한\uFFFD😀E");
+      expect(result.characterCount).toBe(6);
+    } finally { spy.mockRestore(); }
+  });
   it("페이지 순서·빈 페이지·문자 수를 반환합니다", async () => {
     const result = await extractPdf(fixture());
     expect(result.pages).toEqual([{ pageNumber: 1, text: "Eligibility deadline" }, { pageNumber: 2, text: "" }]);

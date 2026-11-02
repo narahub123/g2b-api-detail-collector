@@ -3,6 +3,7 @@ import { chromium } from "playwright-core";
 import { getDocumentPool } from "../src/lib/documents/pool";
 import { DocumentQueue } from "../src/lib/documents/queue";
 import { runBatch } from "../src/lib/documents/worker";
+import { diagnosticError } from "../src/lib/documents/diagnostics";
 
 /** 정해진 인자만 받아 자동 발견 또는 대기열 전용 배치를 실행합니다. */
 async function main(){
@@ -23,4 +24,4 @@ async function main(){
     await writeMaintenanceSummary(result.maintenance);
   } finally {process.removeListener('SIGTERM',stop);process.removeListener('SIGINT',stop);}
 }
-main().catch(()=>{console.error(JSON.stringify({operation:"pdf-extraction-batch",error:"배치가 실패했습니다. 설정과 대기열 상태를 확인하세요."}));process.exitCode=1;}).finally(()=>getDocumentPool().end());
+main().catch(error=>{console.error(JSON.stringify({operation:"pdf-extraction-batch",error:"배치가 실패했습니다. 설정과 대기열 상태를 확인하세요.",diagnostic:diagnosticError(error)}));process.exitCode=1;}).finally(()=>getDocumentPool().end());
