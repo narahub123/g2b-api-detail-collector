@@ -83,6 +83,31 @@ it('단계 변경과 마지막 페이지를 완료 저장 전에 순서대로 �
  }});
  expect(order).toEqual(['attachment:-','download:-','extracting:0','extracting:2','saving:-','complete']);
 });
+it('다운로드 마지막 세부 기록을 다음 단계가 덮어쓰지 않습니다',async()=>{
+ const store=batchStore();
+ const details=[{step:'receive' as const,elapsedMs:50,outcome:'completed' as const}];
+ await runBatch(store as never,{mode:'local',limit:1,extract:async(_r,_t,_s,progress)=>{
+  progress?.({stage:'download',at:new Date().toISOString()});
+  for(let i=0;i<28;i++)progress?.({stage:'download',at:new Date().toISOString(),details});
+  progress?.({stage:'opening',at:new Date().toISOString()});
+  return {result:{pages:[],pageCount:0,characterCount:0,extractorVersion:'test',fileHash:'hash'},peakMemory:null};
+ }});
+ expect(store.progress.mock.calls.some(call=>call[2].details?.[0]?.elapsedMs===50)).toBe(true);
+ expect(store.progress.mock.calls.filter(call=>call[2].stage==='download')).toHaveLength(2);
+});
+it('긴 수신이 끝나기 전에도 마지막 하위 구간을 저장합니다',async()=>{
+ vi.useFakeTimers();
+ try{
+  const store=batchStore();
+  await runBatch(store as never,{mode:'local',limit:1,extract:async(_r,_t,_s,progress)=>{
+   progress?.({stage:'download',at:new Date().toISOString()});
+   progress?.({stage:'download',at:new Date().toISOString(),details:[{step:'receive',elapsedMs:null,outcome:'running'}]});
+   await vi.advanceTimersByTimeAsync(2100);
+   expect(store.progress.mock.calls.some(call=>call[2].details?.[0]?.step==='receive')).toBe(true);
+   return {result:{pages:[],pageCount:0,characterCount:0,extractorVersion:'test',fileHash:'hash'},peakMemory:null};
+  }});
+ }finally{vi.useRealTimers();}
+});
 it('결과 저장 단계의 진행 기록 실패도 저장 진단으로 남깁니다',async()=>{
  const store=batchStore();store.progress.mockImplementation(async(_t:string,_id:string,p:{stage:string})=>{if(p.stage==='saving')throw new Error('진행 저장 실패');});
  await expect(runBatch(store as never,{mode:'local',limit:1,extract:async()=>({result:{pages:[],pageCount:0,characterCount:0,extractorVersion:'test',fileHash:'hash'},peakMemory:null})})).rejects.toThrow('진행 저장 실패');

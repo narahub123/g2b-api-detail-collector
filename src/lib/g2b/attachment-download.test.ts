@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import { attachmentDownloadUrl } from "./attachment-links";
 import { handleAttachmentRequest, openG2bDownload } from "./attachment-download";
 import type { chromium } from "playwright-core";
+import {createDownloadMeasure} from '../documents/download-timings';
+import type {ExtractionProgress} from '../documents/diagnostics';
 
 describe("attachment download request", () => {
   const key = "R26BK01765444--000";
@@ -90,6 +92,7 @@ describe("attachment download request", () => {
   });
 
   it("closes Chrome when the browser reports a failed download", async () => {
+    const events:ExtractionProgress[]=[];
     const close = vi.fn(async () => undefined);
     const page = {
       goto: async () => undefined,
@@ -101,9 +104,14 @@ describe("attachment download request", () => {
         : { first: () => ({ waitFor: async () => undefined, dispatchEvent: async () => undefined }) }
     };
     const launch = vi.fn(async () => ({ close, newPage: async () => page })) as unknown as typeof chromium.launch;
-    await expect(openG2bDownload(key, fileNo, 1, new AbortController().signal, launch))
+    await expect(openG2bDownload(key, fileNo, 1, new AbortController().signal, launch,undefined,createDownloadMeasure(value=>events.push(value))))
       .rejects.toThrow("network failed");
     expect(close).toHaveBeenCalledTimes(1);
+    expect(events.at(-1)?.details).toEqual(expect.arrayContaining([
+      expect.objectContaining({step:'start',outcome:'completed'}),
+      expect.objectContaining({step:'receive',outcome:'failed'}),
+      expect.objectContaining({step:'cleanup',outcome:'completed'}),
+    ]));
   });
 
   it("selects a page row by file number and sequence rather than a shared filename", async () => {
