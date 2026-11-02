@@ -16,7 +16,7 @@ async function main(){
   const store=new DocumentQueue(getDocumentPool()),abort=new AbortController();
   const stop=()=>abort.abort();process.once('SIGTERM',stop);process.once('SIGINT',stop);
   try {
-    const result=await runBatch(store,{mode:"cloud",limit:options.limit?Number(options.limit):20,
+    const result=await runBatch(store,{mode:"cloud",limit:options.limit?Number(options.limit):50,
       budgetMinutes:options['budget-minutes']?Number(options['budget-minutes']):50,noticeKey:options['notice-key'],
       signal:abort.signal,discover:!queueOnly});
     console.log(JSON.stringify({operation:"pdf-extraction-batch",...result}));

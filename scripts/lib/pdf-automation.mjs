@@ -4,21 +4,21 @@ const invocations=new Set(['manual','watchdog']);
 
 /** 신뢰하는 기본 브랜치 이벤트와 제한된 입력만 PDF 배치로 전달합니다. */
 export function evaluatePdfEvent({eventName,ref,repository,event,enabled}){
- const deny=reason=>({allowed:false,reason,mode:'queue-only',limit:20,noticeKey:''});
+ const deny=reason=>({allowed:false,reason,mode:'queue-only',limit:50,noticeKey:''});
  if(typeof repository!=='string'||!/^[-\w.]+\/[-\w.]+$/.test(repository)||event?.repository?.full_name!==repository||event?.repository?.default_branch!==PDF_DEFAULT_BRANCH||ref!==`refs/heads/${PDF_DEFAULT_BRANCH}`)return deny('untrusted_ref');
  if(eventName==='workflow_run'){
   const run=event.workflow_run;
   if(event.action!=='completed'||run?.status!=='completed'||run?.name!=='G2B collection'||run?.path!=='.github/workflows/collect.yml'||run?.event!=='workflow_dispatch'||run?.head_branch!==PDF_DEFAULT_BRANCH||run?.head_repository?.full_name!==repository||!['success','failure','cancelled','timed_out'].includes(run?.conclusion))return deny('untrusted_collection');
   if(enabled!=='true')return deny('disabled');
-  return {allowed:true,reason:'collection_completed',mode:'discover-and-drain',limit:20,noticeKey:''};
+  return {allowed:true,reason:'collection_completed',mode:'discover-and-drain',limit:50,noticeKey:''};
  }
  if(eventName!=='workflow_dispatch')return deny('unsupported_event');
  const inputs=event.inputs??{},mode=inputs.mode??'discover-and-drain',invocation=inputs.invocation??'manual';
  if(!modes.has(mode)||!invocations.has(invocation))return deny('invalid_input');
- const rawLimit=String(inputs.limit??'20'),noticeKey=inputs.notice_key??'';
- if(!/^(?:[1-9]|1[0-9]|20)$/.test(rawLimit)||typeof noticeKey!=='string'||noticeKey.length>200||(noticeKey&&(!/^[A-Za-z0-9_.%~-]+--[A-Za-z0-9_.%~-]+$/.test(noticeKey)||noticeKey.includes('..'))))return deny('invalid_input');
+ const rawLimit=String(inputs.limit??'50'),noticeKey=inputs.notice_key??'';
+ if(!/^(?:[1-9]|[1-4][0-9]|50)$/.test(rawLimit)||typeof noticeKey!=='string'||noticeKey.length>200||(noticeKey&&(!/^[A-Za-z0-9_.%~-]+--[A-Za-z0-9_.%~-]+$/.test(noticeKey)||noticeKey.includes('..'))))return deny('invalid_input');
  if(invocation==='watchdog'){
-  if(mode!=='queue-only'||rawLimit!=='20'||noticeKey)return deny('invalid_input');
+  if(mode!=='queue-only'||rawLimit!=='50'||noticeKey)return deny('invalid_input');
   if(enabled!=='true')return deny('disabled');
  }
  return {allowed:true,reason:invocation,mode,limit:Number(rawLimit),noticeKey};
