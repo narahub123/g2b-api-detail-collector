@@ -6,6 +6,7 @@ import * as cheerio from "cheerio";
 import { chromium } from "playwright-core";
 import { noticeKeyFromParts } from "./identity";
 import { extractCommonSections } from "./common-content-extractor";
+import { checkExtractedContent, runContentCheck, type ContentIssue } from "./content-check";
 import type { StructuredTable } from "./structured-table";
 import { collectAttachments } from "./attachment-collector";
 import { collectModalContents } from "./modal-collector";
@@ -26,7 +27,9 @@ export type AttachmentMetadata = { orgnlAtchFileNm: string; atchFileSqno: number
 export type ClickDownload = { cellId: string; name: string; fileNo: string; seq: number;context?:DownloadContext;downloadUrl?:string };
 export type ModalTriggerStep = { id: string; index: number; label: string; value: string };
 export type StructuredField = { label: string; value: FieldValuePart[]; visible?: boolean; tables?: StructuredTable[] };
+export type StructuredTextBlock = { text: string; visible: boolean };
 export type StructuredSection = { title: string; fields: StructuredField[]; tables: StructuredTable[];
+  textBlocks?: StructuredTextBlock[];
   details?: { title: string; sections?: StructuredSection[]; fields?: StructuredField[]; tables?: StructuredTable[];
     attachments?: Attachment[]; trigger?: ModalCapture["trigger"] }[]; visible?: boolean };
 export type ModalCapture = {
@@ -125,7 +128,8 @@ export type ScrapeResult = { detail: ScrapedDetail; relatedNoticeKeys: string[];
   warnings?: { stage: "attachment" | "detail"; operation: string; message: string }[] };
 
 /** 기존 상세 수집 순서를 유지하면서 선택적인 단계 알림과 시간 계측을 제공합니다. */
-export async function scrapeDetailPage(url: string, options?: { onProgress?: (stage: CollectionStage) => Promise<void> }): Promise<ScrapeResult> {
+export async function scrapeDetailPage(url: string, options?: { onProgress?: (stage: CollectionStage) => Promise<void>;
+  onContentWarning?: (warning: NonNullable<ScrapeResult["warnings"]>[number]) => void }): Promise<ScrapeResult> {
   assertG2bUrl(url);
   await options?.onProgress?.("opening");
   const browser = await measure("browser.launch", () => chromium.launch({ channel: "chrome", executablePath: process.env.G2B_CHROME_PATH || undefined, headless: true }));
@@ -133,6 +137,12 @@ export async function scrapeDetailPage(url: string, options?: { onProgress?: (st
     const page = await measure("browser.page", () => browser.newPage({ locale: "ko-KR", acceptDownloads: false }));
     observeAttachmentContexts(page);
     const warnings: NonNullable<ScrapeResult["warnings"]> = [];
+    /** 진단 이벤트 생성도 검사 시간에 포함하고 직접 호출자는 반환된 경고로 확인합니다. */
+    const reportContentIssue = (issue: ContentIssue): void => {
+      const warning = { stage: "detail" as const, operation: "extraction-check", message: `${issue.section}: ${issue.message}` };
+      if (options?.onContentWarning) options.onContentWarning(warning);
+      else warnings.push(warning);
+    };
     const responses: Promise<AttachmentMetadata[]>[] = [];
     page.on("response", (response) => {
       if (!response.url().includes("/selectUntyAtchFileList.do")) return;
@@ -162,7 +172,9 @@ export async function scrapeDetailPage(url: string, options?: { onProgress?: (st
     }));
     const detail = measureSync("detail.extract", () => extractDetailPage(html, url, metadata, clickDownloads));
     for(const file of detail.attachments)if(!file.url)warnings.push({stage:'attachment',operation:'resolve-download-url',message:`직접 다운로드 문맥을 확인하지 못했습니다: ${file.name}`});
-    await options?.onProgress?.("extracting");
+    await runContentCheck("extraction-check", () => checkExtractedContent(html, "page", detail.sections ?? []),
+      reportContentIssue,
+      options?.onProgress, "extracting");
     await options?.onProgress?.("tables");
     const pagedTables = await measure("table.collect", () => collectPaginatedTables(page, page.locator("body")));
     detail.paginationAudit = true;
@@ -175,7 +187,10 @@ export async function scrapeDetailPage(url: string, options?: { onProgress?: (st
     await options?.onProgress?.("modals");
     // 모달 탐색 실패와 무관하게 기본 추출 결과를 보존합니다.
     try {
-      const { captures, discovery } = await measure("modal.collect", () => collectModalContents(page, detail.noticeKey));
+      const { captures, discovery } = await measure("modal.collect", () => collectModalContents(page, detail.noticeKey, {
+        onProgress: options?.onProgress,
+        onContentIssue: reportContentIssue,
+      }));
       detail.modalCaptures = captures;
       detail.modalDiscovery = discovery;
       detail.modalAttachmentSources = captures.flatMap((capture,modalIndex) =>

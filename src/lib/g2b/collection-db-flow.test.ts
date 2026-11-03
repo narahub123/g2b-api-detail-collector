@@ -28,6 +28,29 @@ vi.mock("./collection-job-store", () => ({
 import { getCollectionJob, startCollection, startRefresh } from "./collection-job";
 import type { CollectionJob } from "./collection-job";
 import { G2bMaintenanceError } from "./maintenance";
+import * as contentChecks from "./content-check";
+
+it.each(["누락", "검사 실패"] as const)("구조화 보존 %s는 진단과 시간을 남기고 공고를 재시도하지 않습니다", async kind => {
+  process.env.G2B_SERVICE_KEY = "test-key";
+  const check = vi.spyOn(contentChecks, "checkPreservedContent").mockImplementation(() => {
+    if (kind === "검사 실패") throw Error("비교기 오류");
+    return [{ section: "공고안내", message: "본문 누락" }];
+  });
+  const scrape = vi.fn(async (url: string) => ({ detail: { sourceUrl: url, sections: [], attachments: [], links: [] }, relatedNoticeKeys: [] }));
+  try {
+    const job = await startCollection({ start: "2026-10-28", end: "2026-10-28" }, { scrape,
+      fetcher: async () => Response.json({ response: { body: { totalCount: 1, numOfRows: 100, pageNo: 1,
+        items: [{ bidNtceNo: "R26BK1", bidNtceOrd: "000" }] } } }),
+    });
+    await vi.waitFor(() => expect(db.releaseDbLease).toHaveBeenCalledWith(job.id, "lease-token"));
+    const saved = await getCollectionJob(job.id);
+    expect(saved).toMatchObject({ status: "completed", detailSucceeded: 1, detailFailed: 0 });
+    expect(saved?.diagnostics?.events).toContainEqual(expect.objectContaining({ operation: "preservation-check", severity: "warning",
+      error: expect.objectContaining({ message: expect.stringContaining(kind === "누락" ? "공고안내" : "검사 실패") }) }));
+    expect(saved?.timings?.totals["preservation-check"]).toBeGreaterThanOrEqual(0);
+    expect(scrape).toHaveBeenCalledTimes(1);
+  } finally { check.mockRestore(); }
+});
 
 it("수동 수집 결과는 작업과 공고의 단계 시간을 기존 작업 상태에 보존합니다", async () => {
   process.env.G2B_SERVICE_KEY = "test-key";
@@ -48,7 +71,7 @@ it("수동 수집 결과는 작업과 공고의 단계 시간을 기존 작업 �
   }
   expect(saved?.timings?.totals.api).toBeGreaterThanOrEqual(0);
   expect(saved?.timings?.totals["extraction-check"]).toBeUndefined();
-  expect(saved?.timings?.totals["preservation-check"]).toBeUndefined();
+  expect(saved?.timings?.totals["preservation-check"]).toBeGreaterThanOrEqual(0);
   expect(saved?.timings?.active).toBeUndefined();
 });
 

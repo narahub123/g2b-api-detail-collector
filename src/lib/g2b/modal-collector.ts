@@ -11,6 +11,8 @@ import { tableHasValue } from "./structured-table";
 import { createModalDeduplication } from "./modal-deduplication";
 import type { StructuredTable } from "./structured-table";
 import { fieldText } from "./field-value";
+import { checkExtractedContent, runContentCheck, type ContentIssue } from "./content-check";
+import type { CollectionStage } from "./collection-progress";
 import { applyPaginatedTables, collectPaginatedTables } from "./table-pagination";
 import type {
   ModalCapture,
@@ -28,13 +30,13 @@ const clean = (value: string) => value.replace(/\s+/g, " ").trim();
 const nonempty = (value: string): string | null => clean(value) || null;
 
 /**
- * 실시간 폼 값이 반영된 모달 HTML 스냅샷에서 필드와 그리드를 추출합니다.
+ * 실시간 폼 값이 반영된 모달 HTML 스냅샷에서 필드·그리드·일반 안내문을 추출합니다.
  * G2B WebSquare는 필드에 td[data-title], 그리드 데이터에 col_id를 사용하며,
  * 그리드 헤더는 필드 레이블로 취급하지 않습니다.
  * @param html 열린 모달의 HTML 스냅샷
  * @param baseUrl 상대 파일 링크를 해석할 현재 페이지 URL
  * @param attachmentOptions 파일 식별자와 저장할 모달 순서
- * @returns 모달 제목, 섹션, 필드, 표 및 확인된 첨부 URL
+ * @returns 모달 제목, 본문을 포함한 섹션, 필드, 표 및 확인된 첨부 URL
  */
 export function extractModalStructure(html: string, baseUrl?: string,
   attachmentOptions: { noticeKey?: string; clickDownloads?: ClickDownload[]; modalIndex?: number } = {}): {
@@ -410,11 +412,13 @@ async function clickCandidates(
  * 개별 클릭 및 모달 종료 실패는 탐색을 중단하지 않고 discovery에 기록합니다.
  * @param page 탐색할 상세 페이지
  * @param noticeKey 공고번호와 차수로 만든 첨부 다운로드 키
+ * @param options 검사 구간 알림과 검사 중 생성할 경고 처리기
  * @returns 모달 원본 수집 결과와 탐색 건수 및 실패 내역
  */
 export async function collectModalContents(
   page: import("playwright-core").Page,
   noticeKey?: string,
+  options: { onProgress?: (stage: CollectionStage) => Promise<void>; onContentIssue?: (issue: ContentIssue) => void } = {},
 ): Promise<{
   captures: ModalCapture[];
   discovery: NonNullable<ScrapedDetail["modalDiscovery"]>;
@@ -511,6 +515,12 @@ export async function collectModalContents(
             fresh.id ? page.locator(`[id=${JSON.stringify(fresh.id)}]`) : page.locator(MODAL_SELECTOR).last()));
           const structured = extractModalStructure(fresh.html, page.url(),
             { noticeKey, clickDownloads, modalIndex });
+          await runContentCheck("extraction-check", () => checkExtractedContent(fresh.html, "modal", structured.sections),
+            issue => {
+              const contextual = { ...issue, section: `${structured.title || "모달"} / ${issue.section}` };
+              if (options.onContentIssue) options.onContentIssue(contextual);
+              else failures.push(`추출 누락 검사: ${contextual.section}: ${issue.message}`);
+            }, options.onProgress, "modals");
           for(const attachment of structured.attachments)if(!attachment.url)
             failures.push(`직접 다운로드 문맥을 확인하지 못했습니다: ${attachment.name}`);
           structured.sections = applyPaginatedTables(structured.sections, pagedTables);
@@ -520,6 +530,7 @@ export async function collectModalContents(
           // 필드 값·테이블 값이 하나라도 있거나 제목을 뺀 본문이 20자를 넘으면 저장할 데이터가 있다고 봅니다.
           // 이 기준은 저장 여부 판단용이며 하위 탐색을 막는 조건으로 사용하지 않습니다.
           const hasData =
+            structured.sections.some(section => section.textBlocks?.some(block => block.text.trim())) ||
             structured.fields.some((field) => Boolean(fieldText(field.value))) ||
             structured.tables.some(tableHasValue) ||
             fresh.text.replace(fresh.title || "", "").trim().length > 20;

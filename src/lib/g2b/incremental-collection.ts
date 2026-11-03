@@ -12,6 +12,7 @@ import { noticeKey, noticeKeyFromParts } from "./identity";
 import type { StoredNotice } from "./notices";
 import { getStoredNotice, saveNoticeRelation, saveStoredNotice } from "./postgres-store";
 import { structureNoticeDetail, type StructuredNoticeDetail } from "./structured-data";
+import { checkPreservedContent, runContentCheck } from "./content-check";
 import type { ApiNotice } from "./types";
 import { getIncrementalCheckpoint, getNoticeAttempt, listFailedNoticeAttempts, saveNoticeAttempt } from "./incremental-store";
 
@@ -204,10 +205,15 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
     const [number, order] = key.split("--");
     let extracted: { result: ScrapeResult; structured: StructuredNoticeDetail };
     try {
-      const result = await scrape(serviceDetailUrl(number, order), { onProgress: stage => observation.progress(stage, noticeResult) });
+      const result = await scrape(serviceDetailUrl(number, order), { onProgress: stage => observation.progress(stage, noticeResult),
+        onContentWarning: warning => addDiagnostic(job, { severity: "warning", stage: warning.stage, operation: warning.operation, target: { key }, error: warning.message }),
+      });
       observation.assert();
       await observation.progress("structuring", noticeResult);
       extracted = { result, structured: structureNoticeDetail(key, result.detail) };
+      await runContentCheck("preservation-check", () => checkPreservedContent(key, result.detail, extracted.structured),
+        issue => addDiagnostic(job, { severity: "warning", stage: "transform", operation: "preservation-check", target: { key }, error: `${issue.section}: ${issue.message}` }),
+        stage => observation.progress(stage, noticeResult));
     } catch (error) {
       observation.assert();
       if (maintenanceFromError(error)) throw error;

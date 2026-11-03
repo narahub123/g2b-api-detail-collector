@@ -51,8 +51,9 @@ const hasFieldContent = (fields: StructuredField[]) => fields.some((field) => Bo
   hasTableContent(field.tables ?? []));
 const hasTableContent = (tables: StructuredTable[]) => tables.some((table) =>
   [...table.headerRows, ...table.bodyRows].some((row) => row.some((cell) => Boolean(cell.value?.trim()))));
-const hasContent = (fields: StructuredField[], tables: StructuredTable[]) =>
-  hasFieldContent(fields) || hasTableContent(tables);
+/** 일반 안내문도 저장할 내용으로 인정해 본문 전용 섹션의 삭제를 막습니다. */
+const hasContent = (fields: StructuredField[], tables: StructuredTable[], textBlocks?: StructuredSection["textBlocks"]) =>
+  hasFieldContent(fields) || hasTableContent(tables) || Boolean(textBlocks?.some(block => block.text.trim()));
 /**
  * 값이 없고 연결된 하위 상세도 없는 섹션을 모든 저장 경로에서 같은 기준으로 제거합니다.
  * @param sections 필터링할 섹션 목록
@@ -66,11 +67,20 @@ const filterNonemptySections = (sections: StructuredSection[] | undefined,
       ...detail,
       ...(detail.sections ? { sections: filterNonemptySections(detail.sections) } : {})
     })) } : {})
-  })).filter((section) => hasContent(section.fields, section.tables) ||
+  })).filter((section) => hasContent(section.fields, section.tables, section.textBlocks) ||
     Boolean(section.details?.length) || Boolean(unresolvedTitles?.has(section.title)));
 /** 독립 표와 필드에 연결된 표를 각각 한 번씩 집계할 목록으로 만듭니다. */
 const allTables = (fields: StructuredField[], tables: StructuredTable[]): StructuredTable[] =>
   [...tables, ...fields.flatMap((field) => field.tables ?? [])];
+
+/** 구조화 결과의 본문 수정이 검사 기준인 원본까지 바꾸지 않도록 참조를 분리합니다. */
+function copySections(sections: StructuredSection[] | undefined): StructuredSection[] | undefined {
+  return sections?.map(section => ({ ...section,
+    ...(section.textBlocks ? { textBlocks: section.textBlocks.map(block => ({ ...block })) } : {}),
+    ...(section.details ? { details: section.details.map(detail => ({ ...detail,
+      ...(detail.sections ? { sections: copySections(detail.sections) } : {}) })) } : {}),
+  }));
+}
 
 /**
  * 클릭 출처의 번호와 최상위 섹션을 기준으로 수집된 모달의 저장 위치를 결정합니다.
@@ -88,7 +98,7 @@ export function structureNoticeDetail(key: string, detail: ScrapedDetail): Struc
   const otherDetailNumbers: string[] = [];
   const openingDetailKeys: string[] = [];
   const independentTriggers: StructuredNoticeDetail["independentTriggers"] = [];
-  const sections = detail.sections?.map((section) => ({ ...section, details: [...(section.details || [])] }));
+  const sections = copySections(detail.sections)?.map((section) => ({ ...section, details: [...(section.details || [])] }));
   const modalCaptures: ModalCapture[] = [];
   const warnings: string[] = [];
   // 귀속되지 않은 모달이 있으면 해당 섹션이 실제로 비었다고 확정할 수 없어 보존합니다.
@@ -98,7 +108,8 @@ export function structureNoticeDetail(key: string, detail: ScrapedDetail): Struc
   for (const original of [...(detail.modalCaptures || []), ...(detail.baseAmountCaptures || []),
     ...(detail.changeNoticeCaptures || [])]) {
     const sectionHint = original.trigger.sectionHint;
-    const capture: ModalCapture = { ...original, trigger: { ...original.trigger }, modal: { ...original.modal } };
+    const capture: ModalCapture = { ...original, trigger: { ...original.trigger }, modal: { ...original.modal,
+      ...(original.modal.sections ? { sections: copySections(original.modal.sections) } : {}) } };
     delete capture.modal.html;
     delete capture.modal.text;
     const title = capture.modal.title;
@@ -183,7 +194,7 @@ export function structureNoticeDetail(key: string, detail: ScrapedDetail): Struc
       titleOwners.add(owner);
       sectionByModalTitle.set(title, titleOwners);
     }
-    if (!contentSections(capture.modal).some((section) => hasContent(section.fields, section.tables)))
+    if (!contentSections(capture.modal).some((section) => hasContent(section.fields, section.tables, section.textBlocks)))
       warnings.push(`${key}: ${title || capture.trigger.label}에 저장할 구조화된 값이 없습니다.`);
   }
   // 중첩 모달 연결이 끝난 뒤 필터링해야 부모의 빈 섹션에 연결된 하위 상세가 남습니다.

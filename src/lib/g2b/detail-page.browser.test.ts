@@ -3,6 +3,9 @@ import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import { collectClickDownloads, collectModalContents, scrapeDetailPage } from "./detail-page";
 import type { CollectionStage } from "./collection-progress";
 import { replayModalPath } from "./modal-collector";
+import * as contentChecks from "./content-check";
+import { createCollectionObserver } from "./collection-observer";
+import type { CollectionJob } from "./collection-job";
 
 let browser: Awaited<ReturnType<typeof chromium.launch>>;
 beforeAll(async () => {
@@ -11,6 +14,53 @@ beforeAll(async () => {
 afterAll(async () => {
   await browser?.close();
 });
+
+it("짧고 태그로 감싸지 않은 모달 안내문도 검사 후 저장 대상으로 유지합니다", async () => {
+  const page = await browser.newPage();
+  const stages: CollectionStage[] = [];
+  try {
+    await page.setContent(`<button id="open">추가 상세</button><div id="shortDialog" role="dialog" style="display:none">
+      <h2>알림</h2>안내문<br>확인<button id="close" data-close>닫기</button></div><script>
+      document.querySelector('#open').onclick=()=>document.querySelector('#shortDialog').style.display='block';
+      document.querySelector('#close').onclick=()=>document.querySelector('#shortDialog').style.display='none';
+      </script>`);
+    const collected = await collectModalContents(page, "R26BK1--000", { onProgress: async stage => { stages.push(stage); } });
+    expect(collected.captures).toHaveLength(1);
+    expect(collected.captures[0].modal.sections?.[0].textBlocks).toEqual([{ text: "안내문\n확인", visible: true }]);
+    expect(collected.discovery.failures).toEqual([]);
+    expect(stages).toEqual(["extraction-check", "modals"]);
+  } finally { await page.close(); }
+}, 30000);
+
+it.each(["누락", "검사 실패"] as const)("실제 추출 경로의 %s는 경고 생성까지 계측하고 수집을 계속합니다", async kind => {
+  const context = await browser.newContext();
+  await context.route("**/*", route => route.fulfill({ contentType: "text/html; charset=utf-8", body: `<main>
+    <div class="dfbox"><div class="fl"><h4 class="df_tit">공고안내</h4></div></div><p>청렴계약 안내</p>
+    <table><tr><td data-title="공고명">검사 경로 테스트</td></tr></table><table id="test_grdFile_body_table"><tr><td>없음</td></tr></table></main>` }));
+  const launch = vi.spyOn(chromium, "launch").mockResolvedValue({ newPage: () => context.newPage(), close: () => context.close() } as unknown as Awaited<ReturnType<typeof chromium.launch>>);
+  const check = vi.spyOn(contentChecks, "checkExtractedContent").mockImplementation(() => {
+    if (kind === "검사 실패") throw Error("원본 비교 실패");
+    return [{ section: "공고안내", message: "누락 주입" }];
+  });
+  const job: CollectionJob = { id: "check-browser", status: "running", phase: "detail", range: null, startedAt: new Date().toISOString(),
+    apiCount: 0, detailSucceeded: 0, detailFailed: 0, errors: [] };
+  const result = { key: "R26BK1--000", status: "pending" as "pending" | "succeeded" };
+  job.results = [result];
+  const observer = createCollectionObserver(job, async () => {});
+  const warnings: string[] = [];
+  try {
+    await observer.begin(result);
+    const scraped = await scrapeDetailPage("https://www.g2b.go.kr/link/PNPE027_01/single/?bidPbancNo=R26BK1&bidPbancOrd=000", {
+      onProgress: stage => observer.progress(stage, result),
+      onContentWarning: warning => { expect(job.timings?.active?.stage).toBe("extraction-check"); warnings.push(warning.message); },
+    });
+    result.status = "succeeded"; await observer.finish(result); job.status = "completed"; await observer.persist();
+    expect(warnings).toEqual([expect.stringContaining(kind === "누락" ? "공고안내" : "검사 실패")]);
+    expect(job.timings?.totals["extraction-check"]).toBeGreaterThanOrEqual(0);
+    expect(scraped.detail.sections?.[0].textBlocks?.[0].text).toBe("청렴계약 안내");
+    expect(scraped.warnings?.some(warning => warning.operation === "extraction-check")).toBe(false);
+  } finally { check.mockRestore(); launch.mockRestore(); await context.close(); }
+}, 30000);
 
 it("실제 브라우저 수집 단계 알림을 순서대로 기다리고 종료 알림 실패에도 자원을 닫습니다", async () => {
   const context = await browser.newContext();
@@ -28,7 +78,7 @@ it("실제 브라우저 수집 단계 알림을 순서대로 기다리고 종료
       onProgress: async stage => { await Promise.resolve(); stages.push(stage); },
     });
     expect(result.detail.sections?.[0].fields[0].label).toBe("공고명");
-    expect(stages).toEqual(["opening", "opening", "extracting", "extracting", "tables", "tables", "modals", "modals", "closing", "closing"]);
+    expect(stages).toEqual(["opening", "opening", "extracting", "extraction-check", "extracting", "tables", "tables", "modals", "modals", "closing", "closing"]);
     expect(close).toHaveBeenCalledTimes(1);
   } finally { launch.mockRestore(); await context.close(); }
 
