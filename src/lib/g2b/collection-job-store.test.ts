@@ -24,6 +24,8 @@ describe("DB 수집 작업 잠금", () => {
     state.timings = { outcome: "running", totals: { opening: 10 }, active: {
       stage: "modals", elapsedMs: 25, startedAt: state.startedAt, lastObservedAt: state.startedAt,
     } };
+    state.timings.details={modals:{steps:{},active:[{id:'span',step:'modal.open',elapsedMs:12,
+      startedAt:state.startedAt,lastObservedAt:state.startedAt,context:{candidateId:'button',depth:1}}]}};
     let stored: CollectionJob | undefined;
     runtime.__g2bPgPool = { query: async (sql: string, values: unknown[]) => {
       if (sql.includes("SELECT state")) return { rows: [{ state: structuredClone(state) }] };
@@ -34,6 +36,9 @@ describe("DB 수집 작업 잠금", () => {
     expect(result?.timings).toMatchObject({ outcome: "interrupted", estimated: true, totals: { opening: 10, modals: 25 } });
     expect(stored?.timings).toEqual(result?.timings);
     expect(result?.timings?.active).toBeUndefined();
+    expect(stored?.timings?.details?.modals).toEqual({active:[],steps:{'modal.open':{
+      elapsedMs:12,count:1,maxMs:12,outcomes:{interrupted:1},
+    }}});
   });
   it("진행 병합·단계 전환·최종 저장의 실제 UPDATE 호출 횟수를 구분합니다", async () => {
     process.env.DATABASE_URL = "postgres://test";

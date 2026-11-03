@@ -1,4 +1,6 @@
 import {measure, measureSync} from './collection-performance';
+import {withCollectionDetailTiming} from './collection-detail-measure';
+import type {CollectionDetailCallback} from './collection-detail-steps';
 import {redactDiagnostic} from './collection-diagnostics';
 import {ATTACHMENT_NAME_SELECTOR, MODAL_TIMING, isResetControl, isAttachmentPreview, isUnneededCompanySearch} from './modal-policy';
 import {isAttachmentDownload, isParticipantLookup, isCollectedReference} from './modal-policy';
@@ -412,17 +414,26 @@ async function clickCandidates(
  * 개별 클릭 및 모달 종료 실패는 탐색을 중단하지 않고 discovery에 기록합니다.
  * @param page 탐색할 상세 페이지
  * @param noticeKey 공고번호와 차수로 만든 첨부 다운로드 키
- * @param options 검사 구간 알림과 검사 중 생성할 경고 처리기
+ * @param options 단계·세부 계측 알림과 검사 중 생성할 경고 처리기
  * @returns 모달 원본 수집 결과와 탐색 건수 및 실패 내역
  */
 export async function collectModalContents(
   page: import("playwright-core").Page,
   noticeKey?: string,
-  options: { onProgress?: (stage: CollectionStage) => Promise<void>; onContentIssue?: (issue: ContentIssue) => void } = {},
+  options: { onProgress?: (stage: CollectionStage) => Promise<void>; onContentIssue?: (issue: ContentIssue) => void;
+    onDetailTiming?:CollectionDetailCallback } = {},
 ): Promise<{
   captures: ModalCapture[];
   discovery: NonNullable<ScrapedDetail["modalDiscovery"]>;
 }> {
+  return withCollectionDetailTiming(options.onDetailTiming,()=>collectModalContentsMeasured(page,noticeKey,options));
+}
+
+/** 계측 문맥 안에서 기존 모달 탐색 순서와 저장 판정을 유지합니다. */
+async function collectModalContentsMeasured(
+  page:import('playwright-core').Page,noticeKey:string|undefined,
+  options:NonNullable<Parameters<typeof collectModalContents>[2]>,
+):ReturnType<typeof collectModalContents> {
   // captures에는 저장 기준을 통과한 모달만 담고, failures에는 개별 탐색 오류를 누적합니다.
   const captures: ModalCapture[] = [];
   observeAttachmentContexts(page);
@@ -435,7 +446,7 @@ export async function collectModalContents(
   const modalDeduplication = createModalDeduplication();
   let candidates = 0;
   let attempted = 0;
-  // 페이지에서 시작해 새로 열린 모달의 내부 클릭 요소까지 깊이 우선으로 탐색합니다.
+  /** 현재 범위의 후보를 탐색하고 새로운 모달의 하위 조회를 깊이 우선으로 수집합니다. */
   const explore = async (
     dialogId: string | null,
     parentModalTitle: string | null,
@@ -447,7 +458,7 @@ export async function collectModalContents(
     // 중첩 깊이는 4단계, 전체 클릭 시도는 60회로 제한하여 탐색이 무한히 확장되지 않게 합니다.
     if (depth > 4 || attempted >= 60) return;
     // 현재 페이지 또는 모달에서 클릭 가능한 후보를 찾습니다.
-    const found = await clickCandidates(page, dialogId);
+    const found = await measure('modal.candidates',()=>clickCandidates(page, dialogId),{depth,parentDialogId:dialogId||'page'});
     candidates += found.length;
     const root = dialogId
       ? page.locator(`[id=${JSON.stringify(dialogId)}]`)
@@ -462,21 +473,21 @@ export async function collectModalContents(
       const control = root.locator(CLICK_SELECTOR).nth(candidate.index);
       if (!(await control.isVisible().catch(() => false))) continue;
       // 클릭 전 열린 모달과 URL을 기록해 클릭 이후의 상태 변화를 식별합니다.
-      const before = await visibleDialogs(page);
+      const candidateDetails = {
+        candidateId: candidate.id || String(candidate.index),
+        label: redactDiagnostic(candidate.label).slice(0, 120),
+        value: redactDiagnostic(candidate.value).slice(0, 120),
+        depth, parentDialogId: dialogId || "page",
+      };
+      const before = await measure('modal.snapshot-before',()=>visibleDialogs(page),candidateDetails);
       const beforeUrl = page.url();
       attempted++;
       try {
         // 조회용 후보 필터를 통과한 컨트롤에 대해서만 클릭 이벤트를 발생시킵니다.
         // WebSquare의 처리 오버레이가 조회용 컨트롤을 덮을 수 있으므로,
         // 필터 통과 후 이벤트를 직접 발생시켜 오버레이의 클릭 가로채기를 피합니다.
-        await measure("modal.open", () => control.dispatchEvent("click", undefined, { timeout: 2500 }));
+        await measure("modal.open", () => control.dispatchEvent("click", undefined, { timeout: 2500 }),candidateDetails);
         // 새로 열린 모달의 값을 읽기 전에 안정화될 때까지 기다립니다.
-        const candidateDetails = {
-          candidateId: candidate.id || String(candidate.index),
-          label: redactDiagnostic(candidate.label).slice(0, 120),
-          value: redactDiagnostic(candidate.value).slice(0, 120),
-          depth, parentDialogId: dialogId || "page",
-        };
         const waitDetails = { ...candidateDetails, outcome: "pending", nonemptyValues: 0 };
         const settling = await measure("modal.wait-settled", async () => {
           const result = await waitForModalDataSettled(page, before);
@@ -487,7 +498,7 @@ export async function collectModalContents(
         if (page.url() !== beforeUrl)
           throw new Error("클릭 후 페이지가 이동했습니다.");
         // 클릭 전에는 없었던 새 모달을 식별합니다.
-        const after = await visibleDialogs(page);
+        const after = await measure('modal.snapshot-after',()=>visibleDialogs(page),candidateDetails);
         const fresh = after.find(
           (item) => !before.some((old) => old.id === item.id),
         );
@@ -501,7 +512,7 @@ export async function collectModalContents(
           // 모달 HTML을 구조화하고, 실제 저장할 만한 데이터가 있는지 기존 기준으로 판단합니다.
           const currentPath = [...path, { id: candidate.id, index: candidate.index,
             label: candidate.label, value: candidate.value }];
-          const preview = extractModalStructure(fresh.html, page.url());
+          const preview = measureSync('modal.preview',()=>extractModalStructure(fresh.html, page.url()),candidateDetails);
           const noticeNumber = preview.fields.find((field) => field.label === "입찰공고번호");
           const identityNumber = noticeNumber && fieldText(noticeNumber.value);
           const modalIdentity = identityNumber && preview.title
@@ -510,11 +521,11 @@ export async function collectModalContents(
           if (modalIdentity && ancestors.has(modalIdentity)) continue;
           const modalIndex = captures.length;
           const clickDownloads = fresh.id
-            ? await collectClickDownloads(page, page.locator(`[id=${JSON.stringify(fresh.id)}]`)) : [];
+            ? await measure('modal.attachments',()=>collectClickDownloads(page, page.locator(`[id=${JSON.stringify(fresh.id)}]`)),candidateDetails) : [];
           const pagedTables = await measure("modal.table-collect", () => collectPaginatedTables(page,
-            fresh.id ? page.locator(`[id=${JSON.stringify(fresh.id)}]`) : page.locator(MODAL_SELECTOR).last()));
-          const structured = extractModalStructure(fresh.html, page.url(),
-            { noticeKey, clickDownloads, modalIndex });
+            fresh.id ? page.locator(`[id=${JSON.stringify(fresh.id)}]`) : page.locator(MODAL_SELECTOR).last()),candidateDetails);
+          const structured = measureSync('modal.extract',()=>extractModalStructure(fresh.html, page.url(),
+            { noticeKey, clickDownloads, modalIndex }),candidateDetails);
           await runContentCheck("extraction-check", () => checkExtractedContent(fresh.html, "modal", structured.sections),
             issue => {
               const contextual = { ...issue, section: `${structured.title || "모달"} / ${issue.section}` };
@@ -523,22 +534,23 @@ export async function collectModalContents(
             }, options.onProgress, "modals");
           for(const attachment of structured.attachments)if(!attachment.url)
             failures.push(`직접 다운로드 문맥을 확인하지 못했습니다: ${attachment.name}`);
-          structured.sections = applyPaginatedTables(structured.sections, pagedTables);
-          structured.tables = structured.sections.flatMap((section) => section.tables);
-          structured.fields = structured.sections.flatMap((section) => section.fields);
-          // 필드 값, 테이블 값 또는 제목 외의 충분한 본문 텍스트 중 하나가 있으면 저장 대상입니다.
-          // 필드 값·테이블 값이 하나라도 있거나 제목을 뺀 본문이 20자를 넘으면 저장할 데이터가 있다고 봅니다.
-          // 이 기준은 저장 여부 판단용이며 하위 탐색을 막는 조건으로 사용하지 않습니다.
-          const hasData =
-            structured.sections.some(section => section.textBlocks?.some(block => block.text.trim())) ||
-            structured.fields.some((field) => Boolean(fieldText(field.value))) ||
-            structured.tables.some(tableHasValue) ||
-            fresh.text.replace(fresh.title || "", "").trim().length > 20;
-          // 저장 여부와 무관하게 동일한 모달 내용인지 한 번만 확인합니다.
-          const isDuplicate = modalDeduplication.isDuplicate({
-            text: fresh.text,
-            ...structured,
-          });
+          const {hasData,isDuplicate}=measureSync('modal.classify',()=>{
+            structured.sections = applyPaginatedTables(structured.sections, pagedTables);
+            structured.tables = structured.sections.flatMap((section) => section.tables);
+            structured.fields = structured.sections.flatMap((section) => section.fields);
+            // 내용이 있는지 판정하되 하위 모달 탐색 여부와는 별도로 처리합니다.
+            const hasData =
+              structured.sections.some(section => section.textBlocks?.some(block => block.text.trim())) ||
+              structured.fields.some((field) => Boolean(fieldText(field.value))) ||
+              structured.tables.some(tableHasValue) ||
+              fresh.text.replace(fresh.title || "", "").trim().length > 20;
+            // 저장 여부와 무관하게 동일한 모달 내용인지 한 번만 확인합니다.
+            const isDuplicate = modalDeduplication.isDuplicate({
+              text: fresh.text,
+              ...structured,
+            });
+            return {hasData,isDuplicate};
+          },candidateDetails);
           // 데이터가 있고 처음 확인한 내용인 모달만 결과에 저장합니다.
           // 저장 여부와 하위 모달 탐색 여부는 별도의 조건으로 판단합니다.
           // 내용이 있고 중복되지 않은 모달만 captures에 추가합니다.
@@ -581,7 +593,7 @@ export async function collectModalContents(
         );
       } finally {
         // 클릭으로 열린 모달을 역순으로 닫아 이전 상태로 복원합니다.
-        const opened = (await visibleDialogs(page)).filter(
+        const opened = (await measure('modal.snapshot-restore',()=>visibleDialogs(page),candidateDetails)).filter(
           (item) => !before.some((old) => old.id === item.id),
         );
         for (const item of opened.reverse()) {
@@ -598,9 +610,9 @@ export async function collectModalContents(
             .first();
           try {
             if (await close.isVisible().catch(() => false))
-              await measure("modal.close", () => close.dispatchEvent("click", undefined, { timeout: 2500 }));
-            else await page.keyboard.press("Escape");
-            await measure("modal.wait-hidden", () => dialog.waitFor({ state: "hidden", timeout: 2500 }));
+              await measure("modal.close", () => close.dispatchEvent("click", undefined, { timeout: 2500 }),candidateDetails);
+            else await measure('modal.close',()=>page.keyboard.press("Escape"),candidateDetails);
+            await measure("modal.wait-hidden", () => dialog.waitFor({ state: "hidden", timeout: 2500 }),candidateDetails);
           } catch (error) {
             failures.push(
               `${candidate.label.slice(0, 60)} 모달 복귀 실패: ${error instanceof Error ? error.message.slice(0, 120) : String(error)}`,

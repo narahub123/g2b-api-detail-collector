@@ -166,6 +166,7 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies, l
     let result: ScrapeResult;
     try { result = await scrape(serviceDetailUrl(identity.number, identity.order), {
       onProgress: stage => observation.progress(stage, noticeResult),
+      onDetailTiming: event => observation.detail(event, noticeResult),
       onContentWarning: warning => addDiagnostic(job, { severity: "warning", stage: warning.stage, operation: warning.operation, target: { key }, error: warning.message }),
     }); }
     catch (error) {
@@ -348,6 +349,7 @@ async function runRefresh(job: CollectionJob, deps: CollectionDependencies, leas
       let scraped: ScrapeResult;
       try {
         scraped = await scrape(serviceDetailUrl(number, order), { onProgress: stage => observation.progress(stage, result),
+          onDetailTiming: event => observation.detail(event, result),
           onContentWarning: warning => addDiagnostic(job, { severity: "warning", stage: warning.stage, operation: warning.operation, target: { key: result.key }, error: warning.message }),
         });
       } catch (error) {

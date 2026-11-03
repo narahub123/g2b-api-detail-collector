@@ -1,4 +1,4 @@
-import { chromium } from "playwright-core";
+import { chromium, type Locator } from "playwright-core";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import { collectClickDownloads, collectModalContents, scrapeDetailPage } from "./detail-page";
 import type { CollectionStage } from "./collection-progress";
@@ -6,6 +6,7 @@ import { replayModalPath } from "./modal-collector";
 import * as contentChecks from "./content-check";
 import { createCollectionObserver } from "./collection-observer";
 import type { CollectionJob } from "./collection-job";
+import type {CollectionDetailEvent} from './collection-detail-steps';
 
 let browser: Awaited<ReturnType<typeof chromium.launch>>;
 beforeAll(async () => {
@@ -14,6 +15,27 @@ beforeAll(async () => {
 afterAll(async () => {
   await browser?.close();
 });
+
+it('클릭과 닫힘 대기 실패를 계측하면서 수집한 모달 내용은 보존합니다',async()=>{
+  const page=await browser.newPage(),events:CollectionDetailEvent[]=[];
+  const prototype=Object.getPrototypeOf(page.locator('body')) as Locator;
+  const original=prototype.dispatchEvent;
+  const dispatch=vi.spyOn(prototype,'dispatchEvent').mockImplementation(async function(this:Locator,...args:Parameters<Locator['dispatchEvent']>){
+    if(await this.getAttribute('id')==='bad')throw Error('클릭 실패 주입');
+    return original.apply(this,args);
+  });
+  try{
+    await page.setContent(`<button id="bad">추가 조회</button><button id="open">상세 조회</button>
+      <div role="dialog" id="detail" style="display:none"><h2>상세</h2>
+      <table><tr><td data-title="내용">보존할 상세 내용</td></tr></table><button data-close>닫기</button></div>
+      <script>document.getElementById('open').onclick=()=>document.getElementById('detail').style.display='block';</script>`);
+    const result=await collectModalContents(page,undefined,{onDetailTiming:event=>events.push(event)});
+    expect(result.captures).toHaveLength(1);
+    expect(result.discovery.failures).toEqual([expect.stringContaining('클릭 실패 주입'),expect.stringContaining('모달 복귀 실패')]);
+    expect(events).toContainEqual(expect.objectContaining({step:'modal.open',phase:'end',outcome:'failed',context:{candidateId:'bad',depth:0,parentDialogId:'page'}}));
+    expect(events).toContainEqual(expect.objectContaining({step:'modal.wait-hidden',phase:'end',outcome:'failed'}));
+  }finally{dispatch.mockRestore();await page.close();}
+},15000);
 
 it("짧고 태그로 감싸지 않은 모달 안내문도 검사 후 저장 대상으로 유지합니다", async () => {
   const page = await browser.newPage();
@@ -52,11 +74,16 @@ it.each(["누락", "검사 실패"] as const)("실제 추출 경로의 %s는 경
     await observer.begin(result);
     const scraped = await scrapeDetailPage("https://www.g2b.go.kr/link/PNPE027_01/single/?bidPbancNo=R26BK1&bidPbancOrd=000", {
       onProgress: stage => observer.progress(stage, result),
+      onDetailTiming: event => observer.detail(event,result),
       onContentWarning: warning => { expect(job.timings?.active?.stage).toBe("extraction-check"); warnings.push(warning.message); },
     });
     result.status = "succeeded"; await observer.finish(result); job.status = "completed"; await observer.persist();
     expect(warnings).toEqual([expect.stringContaining(kind === "누락" ? "공고안내" : "검사 실패")]);
     expect(job.timings?.totals["extraction-check"]).toBeGreaterThanOrEqual(0);
+    expect(job.timings?.details?.opening?.steps['page.maintenance']?.count).toBe(1);
+    expect(job.timings?.details?.opening?.steps['wait.notice']?.outcomes).toEqual({completed:1});
+    expect(job.timings?.details?.modals?.steps['modal.candidates']?.count).toBe(1);
+    expect(job.timings?.details?.modals?.active).toEqual([]);
     expect(scraped.detail.sections?.[0].textBlocks?.[0].text).toBe("청렴계약 안내");
     expect(scraped.warnings?.some(warning => warning.operation === "extraction-check")).toBe(false);
   } finally { check.mockRestore(); launch.mockRestore(); await context.close(); }
@@ -272,6 +299,7 @@ it("waits for asynchronously populated modal fields to settle before capture", a
 
 it("does not report a modal-settling timeout as a collection failure", async () => {
   const page = await browser.newPage();
+  const timings:CollectionDetailEvent[]=[];
   try {
     await page.setContent(`
       <a id="open" href="javascript:void(null)">공지사항 상세조회</a>
@@ -290,7 +318,7 @@ it("does not report a modal-settling timeout as a collection failure", async () 
         };
       </script>
     `);
-    const result = await collectModalContents(page);
+    const result = await collectModalContents(page,undefined,{onDetailTiming:event=>timings.push(event)});
     expect(result.discovery.attempted).toBe(1);
     expect(result.discovery.failures).toEqual([]);
     expect(result.captures).toHaveLength(1);
@@ -300,6 +328,12 @@ it("does not report a modal-settling timeout as a collection failure", async () 
       visible: true,
     });
     expect(result.captures[0].settling?.status).toBe("timeout");
+    expect(timings).toContainEqual(expect.objectContaining({step:'modal.wait-settled',phase:'end',outcome:'timeout',context:{candidateId:'open',depth:0,parentDialogId:'page'}}));
+    expect(timings).toContainEqual(expect.objectContaining({step:'modal.observation',phase:'end',outcome:'found'}));
+    expect(timings.filter(event=>event.phase==='end').map(event=>event.step)).toEqual(expect.arrayContaining([
+      'modal.candidates','modal.snapshot-before','modal.snapshot-after','modal.snapshot-restore',
+      'modal.preview','modal.extract','modal.attachments','modal.classify','modal.close','modal.wait-hidden',
+    ]));
     expect(await page.locator('[role="dialog"]:visible').count()).toBe(0);
   } finally {
     await page.close();
