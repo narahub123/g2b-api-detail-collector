@@ -1,10 +1,11 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { useContext, useEffect, useId, useState, type ReactNode } from "react";
 import { ChevronRight } from "lucide-react";
 import type { CollectionJob } from "@/lib/g2b/collection-job";
 import { collectionDuration, collectionStageLabel, collectionStatuses, collectionTime } from "@/lib/g2b/collection-display";
 import type { CollectionNoticeResult } from "@/lib/g2b/collection-progress";
+import { CollectionStageTimings, CollectionTimingClock as ObservationTime } from "./CollectionStageTimings";
 import "../app/collection-progress.css";
 
 /** 외부 폴링 화면에서는 전달받은 상태만 표시하고 상세 화면에서만 직접 조회합니다. */
@@ -57,8 +58,6 @@ function noticeStatus(result: CollectionNoticeResult, running: boolean, refresh:
   return running ? "처리 중" : "종료 미확인";
 }
 
-const ObservationTime = createContext<number | undefined>(undefined);
-
 /** 하나의 시계로 실행 중인 소요 시간만 갱신해 공고 표 전체의 초당 재렌더링을 피합니다. */
 function ObservationClock({ active, children }: { active: boolean; children: ReactNode }) {
   const [now, setNow] = useState<number>();
@@ -83,6 +82,34 @@ function ElapsedDuration({ startedAt, finishedAt, running, fallback }: { started
     : <>{collectionDuration(startedAt, finishedAt, false)}</>;
 }
 
+/** 공고별 상세 시간을 별도 행에 펼쳐 기본 결과 행이 불필요하게 높아지지 않게 합니다. */
+function NoticeObservationRows({ result, status, refresh, fallback }: { result: CollectionNoticeResult;
+  status: CollectionJob["status"]; refresh: boolean; fallback: number }) {
+  const [open, setOpen] = useState(false);
+  const id = useId();
+  const active = status === "running";
+  const unknownEnd = !!result.startedAt && !result.finishedAt && !active;
+  return <>
+    <tr>
+      <th scope="row"><a href={`/admin/bids/${encodeURIComponent(result.key)}`}>{result.key}</a></th>
+      <td>{status === "deferred" && result.status === "pending" ? "점검으로 보류" : noticeStatus(result, active, refresh)}{result.error && <p className="collection-progress-error">{result.error}</p>}</td>
+      <td>{collectionTime(result.startedAt)}</td>
+      <td>{unknownEnd ? "확인 불가" : result.finishedAt ? collectionTime(result.finishedAt) : result.startedAt ? "진행 중" : "기록 없음"}</td>
+      <td>{unknownEnd ? "확인 불가" : <ElapsedDuration startedAt={result.startedAt} finishedAt={result.finishedAt} running={active && !!result.startedAt} fallback={fallback} />}</td>
+      <td>{collectionStageLabel(result.progress?.stage)}</td>
+      <td>{collectionTime(result.progress?.lastProgressAt)}</td>
+      <td><button type="button" className="collection-notice-timings-toggle" aria-label={`${result.key} 단계별 시간`}
+        aria-expanded={open} aria-controls={id} onClick={() => setOpen(value => !value)}>
+        <ChevronRight size={14} aria-hidden="true" />단계별 시간
+      </button></td>
+    </tr>
+    <tr id={id} hidden={!open} className="collection-stage-detail"><td colSpan={8}>
+      {open && <CollectionStageTimings timings={result.timings} running={active && !result.finishedAt}
+        label={`${result.key} 단계별 처리 시간`} />}
+    </td></tr>
+  </>;
+}
+
 /** 초 단위 경과 시간은 라이브 알림 영역 밖에서 표시하고 종료 후에는 갱신하지 않습니다. */
 function ObservationView({ job }: { job: CollectionJob }) {
   const active = job.status === "running";
@@ -103,27 +130,22 @@ function ObservationView({ job }: { job: CollectionJob }) {
       <div><dt>마지막 진행</dt><dd>{collectionTime(job.progress?.lastProgressAt)}</dd></div>
     </dl>
     <p className="collection-observation-note">마지막 진행은 실제 처리 이벤트 기준이며 생존 여부나 오류 원인을 확정하는 정보는 아닙니다.</p>
+    <section className="collection-stage-section" aria-label="작업 전체 단계별 시간">
+      <h3>단계별 처리 시간</h3>
+      <p className="collection-observation-note">처리 구간별 누적 시간입니다. 작업 전체와 공고별 시간을 서로 합산하지 마세요. 진행 중인 시간은 마지막 저장값에 화면 경과 시간을 더한 표시값입니다.</p>
+      <CollectionStageTimings timings={job.timings} running={active} label="작업 전체 단계별 처리 시간" />
+    </section>
     {!!job.results?.length && <details className="job-results collection-progress-results">
       <summary><span>공고별 결과 {job.results.length}건</span><ChevronRight className="collection-progress-results-chevron" size={20} aria-hidden="true" /></summary>
       <div className="collection-observation-table" role="region" aria-label="공고별 처리 시간" tabIndex={0}>
         <table>
           <caption>상세 처리 대상 공고별 시간·마지막 진행</caption>
-          <thead><tr>{["공고", "상태", "시작", "종료", "소요 시간", "단계", "마지막 진행"].map(label => <th scope="col" key={label}>{label}</th>)}</tr></thead>
-          <tbody>{job.results.map(result => {
-            const unknownEnd = !!result.startedAt && !result.finishedAt && !active;
-            return <tr key={result.key}>
-              <th scope="row"><a href={`/admin/bids/${encodeURIComponent(result.key)}`}>{result.key}</a></th>
-              <td>{job.status === "deferred" && result.status === "pending" ? "점검으로 보류" : noticeStatus(result, active, job.mode === "refresh")}{result.error && <p className="collection-progress-error">{result.error}</p>}</td>
-              <td>{collectionTime(result.startedAt)}</td>
-              <td>{unknownEnd ? "확인 불가" : result.finishedAt ? collectionTime(result.finishedAt) : result.startedAt ? "진행 중" : "기록 없음"}</td>
-              <td>{unknownEnd ? "확인 불가" : <ElapsedDuration startedAt={result.startedAt} finishedAt={result.finishedAt} running={active && !!result.startedAt} fallback={observedNow} />}</td>
-              <td>{collectionStageLabel(result.progress?.stage)}</td>
-              <td>{collectionTime(result.progress?.lastProgressAt)}</td>
-            </tr>;
-          })}</tbody>
+          <thead><tr>{["공고", "상태", "시작", "종료", "소요 시간", "단계", "마지막 진행", "단계별 시간"].map(label => <th scope="col" key={label}>{label}</th>)}</tr></thead>
+          <tbody>{job.results.map(result => <NoticeObservationRows key={result.key} result={result}
+            status={job.status} refresh={job.mode === "refresh"} fallback={observedNow} />)}</tbody>
         </table>
       </div>
-      <p className="collection-observation-note">소요 시간은 최초 시작부터 마지막 종료까지의 경과 시간입니다. 재시도 사이 대기·다른 공고 처리도 포함될 수 있습니다. 완료 공고의 단계는 마지막 처리 단계이며, 단계별 소요 시간 이력은 제공하지 않습니다.</p>
+      <p className="collection-observation-note">소요 시간은 최초 시작부터 마지막 종료까지의 경과 시간입니다. 재시도 사이 대기·다른 공고 처리도 포함될 수 있습니다. 단계별 누적 시간은 실제 처리 구간 기준이므로 공고 소요 시간과 다를 수 있습니다.</p>
     </details>}
   </section></ObservationClock>;
 }

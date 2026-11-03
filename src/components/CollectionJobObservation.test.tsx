@@ -106,3 +106,45 @@ it("조회 실패 후 재조회하고 성공하면 오류 안내를 지웁니다
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   expect(fetcher).toHaveBeenCalledTimes(2);
 });
+
+it("작업 전체와 펼친 공고별 단계 시간을 구분해 표시합니다", () => {
+  render(<CollectionJobObservation initial={job({ status: "completed", timings: { outcome: "completed", totals: {
+    "extraction-check": 12, "preservation-check": 34,
+  } }, results: [{ key: "A--000", status: "succeeded", timings: { outcome: "completed", totals: {
+    "extraction-check": 7, "preservation-check": 9,
+  } } }] })} />);
+  const overall = screen.getByRole("table", { name: "작업 전체 단계별 처리 시간" });
+  expect(within(overall).getByText("12ms")).toBeInTheDocument();
+  expect(within(overall).getByText("34ms")).toBeInTheDocument();
+  expect(screen.queryByRole("table", { name: "A--000 단계별 처리 시간" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByText("공고별 결과 1건"));
+  const toggle = screen.getByRole("button", { name: "A--000 단계별 시간" });
+  expect(toggle).toHaveAttribute("aria-expanded", "false");
+  fireEvent.click(toggle);
+  const notice = screen.getByRole("table", { name: "A--000 단계별 처리 시간" });
+  expect(notice.closest("td")).toHaveAttribute("colspan", "8");
+  expect(within(notice).getByText("7ms")).toBeInTheDocument();
+  expect(within(notice).getByText("9ms")).toBeInTheDocument();
+  expect(screen.getByText(/작업 전체와 공고별 시간을 서로 합산하지/)).toBeInTheDocument();
+  fireEvent.click(toggle);
+  expect(screen.queryByRole("table", { name: "A--000 단계별 처리 시간" })).not.toBeInTheDocument();
+});
+
+it("공용 시계로 현재 구간만 늘리고 완료 응답 후에는 단계 시간을 고정합니다", async () => {
+  vi.useFakeTimers(); vi.setSystemTime(new Date(start));
+  const initial = job({ results: [], timings: { outcome: "running", totals: { opening: 1000, extracting: 50 },
+    active: { stage: "opening", startedAt: start, lastObservedAt: start, elapsedMs: 200 } } });
+  const finished = { ...initial, status: "completed" as const, timings: { outcome: "completed" as const, totals: { opening: 4200, extracting: 50 } } };
+  const fetcher = vi.fn(async () => Response.json(finished)); vi.stubGlobal("fetch", fetcher);
+  render(<CollectionJobObservation initial={initial} poll />);
+  const overall = screen.getByRole("table", { name: "작업 전체 단계별 처리 시간" });
+  expect(within(overall).getByText("1.20초")).toBeInTheDocument();
+  act(() => vi.advanceTimersByTime(1000));
+  expect(within(overall).getByText("2.20초")).toBeInTheDocument();
+  expect(within(overall).getByText("50ms")).toBeInTheDocument();
+  await act(() => vi.advanceTimersByTimeAsync(4000));
+  expect(within(overall).getByText("4.20초")).toBeInTheDocument();
+  await act(() => vi.advanceTimersByTimeAsync(10000));
+  expect(within(overall).getByText("4.20초")).toBeInTheDocument();
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});

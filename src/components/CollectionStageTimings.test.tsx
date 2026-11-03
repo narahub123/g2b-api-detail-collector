@@ -1,0 +1,85 @@
+// @vitest-environment jsdom
+import { cleanup, render, screen, within } from "@testing-library/react";
+import { afterEach, expect, it } from "vitest";
+import { CollectionStageTimings, CollectionTimingClock } from "./CollectionStageTimings";
+import type { CollectionTimings } from "@/lib/g2b/collection-timings";
+
+afterEach(cleanup);
+
+/** 단계 이름으로 행을 골라 서로 다른 검사 시간이 섞이지 않는지 확인합니다. */
+function row(name: string): HTMLElement {
+  return screen.getByRole("rowheader", { name }).closest("tr")!;
+}
+
+it("두 검사 시간과 미실행을 구분하고 짧은 측정값은 밀리초로 표시합니다", () => {
+  render(<CollectionStageTimings label="작업 시간" running={false} timings={{ outcome: "completed", totals: {
+    extracting: 1500, "extraction-check": 0.25, "preservation-check": 0,
+  } }} />);
+  expect(within(row("본문 추출")).getByText("1.50초")).toBeInTheDocument();
+  expect(within(row("추출 누락 검사")).getByText("0.25ms")).toBeInTheDocument();
+  expect(within(row("구조화 보존 검사")).getByText("0ms")).toBeInTheDocument();
+  expect(within(row("구조화 보존 검사")).getByText("측정 완료")).toBeInTheDocument();
+  expect(within(row("표 수집")).getByText("미실행")).toBeInTheDocument();
+});
+
+it("과거 자료는 미실행으로 추정하지 않고 기록 없음으로 표시합니다", () => {
+  render(<CollectionStageTimings label="과거 작업 시간" running={false} />);
+  expect(screen.getByText("단계별 처리 시간: 기록 없음")).toBeInTheDocument();
+  expect(screen.queryByRole("table")).not.toBeInTheDocument();
+  expect(screen.queryByText("미실행")).not.toBeInTheDocument();
+});
+
+it("기존 누적과 저장된 현재 구간에 마지막 관측 이후 시간만 더합니다", () => {
+  const observed = Date.parse("2026-11-03T00:00:02Z");
+  const timings: CollectionTimings = { outcome: "running", totals: { opening: 1000, extracting: 250 },
+    active: { stage: "opening", startedAt: "2026-11-03T00:00:00Z", lastObservedAt: new Date(observed).toISOString(), elapsedMs: 200 } };
+  /** 같은 시계 문맥을 바꿔 진행 중인 구간만 늘어나는지 검증합니다. */
+  const view = (now: number, running = true, data = timings) => <CollectionTimingClock.Provider value={now}>
+    <CollectionStageTimings label="현재 작업 시간" running={running} timings={data} />
+  </CollectionTimingClock.Provider>;
+  const { rerender } = render(view(observed + 1000));
+  expect(within(row("상세 화면 열기")).getByText("2.20초")).toBeInTheDocument();
+  expect(within(row("상세 화면 열기")).getByText("진행 중")).toBeInTheDocument();
+  rerender(view(observed + 2000));
+  expect(within(row("상세 화면 열기")).getByText("3.20초")).toBeInTheDocument();
+  expect(within(row("본문 추출")).getByText("250ms")).toBeInTheDocument();
+  const finished: CollectionTimings = { outcome: "completed", totals: { opening: 3200, extracting: 250 } };
+  rerender(view(observed + 10000, false, finished));
+  expect(within(row("상세 화면 열기")).getByText("3.20초")).toBeInTheDocument();
+  expect(screen.queryByText("진행 중")).not.toBeInTheDocument();
+});
+
+it("종료되지 않은 스냅샷은 작업 종료 뒤 현재 시각까지 연장하지 않습니다", () => {
+  render(<CollectionTimingClock.Provider value={Date.parse("2026-11-03T01:00:00Z")}>
+    <CollectionStageTimings label="중단 작업 시간" running={false} timings={{ outcome: "running", totals: { modals: 100 },
+      active: { stage: "modals", startedAt: "2026-11-03T00:00:00Z", lastObservedAt: "2026-11-03T00:00:01Z", elapsedMs: 250 } }} />
+  </CollectionTimingClock.Provider>);
+  expect(within(row("모달 수집")).getByText("350ms")).toBeInTheDocument();
+  expect(within(row("모달 수집")).getByText("종료 미확인")).toBeInTheDocument();
+});
+
+it("중단 추정은 기록값으로 표시하고 미실행 검사에는 시간을 만들지 않습니다", () => {
+  render(<CollectionStageTimings label="중단 작업 시간" running={false}
+    timings={{ outcome: "interrupted", estimated: true, totals: { modals: 350 } }} />);
+  expect(screen.getByText(/중단 추정/)).toBeInTheDocument();
+  expect(within(row("모달 수집")).getByText("350ms")).toBeInTheDocument();
+  expect(within(row("추출 누락 검사")).getByText("미실행")).toBeInTheDocument();
+});
+
+it("초기 렌더는 저장값만 사용하고 극히 짧은 실행도 0으로 지우지 않습니다", () => {
+  render(<CollectionStageTimings label="초기 시간" running timings={{ outcome: "running", totals: { "extraction-check": 0.003 },
+    active: { stage: "opening", startedAt: "2026-11-03T00:00:00Z", lastObservedAt: "2026-11-03T00:00:01Z", elapsedMs: 200 } }} />);
+  expect(within(row("상세 화면 열기")).getByText("200ms")).toBeInTheDocument();
+  expect(within(row("추출 누락 검사")).getByText("<0.01ms")).toBeInTheDocument();
+});
+
+it.each(["completed", "failed", "deferred", "interrupted"] as const)("%s 기록은 다른 공고의 화면 시계가 움직여도 고정합니다", outcome => {
+  /** 다른 공고가 실행 중인 화면에서도 종료된 구간을 연장하지 않습니다. */
+  const view = (now: number) => <CollectionTimingClock.Provider value={now}>
+    <CollectionStageTimings label="종료 공고 시간" running timings={{ outcome, totals: { saving: 25 } }} />
+  </CollectionTimingClock.Provider>;
+  const { rerender } = render(view(1000));
+  rerender(view(100000));
+  expect(within(row("결과 저장")).getByText("25ms")).toBeInTheDocument();
+  expect(screen.queryByText("진행 중")).not.toBeInTheDocument();
+});
