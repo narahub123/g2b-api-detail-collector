@@ -45,7 +45,7 @@ export function NoticeList({
       .catch(() => undefined);
   }, [fetcher]);
   useEffect(() => {
-    if (job?.status !== "running") return;
+    if (job?.status !== "running" && job?.status !== "queued") return;
     const timer = setTimeout(async () => {
       try {
         const response = await fetcher(`/api/collections/${job.id}`, {
@@ -54,7 +54,7 @@ export function NoticeList({
         if (!response.ok) throw new Error("재수집 상태를 읽지 못했습니다.");
         const next = (await response.json()) as CollectionJob;
         setJob(next);
-        if (next.status !== "running") router.refresh();
+        if (next.status !== "running" && next.status !== "queued") router.refresh();
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : "재수집 상태 오류");
         setPollAttempt((attempt) => attempt + 1);
@@ -62,7 +62,8 @@ export function NoticeList({
     }, 1200);
     return () => clearTimeout(timer);
   }, [job, pollAttempt, fetcher, router]);
-  const busy = submitting || job?.status === "running";
+  const busy = submitting || (job?.queueVersion !== 1 && job?.status === "running");
+  /** 큐가 실행 중이어도 다른 공고를 선택하여 추가 요청할 수 있게 합니다. */
   function toggle(key: string) {
     setSelected((current) =>
       current.includes(key)
@@ -70,6 +71,7 @@ export function NoticeList({
         : [...current, key],
     );
   }
+  /** 선택한 공고를 접수하고 응답받은 작업의 대기·실행 상태를 조회합니다. */
   async function refresh() {
     setError("");
     setSubmitting(true);
@@ -117,7 +119,7 @@ export function NoticeList({
       {job?.mode === "refresh" && (
         <div className="refresh-results">
           <strong>
-            {job.status === "running" ? "재수집 진행 중" : "재수집 결과"}
+            {job.status === "queued" ? "재수집 대기 중" : job.status === "running" ? "재수집 진행 중" : "재수집 결과"}
           </strong>
           <CollectionJobObservation initial={job} />
         </div>

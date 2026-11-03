@@ -24,21 +24,21 @@ export function CollectionForm({ fetcher = fetch, onJobChange, showProgress = tr
     void fetcher("/api/collections", { cache: "no-store" })
       .then(async (response) => response.ok ? await response.json() as CollectionJob : null)
       .then((saved) => {
-        if (saved?.id) { setJob(saved); setBusy(saved.status === "running"); }
+        if (saved?.id) { setJob(saved); setBusy(saved.status === "running" || saved.status === "queued"); }
       }).catch(() => undefined);
   }, [fetcher]);
 
   useEffect(() => { onJobChange?.(job); }, [job, onJobChange]);
 
   useEffect(() => {
-    if (!job || job.status !== "running") return;
+    if (!job || (job.status !== "running" && job.status !== "queued")) return;
     const timer = setTimeout(async () => {
       try {
         const response = await fetcher(`/api/collections/${job.id}`, { cache: "no-store" });
         if (!response.ok) throw new Error("수집 상태를 읽지 못했습니다.");
         const next = await response.json() as CollectionJob;
         setJob(next);
-        if (next.status !== "running") { setBusy(false); router.refresh(); }
+        if (next.status !== "running" && next.status !== "queued") { setBusy(false); router.refresh(); }
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : "수집 상태 오류");
         setPollAttempt((attempt) => attempt + 1);

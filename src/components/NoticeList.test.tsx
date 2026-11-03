@@ -15,6 +15,17 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 afterEach(cleanup);
 
 describe("NoticeList", () => {
+  it("큐 대기를 완료로 오인하지 않고 폴링하며 추가 공고를 선택할 수 있습니다", async () => {
+    const queued = { id: "queue-job", mode: "refresh", queueVersion: 1, status: "queued", phase: "detail", range: null,
+      apiCount: 0, detailQueued: 1, detailSucceeded: 0, detailFailed: 0, results: [], errors: [], startedAt: "2026-11-03T00:00:00Z" };
+    const fetcher = vi.fn(async (url: RequestInfo | URL) => Response.json(
+      String(url).endsWith("/queue-job") ? { ...queued, status: "completed", detailQueued: 0, detailSucceeded: 1 } : queued));
+    render(<NoticeList notices={[base]} fetcher={fetcher} />);
+    expect(await screen.findByText("재수집 대기 중")).toBeInTheDocument();
+    expect(screen.getByRole("checkbox")).toBeEnabled();
+    await waitFor(() => expect(screen.getByText("재수집 결과")).toBeInTheDocument(), { timeout: 3000 });
+    expect(fetcher).toHaveBeenCalledWith("/api/collections/queue-job", { cache: "no-store" });
+  });
   it("관리자 목록에서 수요기관과 공고기관을 구분해 표시합니다", () => {
     render(<NoticeList notices={[base]} />);
     expect(screen.getByText("수요기관: 국무조정실")).toBeInTheDocument();

@@ -7,6 +7,8 @@ import type { StoredNotice } from "./notices";
 import { saveNoticeApiInTransaction, saveNoticeRelationInTransaction, saveStoredNoticeInTransaction } from "./postgres-store";
 import type { StructuredNoticeDetail } from "./structured-data";
 import type { ApiNotice } from "./types";
+import { getDetailRefresh, submitDetailRefresh, type DetailSnapshot } from "./detail-refresh-store";
+import { shouldReplacePaginatedDetail } from "./pagination-coverage";
 
 export type DetailRequest = {
   key: string;
@@ -22,9 +24,10 @@ export type DetailRun = {
   status: "queued" | "processing" | "succeeded" | "failed";
   owner_token: string | null;
 };
-type Finish = { status: "succeeded"; detail: NonNullable<StoredNotice["detail"]>;
+type Finish = ({ status: "succeeded"; detail: NonNullable<StoredNotice["detail"]>;
   structured?: StructuredNoticeDetail; relatedKeys?: string[]; followups?: DetailRequest[] }
-  | { status: "failed"; error: string; diagnostic?: unknown };
+  | { status: "failed"; error: string; diagnostic?: unknown }) & { snapshot?: DetailSnapshot | ((preserved: boolean) => DetailSnapshot) };
+const cancelledClaim = Symbol("cancelledClaim");
 
 /** 공고 키 오류가 DB 잠금을 잡기 전에 드러나도록 검증합니다. */
 function parts(key: string) {
@@ -36,7 +39,8 @@ function parts(key: string) {
 /** 요청 접수와 공고 실행을 분리하고 짧은 저장 트랜잭션에서만 임대 행을 잠급니다. */
 export class DetailQueue {
   /** 연결 풀과 검사된 스키마를 사용하며 기존 수집 경로는 변경하지 않습니다. */
-  constructor(readonly pool: pg.Pool, readonly schema = process.env.G2B_DB_SCHEMA || "public") {
+  constructor(readonly pool: pg.Pool, readonly schema = process.env.G2B_DB_SCHEMA || "public",
+    private readonly options: { legacyCollectionLock?: boolean } = {}) {
     if (!/^[a-z][a-z0-9_]*$/.test(schema)) throw new Error("잘못된 DB 스키마 이름입니다.");
   }
 
@@ -60,6 +64,10 @@ export class DetailQueue {
   private async lockLease(db: pg.PoolClient) {
     const row = await db.query(`SELECT * FROM ${this.schema}.detail_collection_worker_lease WHERE id=1 FOR UPDATE`);
     if (!row.rowCount) throw new Error("상세 큐 스키마가 준비되지 않았습니다.");
+    if (this.options.legacyCollectionLock) {
+      await db.query(`INSERT INTO ${this.schema}.collection_lock(id) VALUES(1) ON CONFLICT DO NOTHING`);
+      await db.query(`SELECT id FROM ${this.schema}.collection_lock WHERE id=1 FOR UPDATE`);
+    }
   }
 
   /** 임대 행 잠금을 유지한 연결에서 토큰과 현재 유효기간을 검사합니다. */
@@ -67,6 +75,11 @@ export class DetailQueue {
     const row = await db.query(`SELECT 1 FROM ${this.schema}.detail_collection_worker_lease
       WHERE id=1 AND owner_token=$1 AND expires_at>clock_timestamp()`, [token]);
     if (!row.rowCount) throw new Error("상세 소비기 임대 소유권을 잃었습니다.");
+    if (this.options.legacyCollectionLock) {
+      const legacy = await db.query(`SELECT 1 FROM ${this.schema}.collection_lock
+        WHERE id=1 AND job_id=$1 AND token=$1 AND expires_at>clock_timestamp()`, [token]);
+      if (!legacy.rowCount) throw new Error("기존 수집과의 호환 잠금 소유권을 잃었습니다.");
+    }
   }
 
   /** 공고 자리표시자를 확보하며 기존 API와 상세는 수정하지 않습니다. */
@@ -78,6 +91,19 @@ export class DetailQueue {
 
   /** 다른 소비기의 유효한 임대를 빼앗지 않고 단일 실행권을 얻습니다. */
   async acquire(token: string): Promise<boolean> {
+    if (this.options.legacyCollectionLock) return this.transaction(async db => {
+      await this.lockLease(db);
+      const lease = await db.query(`SELECT 1 FROM ${this.schema}.detail_collection_worker_lease
+        WHERE id=1 AND (owner_token IS NULL OR expires_at<=clock_timestamp())`);
+      const legacy = await db.query(`SELECT 1 FROM ${this.schema}.collection_lock
+        WHERE id=1 AND (job_id IS NULL OR expires_at<=clock_timestamp())`);
+      if (!lease.rowCount || !legacy.rowCount) return false;
+      await db.query(`UPDATE ${this.schema}.detail_collection_worker_lease
+        SET owner_token=$1,expires_at=clock_timestamp()+interval '120 seconds' WHERE id=1`, [token]);
+      await db.query(`UPDATE ${this.schema}.collection_lock SET job_id=$1,token=$1,
+        expires_at=clock_timestamp()+interval '120 seconds' WHERE id=1`, [token]);
+      return true;
+    });
     const row = await this.pool.query(`UPDATE ${this.schema}.detail_collection_worker_lease
       SET owner_token=$1,expires_at=clock_timestamp()+interval '120 seconds'
       WHERE id=1 AND (owner_token IS NULL OR expires_at<=clock_timestamp()) RETURNING id`, [token]);
@@ -86,6 +112,14 @@ export class DetailQueue {
 
   /** 만료된 소비기가 새 소유권을 갱신할 수 없도록 제한합니다. */
   async renew(token: string): Promise<boolean> {
+    if (this.options.legacyCollectionLock) return this.transaction(async db => {
+      await this.lockLease(db);
+      try { await this.owned(db, token); } catch { return false; }
+      await db.query(`UPDATE ${this.schema}.detail_collection_worker_lease
+        SET expires_at=clock_timestamp()+interval '120 seconds' WHERE id=1`, []);
+      await db.query(`UPDATE ${this.schema}.collection_lock SET expires_at=clock_timestamp()+interval '120 seconds' WHERE id=1`);
+      return true;
+    });
     const row = await this.pool.query(`UPDATE ${this.schema}.detail_collection_worker_lease
       SET expires_at=clock_timestamp()+interval '120 seconds'
       WHERE id=1 AND owner_token=$1 AND expires_at>clock_timestamp() RETURNING id`, [token]);
@@ -94,6 +128,16 @@ export class DetailQueue {
 
   /** 자신의 소비기 임대만 반환하며 새 소유자의 임대는 보존합니다. */
   async release(token: string): Promise<void> {
+    if (this.options.legacyCollectionLock) {
+      await this.transaction(async db => {
+        await this.lockLease(db);
+        await db.query(`UPDATE ${this.schema}.detail_collection_worker_lease SET owner_token=NULL,expires_at=NULL
+          WHERE id=1 AND owner_token=$1`, [token]);
+        await db.query(`UPDATE ${this.schema}.collection_lock SET job_id=NULL,token=NULL,expires_at=NULL
+          WHERE id=1 AND job_id=$1 AND token=$1`, [token]);
+      });
+      return;
+    }
     await this.pool.query(`UPDATE ${this.schema}.detail_collection_worker_lease SET owner_token=NULL,expires_at=NULL
       WHERE id=1 AND owner_token=$1`, [token]);
   }
@@ -130,10 +174,11 @@ export class DetailQueue {
   }
 
   /** 준비된 요청 중 직접·자동 최초·자동 보완 순서로 공고 하나를 선점합니다. */
-  async claim(token: string): Promise<DetailRun | null> {
-    return this.transaction(async db => {
+  async claim(token: string, signal?: AbortSignal): Promise<DetailRun | null> {
+    try { return await this.transaction(async db => {
       await this.lockLease(db);
       await this.owned(db, token);
+      if (signal?.aborted) return null;
       // 공고마다 다시 선택하므로 새 직접 요청이 기존 자동 대기보다 먼저 실행됩니다.
       const run = (await db.query<DetailRun>(`SELECT * FROM ${this.schema}.detail_collection_runs
         WHERE status='queued' AND (next_attempt_at IS NULL OR next_attempt_at<=clock_timestamp())
@@ -145,8 +190,12 @@ export class DetailQueue {
         SET status='processing',owner_token=$2,started_at=clock_timestamp(),next_attempt_at=NULL
         WHERE id=$1 RETURNING *`, [run.id, token])).rows[0];
       await this.owned(db, token);
+      if (signal?.aborted) throw cancelledClaim;
       return claimed;
-    });
+    }); } catch (error) {
+      if (error === cancelledClaim) return null;
+      throw error;
+    }
   }
 
   /** 모든 상세 쓰기를 같은 연결의 임대→실행→공고 잠금 아래 수행합니다.
@@ -208,21 +257,54 @@ export class DetailQueue {
   /** 상세·참조·관계·후속 요청과 실행 종료를 함께 저장합니다. */
   async finish(token: string, id: string, result: Finish): Promise<void> {
     await this.withRun(token, id, async (db, run, current) => {
-      if (result.status === "succeeded") {
+      const preserved = result.status === "succeeded" && !!current.detail && !shouldReplacePaginatedDetail(current.detail, result.detail);
+      if (result.status === "succeeded" && !preserved) {
         await saveStoredNoticeInTransaction(db, run.notice_key,
           { ...current, detail: result.detail, detailError: null, detailDiagnostic: null }, result.structured, this.schema);
         for (const key of [...new Set(result.relatedKeys ?? [])].sort())
           await saveNoticeRelationInTransaction(db, run.notice_key, key, this.schema);
         for (const request of result.followups ?? []) await this.enqueueInTransaction(db, request);
-      } else {
+      } else if (result.status === "failed") {
         await saveStoredNoticeInTransaction(db, run.notice_key, { ...current,
           detailError: redactDiagnostic(result.error), detailDiagnostic: result.diagnostic ? serializeError(result.diagnostic) : null }, undefined, this.schema);
       }
+      // 실제 자료 저장까지의 시간을 관측에 포함하고 같은 커밋으로 종료 상태와 확정합니다.
+      const snapshot = typeof result.snapshot === "function" ? result.snapshot(preserved) : result.snapshot;
       await db.query(`UPDATE ${this.schema}.detail_collection_runs SET status=$2,owner_token=NULL,
-        finished_at=clock_timestamp(),error=$3,diagnostic=$4::jsonb WHERE id=$1`, [id, result.status,
+        finished_at=clock_timestamp(),error=$3,diagnostic=$4::jsonb,progress=COALESCE($5::jsonb,progress) WHERE id=$1`, [id, result.status,
         result.status === "failed" ? redactDiagnostic(result.error) : null,
-        result.status === "failed" && result.diagnostic ? JSON.stringify(serializeError(result.diagnostic)) : null]);
+        result.status === "failed" && result.diagnostic ? JSON.stringify(serializeError(result.diagnostic)) : null,
+        snapshot ? JSON.stringify(snapshot) : null]);
     });
+  }
+
+  /** 점검으로 중단된 공고를 실패 처리하지 않고 잠시 뒤 재개할 수 있도록 반환합니다. */
+  async defer(token: string, id: string, snapshot: DetailSnapshot): Promise<void> {
+    await this.withRun(token, id, async db => {
+      await db.query(`UPDATE ${this.schema}.detail_collection_runs SET status='queued',owner_token=NULL,
+        started_at=NULL,next_attempt_at=clock_timestamp()+interval '60 seconds',progress=$2::jsonb WHERE id=$1`,
+      [id, JSON.stringify(snapshot)]);
+    });
+  }
+
+  /** 종료 신호 직후 선점한 공고를 실패나 지연 없이 원래 대기 순서로 반환합니다. */
+  async returnClaim(token: string, id: string): Promise<void> {
+    await this.withRun(token, id, async db => {
+      await db.query(`UPDATE ${this.schema}.detail_collection_runs SET status='queued',owner_token=NULL,
+        started_at=NULL,progress='{}'::jsonb WHERE id=$1`, [id]);
+    });
+  }
+
+  /** 선택 재수집의 접수와 공유 실행 연결을 원자적으로 저장합니다. */
+  async submitRefresh(keys: string[]) { return submitDetailRefresh(this, keys); }
+
+  /** 요청 작업을 실행 결과에서 집계하여 반환합니다. */
+  async getRefreshJob(id: string) { return getDetailRefresh(this, id); }
+
+  /** 최신 선택 재수집을 읽어 웹 재접속 시 대기를 복원합니다. */
+  async latestRefreshJob() {
+    const row = (await this.pool.query(`SELECT id FROM ${this.schema}.detail_collection_jobs ORDER BY requested_at DESC,id DESC LIMIT 1`)).rows[0];
+    return row ? this.getRefreshJob(row.id) : null;
   }
 
   /** 새 소비기가 이전 실행의 미완료 공고를 실패 횟수 증가 없이 대기로 돌립니다. */

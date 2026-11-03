@@ -18,6 +18,7 @@ export function createCollectionObserver(job: CollectionJob, save: () => Promise
   let failure: unknown;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let version = 0;
+  let closed = false;
 
   /** 명시적 저장이 예약 쓰기를 대신하므로 이미 큐에 들어간 예약도 무효화합니다. */
   function cancelPending(): void {
@@ -28,6 +29,7 @@ export function createCollectionObserver(job: CollectionJob, save: () => Promise
 
   /** 요청을 직렬화하되 오류 처리는 호출자에게 돌려 기존 재시도 경로를 유지합니다. */
   function enqueue(work: () => Promise<void>): Promise<void> {
+    if (closed) return Promise.resolve();
     const pending = tail.then(work).catch(error => { failure = error; throw error; });
     tail = pending.catch(() => undefined);
     return pending;
@@ -38,7 +40,7 @@ export function createCollectionObserver(job: CollectionJob, save: () => Promise
     cancelPending();
     const at = new Date(now()).toISOString();
     if (job.status === "running") timings.checkpoint(at);
-    else timings.finish(job.status, at);
+    else if (job.status !== "queued") timings.finish(job.status, at);
     await save();
     failure = undefined;
     lastWrite = now();
@@ -46,7 +48,7 @@ export function createCollectionObserver(job: CollectionJob, save: () => Promise
 
   /** 다음 이벤트가 없어도 최신 실제 진행을 저장하되 생존 시각을 새로 만들지 않습니다. */
   function scheduleWrite(wait: number): void {
-    if (timer !== undefined) return;
+    if (timer !== undefined || closed) return;
     const scheduledVersion = version;
     timer = setTimeout(() => {
       timer = undefined;
@@ -71,6 +73,20 @@ export function createCollectionObserver(job: CollectionJob, save: () => Promise
   }
 
   return {
+    /** 공고 실행 종료 후 예약된 중간 저장이 새 소유권에 도달하지 않도록 정리합니다. */
+    async close(): Promise<void> {
+      closed = true;
+      cancelPending();
+      await tail;
+    },
+    /** 저장 트랜잭션 안에서는 추가 DB 쓰기 없이 마지막 공고 시간을 확정합니다. */
+    finishSnapshot(result: CollectionNoticeResult): void {
+      if (result.finishedAt) return;
+      const at = new Date(now()).toISOString();
+      result.finishedAt = at;
+      recordCollectionProgress(job, result.progress?.stage ?? "preparing", at, result);
+      timings.finishNotice(result, result.status === "failed" ? "failed" : "completed", at);
+    },
     /** 세부 알림도 같은 직렬 큐와 저장 주기에 합쳐 쓰기 횟수를 제한합니다. */
     detail(event:CollectionDetailEvent,result:CollectionNoticeResult):void {
       const time=now();

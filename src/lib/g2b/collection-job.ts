@@ -20,11 +20,14 @@ import type { CollectionNoticeResult, CollectionProgress } from "./collection-pr
 import { createCollectionObserver, observeCollectionPages } from "./collection-observer";
 import type { CollectionTimings } from "./collection-timings";
 import { checkPreservedContent, runContentCheck } from "./content-check";
+import { detailQueueEnabled, wakeDetailWebRuntime, webDetailQueue } from "./detail-web-runtime";
 
 export type CollectionJob = DiagnosticState & {
   id: string;
   mode?: "collection" | "refresh" | "incremental";
-  status: "running" | "completed" | "failed" | "interrupted" | "deferred";
+  status: "queued" | "running" | "completed" | "failed" | "interrupted" | "deferred";
+  queueVersion?: 1;
+  detailQueued?: number;
   maintenance?: MaintenanceInfo;
   phase: "api" | "detail" | "done";
   range: PostedDateRange | null;
@@ -428,6 +431,11 @@ async function runRefresh(job: CollectionJob, deps: CollectionDependencies, leas
 
 /** 저장된 공고 키를 검증한 뒤 선택 재수집 작업을 시작합니다. */
 export async function startRefresh(keys: string[], deps: CollectionDependencies = {}): Promise<CollectionJob> {
+  if (detailQueueEnabled()) {
+    const job = await webDetailQueue().submitRefresh(keys);
+    wakeDetailWebRuntime();
+    return job;
+  }
   getPool();
   if (jobRuntime.__g2bActiveJobId) throw new Error("이미 수집 작업이 진행 중입니다.");
   if (!Array.isArray(keys) || keys.length === 0) throw new Error("재수집할 공고를 선택하세요.");
@@ -458,10 +466,18 @@ export async function startRefresh(keys: string[], deps: CollectionDependencies 
 /** 작업 ID로 DB에 저장된 수집 상태를 조회합니다. */
 export async function getCollectionJob(jobId: string): Promise<CollectionJob | null> {
   if (!/^[a-f0-9-]{36}$/.test(jobId)) return null;
+  if (detailQueueEnabled()) {
+    const queued = await webDetailQueue().getRefreshJob(jobId);
+    if (queued) return queued;
+  }
   return getDbJob(jobId);
 }
 
 /** 가장 최근 수집 작업 상태를 DB에서 조회합니다. */
 export async function getLatestCollectionJob(): Promise<CollectionJob | null> {
+  if (detailQueueEnabled()) {
+    const [legacy, queued] = await Promise.all([getLatestDbJob(), webDetailQueue().latestRefreshJob()]);
+    return queued && (!legacy || queued.startedAt >= legacy.startedAt) ? queued : legacy;
+  }
   return getLatestDbJob();
 }

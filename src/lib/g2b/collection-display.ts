@@ -9,6 +9,7 @@ export const collectionStages: Record<CollectionStage, string> = {
 };
 
 export const collectionStatuses: Record<CollectionJob["status"], string> = {
+  queued: "수집 대기 중",
   running: "수집 진행 중", completed: "수집 완료", failed: "수집 실패", interrupted: "수집 중단", deferred: "나라장터 시스템 점검으로 보류",
 };
 

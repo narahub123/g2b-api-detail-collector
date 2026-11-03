@@ -18,7 +18,7 @@ function PollingObservation({ initial }: { initial: CollectionJob }) {
   const [received, setReceived] = useState<{ source: CollectionJob; value: CollectionJob } | null>(null);
   const [error, setError] = useState("");
   const job = received?.source === initial ? received.value : initial;
-  const active = job.status === "running";
+  const active = job.status === "running" || job.status === "queued";
   useEffect(() => {
     if (!active) return;
     const abort = new AbortController();
@@ -34,7 +34,7 @@ function PollingObservation({ initial }: { initial: CollectionJob }) {
         if (value.id !== initial.id) throw Error("다른 작업의 수집 상태를 받았습니다.");
         setReceived({ source: initial, value });
         setError("");
-        next = value.status === "running";
+        next = value.status === "running" || value.status === "queued";
       } catch (reason) {
         if (!abort.signal.aborted) setError(reason instanceof Error ? reason.message : "수집 상태 조회 실패");
       }
@@ -119,6 +119,7 @@ function ObservationView({ job }: { job: CollectionJob }) {
   return <ObservationClock key={job.id} active={active}><section className="collection-observation" aria-label="수집 처리 관측">
     <h2>처리 관측</h2>
     <p className="collection-observation-status" role="status">상태: {collectionStatuses[job.status]}</p>
+    {job.detailQueued !== undefined && <p>상세 수집 대기 {job.detailQueued}건</p>}
     {job.maintenance && <div role="status"><p>{job.maintenance.message}</p><p>점검 확인: {collectionTime(job.maintenance.detectedAt)}</p></div>}
     <dl className="collection-observation-data">
       <div><dt>시작</dt><dd>{collectionTime(job.startedAt)}</dd></div>
