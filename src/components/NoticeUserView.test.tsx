@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { NoticeNavigationContext } from "./NoticeNavigationContext";
 import { NoticeUserView } from "./NoticeUserView";
+import { IndependentDetailsView } from "./IndependentDetailsView";
 import type { ScrapedDetail } from "@/lib/g2b/detail-page";
 
 const detail: ScrapedDetail = {
@@ -30,6 +31,34 @@ const detail: ScrapedDetail = {
 
 describe("NoticeUserView", () => {
   afterEach(cleanup);
+
+  it("독립 상세 탭에 연결되는 실제 렌더러에서도 본문 전용 섹션을 표시합니다", () => {
+    render(<IndependentDetailsView references={[{ number: "R26BD12345678", detail: {
+      schemaVersion: 5, number: "R26BD12345678", title: "사전규격 상세", capturedAt: "2026-11-03T00:00:00Z", sourceNoticeKey: "R26BK1--000",
+      sections: [{ title: "사전규격 안내", fields: [], tables: [], textBlocks: [{ text: "독립 상세 안내문", visible: true }] }],
+    } }]} />);
+    expect(screen.getByText("독립 상세 안내문")).toBeInTheDocument();
+    expect(screen.queryByText("표시할 상세 정보가 없습니다.")).not.toBeInTheDocument();
+  });
+
+  it("본문만 있는 섹션과 여러 깊이의 하위 안내문을 표시하고 숨긴 본문은 제외합니다", () => {
+    render(<NoticeUserView detail={{ ...detail, sections: [
+      { title: "공고안내", fields: [], tables: [], textBlocks: [{ text: "청렴계약 안내\n보증금 안내", visible: true }, { text: "숨긴 문단", visible: false }] },
+      { title: "연관정보", fields: [], tables: [], details: [{ title: "부모 안내", sections: [
+        { title: "부모 본문", fields: [], tables: [], textBlocks: [{ text: "부모 문구", visible: true }], details: [{ title: "자식 안내", sections: [
+          { title: "자식 본문", fields: [], tables: [], textBlocks: [{ text: "자식 문구", visible: true }] },
+        ] }] },
+      ] }] },
+      { title: "숨김 전용", fields: [], tables: [], textBlocks: [{ text: "사용자 제외", visible: false }] },
+      { title: "숨긴 섹션", visible: false, fields: [], tables: [], textBlocks: [{ text: "상위 숨김 제외", visible: true }] },
+    ] }} />);
+    expect(screen.getByText("공고안내").closest("details")).toHaveAttribute("open");
+    expect(screen.getByText(/청렴계약 안내/).textContent).toBe("청렴계약 안내\n보증금 안내");
+    expect(screen.getByText("부모 문구")).toBeInTheDocument();
+    expect(screen.getByText("자식 문구")).toBeInTheDocument();
+    for (const value of ["숨긴 문단", "숨김 전용", "사용자 제외", "상위 숨김 제외", "표시할 상세 정보가 없습니다."])
+      expect(screen.queryByText(value)).not.toBeInTheDocument();
+  });
 
   it("중첩 표의 페이지를 독립적으로 이동하고 번호 탐색을 유지한다", () => {
     const navigate = vi.fn();

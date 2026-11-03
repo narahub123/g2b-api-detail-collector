@@ -26,6 +26,38 @@ const detail: ScrapedDetail = {
 };
 
 describe("NoticeComparison", () => {
+  it("본문 전용 섹션의 안내문과 숨김 표시를 제공하고 빈 필드 안내는 생략합니다", () => {
+    render(<NoticeComparison api={null} detail={{ ...detail, modalCaptures: [], sections: [
+      { title: "공고안내", fields: [], tables: [], textBlocks: [{ text: "청렴계약 안내\n보증금 안내", visible: true }, { text: "숨김 문단", visible: false }] },
+    ] }} />);
+    const section = screen.getByText("공고안내", { selector: "summary" }).closest("details")!;
+    expect(within(section).getByText(/청렴계약 안내/).textContent).toBe("청렴계약 안내\n보증금 안내");
+    expect(within(section).getByText("숨김 문단")).toBeInTheDocument();
+    expect(within(section).getByText("숨김")).toBeInTheDocument();
+    expect(within(section).queryByText("수집된 필드가 없습니다.")).not.toBeInTheDocument();
+  });
+
+  it("상위 섹션이 숨겨져 있으면 하위 본문에도 숨김 표시를 유지합니다", () => {
+    render(<NoticeComparison api={null} detail={{ ...detail, modalCaptures: [], sections: [
+      { title: "숨긴 상위", visible: false, fields: [], tables: [], details: [{ title: "하위 상세", sections: [
+        { title: "하위 안내", fields: [], tables: [], textBlocks: [{ text: "상위 숨김 본문", visible: true }] },
+      ] }] },
+    ] }} />);
+    expect(within(screen.getByText("상위 숨김 본문").parentElement!).getByText("숨김")).toBeInTheDocument();
+  });
+
+  it("귀속·미귀속·독립 상세와 중첩 하위 본문을 표시합니다", () => {
+    const part = (text: string) => ({ title: text, fields: [], tables: [], textBlocks: [{ text: `${text} 문구`, visible: true }] });
+    render(<NoticeComparison api={null} detail={{ ...detail, sections: [{ title: "공지사항", fields: [], tables: [], details: [
+      { title: "부모", sections: [{ ...part("부모 본문"), details: [{ title: "자식", sections: [part("자식 본문")] }] }] },
+    ] }], modalCaptures: [{ trigger: detail.modalCaptures![0].trigger, modal: { title: "미귀속 안내", sections: [part("미귀속 본문")], text: "미귀속 본문 문구" } }] }}
+      preSpecifications={[{ number: "R26BD12345678", detail: { schemaVersion: 5, number: "R26BD12345678", title: "독립 안내",
+        capturedAt: "2026-11-03T00:00:00Z", sourceNoticeKey: "R26BK1--000", sections: [{ ...part("독립 본문"), details: [
+          { title: "독립 자식", sections: [{ ...part("독립 자식 본문"), details: [{ title: "손자", sections: [part("손자 본문")] }] }] },
+        ] }] } }]} />);
+    for (const name of ["부모 본문", "자식 본문", "미귀속 본문", "독립 본문", "독립 자식 본문", "손자 본문"])
+      expect(screen.getAllByText(`${name} 문구`)).toHaveLength(1);
+  });
   it("개찰 독립 상세와 그 안의 하위 모달을 함께 표시합니다", () => {
     render(<NoticeComparison api={null} detail={detail} openingDetails={[{
       number: "opening--R26BK1--000--002",

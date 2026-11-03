@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { ApiNotice } from "@/lib/g2b/types";
-import type { ModalCapture, ScrapedDetail, StructuredField, StructuredTable } from "@/lib/g2b/detail-page";
+import type { ModalCapture, ScrapedDetail, StructuredField, StructuredSection, StructuredTable } from "@/lib/g2b/detail-page";
 import { apiFieldDisplayName } from "@/lib/g2b/api-field-labels";
 import type { IndependentReference } from "@/lib/g2b/notices";
 import { paginateTableRows, tableForDisplay } from "@/lib/g2b/structured-table";
@@ -11,6 +11,7 @@ import { safeAttachmentLink } from "@/lib/g2b/attachment-links";
 import { contentSections } from "@/lib/g2b/content-sections";
 import { attachmentLinkMap } from "@/lib/g2b/attachment-map";
 import { fieldText } from "@/lib/g2b/field-value";
+import { SectionTextBlocks, hasTextBlocks } from "./SectionTextBlocks";
 
 function safeLink(value: string): string | null {
   try {
@@ -86,6 +87,42 @@ function ClickSources({ triggers }: { triggers: ModalCapture["trigger"][] }) {
   </p>);
 }
 
+/** 본문이나 하위 상세가 있는 섹션에 빈 필드 안내를 중복해서 표시하지 않습니다. */
+function SectionFieldList({ section, group, links }: { section: StructuredSection; group?: string; links: ReadonlyMap<string, string> }) {
+  if (!section.fields.length && (hasTextBlocks(section.textBlocks, true) || section.tables.length || section.details?.length)) return null;
+  return <FieldList fields={section.fields} group={group} links={links} />;
+}
+
+/** 중첩 상세의 깊이와 무관하게 본문·필드·표를 표시하고 첨부 범위를 유지합니다. */
+function NestedComparisonDetails({ items, group, hidden = false }: {
+  items?: StructuredSection["details"]; group: string; hidden?: boolean;
+}) {
+  return items?.map((item, index) => {
+    const links = attachmentLinkMap(item.attachments || []);
+    return <div className="comparison-detail-block" key={index}>
+      <h5>{item.title}</h5>
+      {item.trigger && <ClickSources triggers={[item.trigger]} />}
+      {contentSections(item, item.title).map((part, partIndex) => {
+        const partHidden = hidden || part.visible === false;
+        const partGroup = `${group} ${item.title} ${part.title} ${index + 1}`;
+        return <div key={partIndex}>
+          {item.sections && <h6>{part.title}</h6>}
+          <SectionFieldList section={part} group={partGroup} links={links} />
+          <SectionTextBlocks blocks={part.textBlocks} includeHidden sectionVisible={!partHidden} />
+          <TableList tables={part.tables} group={partGroup} links={links} />
+          <NestedComparisonDetails items={part.details} group={partGroup} hidden={partHidden} />
+        </div>;
+      })}
+    </div>;
+  });
+}
+
+/** 구조화된 본문이 있으면 과거 평면 본문을 다시 출력하지 않도록 확인합니다. */
+function hasSectionBody(sections: StructuredSection[]): boolean {
+  return sections.some(section => hasTextBlocks(section.textBlocks, true) ||
+    section.details?.some(item => hasSectionBody(contentSections(item, item.title))));
+}
+
 /**
  * API 응답, 섹션 상세, 독립 저장 자료를 공고별로 비교해 보여줍니다.
  * @param props 읽은 공고 자료와 번호로 연결한 독립 상세 참조
@@ -124,19 +161,23 @@ export function NoticeComparison({ api, detail, orderPlans = [], preSpecificatio
         <div className="comparison-group"><h3>상세 페이지 섹션 · {detail.sections?.length || 0}개</h3>
           {detail.sections?.length ? detail.sections.map((section, index) => <details className="comparison-card" key={`${section.title}-${index}`} open>
             <summary>{section.title} <span>필드 {section.fields.length} · 표 {section.tables.length}</span></summary>
-            {(section.fields.length > 0 || !section.details?.length) && <FieldList fields={section.fields} group={section.title} links={pageLinks} />}
+            <SectionFieldList section={section} group={section.title} links={pageLinks} />
+            <SectionTextBlocks blocks={section.textBlocks} includeHidden sectionVisible={section.visible} />
             <TableList tables={section.tables} group={section.title} links={pageLinks} />
             {section.details?.map((item, detailIndex) => <div className="comparison-detail-block" key={detailIndex}>
               <h4>{item.title}</h4>
               {item.trigger && <ClickSources triggers={[item.trigger]} />}
               {contentSections(item, item.title).map((part, partIndex) => <div key={partIndex}>
                 {item.sections && <h5>{part.title}</h5>}
-                <FieldList fields={part.fields} group={`${section.title} ${item.title} ${part.title}`}
+                <SectionFieldList section={part} group={`${section.title} ${item.title} ${part.title}`}
                   links={attachmentLinkMap(item.attachments || [])} />
+                <SectionTextBlocks blocks={part.textBlocks} includeHidden sectionVisible={section.visible !== false && part.visible !== false} />
                 <TableList tables={part.tables} group={item.sections
                   ? `${section.title} ${item.title} ${part.title} ${detailIndex + 1}`
                   : `${section.title} ${item.title} ${detailIndex + 1}`}
                   links={attachmentLinkMap(item.attachments || [])} />
+                <NestedComparisonDetails items={part.details} group={`${section.title} ${item.title} ${part.title}`}
+                  hidden={section.visible === false || part.visible === false} />
               </div>)}
             </div>)}
           </details>) : <p className="muted comparison-empty">섹션별 수집 자료가 없습니다.</p>}
@@ -162,12 +203,14 @@ export function NoticeComparison({ api, detail, orderPlans = [], preSpecificatio
             {contentSections(capture.modal, capture.modal.title || capture.trigger.label).map((part, partIndex) =>
               <div key={partIndex}>
                 {capture.modal.sections && <h4>{part.title}</h4>}
-                <FieldList fields={part.fields} links={attachmentLinkMap(capture.modal.attachments || [])} />
+                <SectionFieldList section={part} links={attachmentLinkMap(capture.modal.attachments || [])} />
+                <SectionTextBlocks blocks={part.textBlocks} includeHidden sectionVisible={part.visible} />
                 <TableList tables={part.tables} group={capture.modal.sections
                   ? `${capture.trigger.label} ${part.title}` : capture.trigger.label}
                   links={attachmentLinkMap(capture.modal.attachments || [])} />
+                <NestedComparisonDetails items={part.details} group={`${capture.trigger.label} ${part.title}`} hidden={part.visible === false} />
               </div>)}
-            {capture.modal.text && <div className="comparison-text-block"><h4>팝업 본문</h4><p>{capture.modal.text}</p></div>}
+            {capture.modal.text && !hasSectionBody(contentSections(capture.modal)) && <div className="comparison-text-block"><h4>팝업 본문</h4><p>{capture.modal.text}</p></div>}
           </details>) : <p className="muted comparison-empty">수집된 클릭 상세 정보가 없습니다.</p>}
           {detail.modalDiscovery?.failures.length ? <p className="comparison-failures">수집 실패 {detail.modalDiscovery.failures.length}건: {detail.modalDiscovery.failures.join(" · ")}</p> : null}
         </section>
@@ -180,7 +223,8 @@ export function NoticeComparison({ api, detail, orderPlans = [], preSpecificatio
             {item.detail ? contentSections(item.detail, item.detail.title || item.number).map((part, partIndex) =>
               <div key={partIndex}>
                 {item.detail?.sections && <h4>{part.title}</h4>}
-                <FieldList fields={part.fields} links={attachmentLinkMap(item.detail?.attachments || [])} />
+                <SectionFieldList section={part} links={attachmentLinkMap(item.detail?.attachments || [])} />
+                <SectionTextBlocks blocks={part.textBlocks} includeHidden sectionVisible={part.visible} />
                 <TableList tables={part.tables} group={`${item.kind} ${item.number} ${part.title}`}
                   links={attachmentLinkMap(item.detail?.attachments || [])} />
                 {part.details?.map((child, childIndex) => <div className="comparison-detail-block" key={childIndex}>
@@ -188,9 +232,12 @@ export function NoticeComparison({ api, detail, orderPlans = [], preSpecificatio
                   {child.trigger && <ClickSources triggers={[child.trigger]} />}
                   {contentSections(child, child.title).map((childPart, childPartIndex) => <div key={childPartIndex}>
                     {child.sections && <h6>{childPart.title}</h6>}
-                    <FieldList fields={childPart.fields} links={attachmentLinkMap(child.attachments || [])} />
+                    <SectionFieldList section={childPart} links={attachmentLinkMap(child.attachments || [])} />
+                    <SectionTextBlocks blocks={childPart.textBlocks} includeHidden sectionVisible={part.visible !== false && childPart.visible !== false} />
                     <TableList tables={childPart.tables} group={`${item.kind} ${child.title} ${childPart.title}`}
                       links={attachmentLinkMap(child.attachments || [])} />
+                    <NestedComparisonDetails items={childPart.details} group={`${item.kind} ${child.title} ${childPart.title}`}
+                      hidden={part.visible === false || childPart.visible === false} />
                   </div>)}
                 </div>)}
               </div>)

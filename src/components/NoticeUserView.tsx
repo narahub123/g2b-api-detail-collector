@@ -11,6 +11,7 @@ import { contentSections } from "@/lib/g2b/content-sections";
 import { openingTargetForCell, splitNavigationValue, type NavigationTarget } from "@/lib/g2b/notice-navigation";
 import { useNoticeNavigation } from "./NoticeNavigationContext";
 import { FormAccordion } from "./FormAccordion";
+import { SectionTextBlocks, hasTextBlocks } from "./SectionTextBlocks";
 
 /** 화면 문자열과 수집된 첨부파일명을 같은 기준으로 비교합니다. */
 function fileNameKey(value: string): string {
@@ -75,7 +76,7 @@ type LinkedDetail = NonNullable<StructuredSection["details"]>[number];
 /** 하위 상세까지 살펴 사용자에게 표시할 내용이 있는 섹션인지 판별합니다. */
 function hasVisibleSectionContent(section: StructuredSection): boolean {
   return section.visible !== false && (visibleFields(section.fields).length > 0 ||
-    section.tables.some(hasVisibleTableData) || section.details?.some(hasVisibleDetailContent) === true);
+    hasTextBlocks(section.textBlocks) || section.tables.some(hasVisibleTableData) || section.details?.some(hasVisibleDetailContent) === true);
 }
 
 /** 모달의 실제 표시 가능한 섹션을 최상위 섹션과 같은 기준으로 찾습니다. */
@@ -135,12 +136,13 @@ function UserSections({ sections, links, labelPrefix = "" }: { sections: Structu
   </div>;
 }
 
-/** 필드·표·하위 상세를 같은 섹션 레이아웃 안에 배치합니다. */
+/** 필드·일반 본문·표·하위 상세를 같은 섹션 레이아웃 안에 배치합니다. */
 function UserSection({ section, links, labelPrefix }: { section: StructuredSection;
   links: Map<string, string>; labelPrefix: string }) {
   const label = labelPrefix + section.title;
   return <FormAccordion title={section.title} defaultOpen>
     <UserFields fields={section.fields} links={links} />
+    <SectionTextBlocks blocks={section.textBlocks} sectionVisible={section.visible} />
     {section.tables.map((table, tableIndex) => <UserTable table={table}
       label={label + " 표 " + (tableIndex + 1)} links={links} section={section.title} key={tableIndex} />)}
     {section.details?.filter(hasVisibleDetailContent).map((item, detailIndex) =>
