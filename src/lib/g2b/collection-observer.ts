@@ -1,11 +1,16 @@
 import type { CollectionJob } from "./collection-job";
 import { recordCollectionProgress, type CollectionNoticeResult, type CollectionStage } from "./collection-progress";
+import { createCollectionTimings } from "./collection-timings";
 
 /**
  * 기존 상태 저장과 진행 저장을 하나의 직렬 큐로 처리합니다.
  * 중간 단계는 단계가 달라도 2초 이내에 합치고 시작·종료·기존 상태 저장은 즉시 확정합니다.
+ * @param now 진행 표시와 저장 주기에 사용할 벽시계
+ * @param monotonic 경과 시간 검증에 주입할 단조 시계이며 기본값은 performance.now입니다.
  */
-export function createCollectionObserver(job: CollectionJob, save: () => Promise<void>, now: () => number = Date.now) {
+export function createCollectionObserver(job: CollectionJob, save: () => Promise<void>, now: () => number = Date.now,
+  monotonic?: () => number) {
+  const timings = createCollectionTimings(job, monotonic);
   let tail = Promise.resolve();
   let lastWrite = -Infinity;
   let failure: unknown;
@@ -29,6 +34,9 @@ export function createCollectionObserver(job: CollectionJob, save: () => Promise
   /** 기존 소유권 검사를 거쳐 상태를 저장합니다. */
   async function write(): Promise<void> {
     cancelPending();
+    const at = new Date(now()).toISOString();
+    if (job.status === "running") timings.checkpoint(at);
+    else timings.finish(job.status, at);
     await save();
     failure = undefined;
     lastWrite = now();
@@ -52,12 +60,12 @@ export function createCollectionObserver(job: CollectionJob, save: () => Promise
 
   /** 단계 전환도 같은 저장 간격에 합치되 마지막 이벤트 자체는 즉시 반영합니다. */
   async function update(stage: CollectionStage, time: number, result?: CollectionNoticeResult): Promise<void> {
-    const previous = job.progress;
     recordCollectionProgress(job, stage, new Date(time).toISOString(), result);
-    if (job.progress === previous) return;
+    // 벽시계 역전으로 표시 갱신이 보류돼도 실제 처리 시간은 현재 단계에 귀속합니다.
+    timings.transition(stage, new Date(time).toISOString(), result);
     const remaining = 2000 - (time - lastWrite);
     if (remaining <= 0) await write();
-    else scheduleWrite(remaining);
+    else scheduleWrite(Math.min(2000, remaining));
   }
 
   return {
@@ -66,7 +74,10 @@ export function createCollectionObserver(job: CollectionJob, save: () => Promise
       cancelPending();
       const at = new Date(now()).toISOString();
       return enqueue(async () => {
-        if (stage) recordCollectionProgress(job, stage, at, result);
+        if (stage) {
+          recordCollectionProgress(job, stage, at, result);
+          timings.transition(stage, at, result);
+        }
         await write();
       });
     },
@@ -82,6 +93,7 @@ export function createCollectionObserver(job: CollectionJob, save: () => Promise
         delete result.error;
         result.status = "pending";
         recordCollectionProgress(job, "preparing", at, result);
+        timings.transition("preparing", at, result);
         await write();
       });
     },
@@ -95,6 +107,14 @@ export function createCollectionObserver(job: CollectionJob, save: () => Promise
         await update(stage, time, result);
       });
     },
+    /** 일시적인 검사·저장 구간은 원래 단계를 멈춘 뒤 성공 여부와 무관하게 복귀합니다. */
+    async during<T>(stage: CollectionStage, work: () => T | Promise<T>, result?: CollectionNoticeResult): Promise<T> {
+      const previous = result?.timings?.active?.stage ?? job.timings?.active?.stage ??
+        result?.progress?.stage ?? job.progress?.stage;
+      await this.progress(stage, result);
+      try { return await work(); }
+      finally { if (previous) await this.progress(previous, result); }
+    },
     /** 자식 공고로 진행하기 전에 업무 결과 저장 완료 시각을 고정합니다. */
     finish(result: CollectionNoticeResult) {
       cancelPending();
@@ -103,6 +123,7 @@ export function createCollectionObserver(job: CollectionJob, save: () => Promise
         if (result.finishedAt) return;
         result.finishedAt = at;
         recordCollectionProgress(job, result.progress?.stage ?? "preparing", at, result);
+        timings.finishNotice(result, result.status === "failed" ? "failed" : "completed", at);
         await write();
       });
     },

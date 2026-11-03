@@ -29,6 +29,29 @@ import { getCollectionJob, startCollection, startRefresh } from "./collection-jo
 import type { CollectionJob } from "./collection-job";
 import { G2bMaintenanceError } from "./maintenance";
 
+it("수동 수집 결과는 작업과 공고의 단계 시간을 기존 작업 상태에 보존합니다", async () => {
+  process.env.G2B_SERVICE_KEY = "test-key";
+  const value = await startCollection({ start: "2026-10-28", end: "2026-10-28" }, {
+    fetcher: async () => Response.json({ response: { body: { totalCount: 1, numOfRows: 100, pageNo: 1,
+      items: [{ bidNtceNo: "R26BK1", bidNtceOrd: "000" }] } } }),
+    scrape: async (url, options) => {
+      for (const stage of ["extracting", "tables", "modals", "closing"] as const) await options?.onProgress?.(stage);
+      return { detail: { sourceUrl: url, sections: [], attachments: [], links: [] }, relatedNoticeKeys: [] };
+    },
+  });
+  await vi.waitFor(() => expect(db.releaseDbLease).toHaveBeenCalledWith(value.id, "lease-token"));
+  const saved = await getCollectionJob(value.id);
+  expect(saved?.timings?.outcome).toBe("completed");
+  expect(saved?.results?.[0].timings?.outcome).toBe("completed");
+  for (const stage of ["preparing", "opening", "extracting", "tables", "modals", "closing", "structuring", "saving"] as const) {
+    expect(saved?.results?.[0].timings?.totals[stage]).toBeGreaterThanOrEqual(0);
+  }
+  expect(saved?.timings?.totals.api).toBeGreaterThanOrEqual(0);
+  expect(saved?.timings?.totals["extraction-check"]).toBeUndefined();
+  expect(saved?.timings?.totals["preservation-check"]).toBeUndefined();
+  expect(saved?.timings?.active).toBeUndefined();
+});
+
 it("수동 구간 재실행도 완료 부모를 다시 수집하지 않고 점검으로 남은 관련 공고를 처리합니다",async()=>{
   process.env.G2B_SERVICE_KEY="test-key";
   db.saveNoticeRelation.mockImplementation(async(source?:string,related?:string)=>{

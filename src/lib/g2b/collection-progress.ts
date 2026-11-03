@@ -1,7 +1,9 @@
 import type { CollectionJob } from "./collection-job";
+import type { CollectionTimings } from "./collection-timings";
 
 export type CollectionStage = "api" | "preparing" | "opening" | "extracting" |
-  "tables" | "modals" | "closing" | "structuring" | "saving" | "relations";
+  "tables" | "modals" | "closing" | "structuring" | "saving" | "relations" |
+  "extraction-check" | "preservation-check";
 
 export type CollectionProgress = {
   stage: CollectionStage;
@@ -17,6 +19,7 @@ export type CollectionNoticeResult = {
   startedAt?: string;
   finishedAt?: string;
   progress?: CollectionProgress;
+  timings?: CollectionTimings;
 };
 
 /**

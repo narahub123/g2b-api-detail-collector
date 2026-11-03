@@ -4,6 +4,29 @@ import type { StoredNotice } from "./notices";
 import type { CollectionJob } from "./collection-job";
 import { G2bMaintenanceError } from "./maintenance";
 
+it("증분 수집도 공고별 시간을 상태 JSON으로 보존하고 검사 미실행을 유지합니다", async () => {
+  vi.stubEnv("G2B_SERVICE_KEY", "test-key");
+  try {
+    const memory = memoryStore();
+    const value = await runIncrementalCollection({ start: "2026-10-27T00:00:00Z", end: "2026-10-27T01:00:00Z", store: memory.store,
+      fetcher: async () => Response.json({ response: { body: { totalCount: 1, numOfRows: 100, pageNo: 1,
+        items: [{ bidNtceNo: "R26BK1", bidNtceOrd: "000" }] } } }),
+      scrape: async (url, options) => {
+        await options?.onProgress?.("extracting");
+        return { detail: { sourceUrl: url, sections: [], attachments: [], links: [] }, relatedNoticeKeys: [] };
+      },
+    });
+    const saved = memory.jobs.at(-1)!;
+    expect(saved.timings).toEqual(value.timings);
+    expect(saved.timings?.outcome).toBe("completed");
+    expect(saved.results?.[0].timings?.outcome).toBe("completed");
+    expect(saved.results?.[0].timings?.totals.extracting).toBeGreaterThanOrEqual(0);
+    expect(saved.results?.[0].timings?.totals.saving).toBeGreaterThanOrEqual(0);
+    expect(saved.timings?.totals["extraction-check"]).toBeUndefined();
+    expect(saved.timings?.active).toBeUndefined();
+  } finally { vi.unstubAllEnvs(); }
+});
+
 it("부모 저장 후 관련 공고에서 점검이 시작되어도 다음 실행에서 미완료 관계를 재개합니다",async()=>{
   vi.stubEnv("G2B_SERVICE_KEY","test-key");
   try {
