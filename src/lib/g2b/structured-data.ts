@@ -51,8 +51,9 @@ const hasFieldContent = (fields: StructuredField[]) => fields.some((field) => Bo
   hasTableContent(field.tables ?? []));
 const hasTableContent = (tables: StructuredTable[]) => tables.some((table) =>
   [...table.headerRows, ...table.bodyRows].some((row) => row.some((cell) => Boolean(cell.value?.trim()))));
-const hasContent = (fields: StructuredField[], tables: StructuredTable[]) =>
-  hasFieldContent(fields) || hasTableContent(tables);
+/** 일반 안내문도 저장할 내용으로 인정해 본문 전용 섹션의 삭제를 막습니다. */
+const hasContent = (fields: StructuredField[], tables: StructuredTable[], textBlocks?: StructuredSection["textBlocks"]) =>
+  hasFieldContent(fields) || hasTableContent(tables) || Boolean(textBlocks?.some(block => block.text.trim()));
 /**
  * 값이 없고 연결된 하위 상세도 없는 섹션을 모든 저장 경로에서 같은 기준으로 제거합니다.
  * @param sections 필터링할 섹션 목록
@@ -66,7 +67,7 @@ const filterNonemptySections = (sections: StructuredSection[] | undefined,
       ...detail,
       ...(detail.sections ? { sections: filterNonemptySections(detail.sections) } : {})
     })) } : {})
-  })).filter((section) => hasContent(section.fields, section.tables) ||
+  })).filter((section) => hasContent(section.fields, section.tables, section.textBlocks) ||
     Boolean(section.details?.length) || Boolean(unresolvedTitles?.has(section.title)));
 /** 독립 표와 필드에 연결된 표를 각각 한 번씩 집계할 목록으로 만듭니다. */
 const allTables = (fields: StructuredField[], tables: StructuredTable[]): StructuredTable[] =>
@@ -183,7 +184,7 @@ export function structureNoticeDetail(key: string, detail: ScrapedDetail): Struc
       titleOwners.add(owner);
       sectionByModalTitle.set(title, titleOwners);
     }
-    if (!contentSections(capture.modal).some((section) => hasContent(section.fields, section.tables)))
+    if (!contentSections(capture.modal).some((section) => hasContent(section.fields, section.tables, section.textBlocks)))
       warnings.push(`${key}: ${title || capture.trigger.label}에 저장할 구조화된 값이 없습니다.`);
   }
   // 중첩 모달 연결이 끝난 뒤 필터링해야 부모의 빈 섹션에 연결된 하위 상세가 남습니다.

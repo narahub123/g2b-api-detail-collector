@@ -1,16 +1,17 @@
 import * as cheerio from "cheerio";
 import { extractFieldValue, fieldText } from "./field-value";
 import { extractDetailTable, isInlineVisible } from "./structured-table";
-import type { StructuredField, StructuredSection } from "./detail-page";
+import type { StructuredField, StructuredSection, StructuredTextBlock } from "./detail-page";
 
 type ContentKind = "page" | "modal";
 
 const clean = (value: string) => value.replace(/\s+/g, " ").trim();
 // 제목이 .fl 내부에 있거나 .fl과 같은 요소에 있는 WebSquare 구조를 함께 인식합니다.
-const SECTION_TITLE_SELECTOR = ".dfbox > .fl > .df_tit, .dfbox > .df_tit.fl";
+export const SECTION_TITLE_SELECTOR = ".dfbox > .fl > .df_tit, .dfbox > .df_tit.fl";
+export const CONTENT_CONTROL_SELECTOR = "script,style,button,input,textarea,select,nav,header,footer,[role='navigation'],[role='button'],h1,h2,h3,h4,.df_tit,.total_area,.help_ellipsis,.udc_help_toggle,.stepbar,.btnbox_all,.w2window_header_title,[id$='_header_title'],caption,.w2grid_start_div,.w2grid_end_div,[id$='_noresult'],.loading-wrap";
 
 /**
- * 상세 본문과 모달에서 제목·필드·표를 같은 문서 순회 규칙으로 수집합니다.
+ * 상세 본문과 모달에서 제목·필드·표·일반 안내문을 같은 문서 순회 규칙으로 수집합니다.
  * @param html 현재 입력값을 반영한 HTML
  * @param kind 대상 영역을 선택하는 종류
  * @returns 문서 순서대로 정리한 섹션
@@ -20,11 +21,27 @@ export function extractCommonSections(html: string, kind: ContentKind): Structur
   $("script,style").remove();
   const sections: StructuredSection[] = [];
   const fieldByCell = new Map<any, StructuredField>();
+  const representedTables = new Set<any>();
   let active: StructuredSection | null = null;
+  let pending: StructuredTextBlock | null = null;
+  /** 제목 없는 모달 본문도 기존 미분류 섹션에 담습니다. */
   const target = (): StructuredSection => {
     if (!active) { active = { title: "미분류", fields: [], tables: [] }; sections.push(active); }
     return active;
   };
+  /** 문단 경계와 숨김 상태를 보존하되 HTML 들여쓰기 공백은 본문으로 저장하지 않습니다. */
+  const flushText = (): void => {
+    const text = pending?.text.replace(/[ \t\r\f]+/g, " ").replace(/ *\n */g, "\n").trim();
+    if (text && pending) (target().textBlocks ??= []).push({ text, visible: pending.visible });
+    pending = null;
+  };
+  /** 같은 문구가 반복되어도 DOM의 각 문단을 독립적으로 보존합니다. */
+  const appendText = (text: string, visible: boolean): void => {
+    if (pending && pending.visible !== visible) flushText();
+    pending ??= { text: "", visible };
+    pending.text += text;
+  };
+  /** 새 제목이 시작되면 이후 필드와 안내문의 소유 섹션을 전환합니다. */
   const startSection = (title: string, visible: boolean): void => {
     active = { title, fields: [], tables: [], visible };
     sections.push(active);
@@ -57,16 +74,36 @@ export function extractCommonSections(html: string, kind: ContentKind): Structur
   };
   /** 표 셀에서도 필드와 같은 입력값·숨김값 규칙을 사용합니다. */
   const readCell = (cell: cheerio.Cheerio<any>): string | null => fieldText(extractFieldValue($, cell));
+  /** 이미 필드나 표로 표현된 값은 제외하고 남은 일반 본문을 문서 순서로 읽습니다. */
   const walk = (node: any): void => {
+    if (node.type === "text") {
+      const parents = $(node.parent).parents().addBack();
+      const owned = parents.toArray().some(parent => representedTables.has(parent) || fieldByCell.has(parent));
+      if ((active || kind === "modal") && !owned && !$(node.parent).closest(".dfbox,th").length) {
+        const preserveLines = parents.toArray().some(parent => $(parent).is("pre") ||
+          /white-space\s*:\s*(?:pre|pre-wrap|break-spaces)/i.test($(parent).attr("style") || ""));
+        appendText(preserveLines ? (node.data || "").replace(/\r\n?/g, "\n") : (node.data || "").replace(/\s+/g, " "), isInlineVisible($, node.parent));
+      }
+      return;
+    }
     if (node.type !== "tag") return;
     const element = $(node);
     if (element.is(SECTION_TITLE_SELECTOR)) {
       const title = clean(element.text());
-      if (title) { startSection(title, isInlineVisible($, node)); return; }
+      if (title) { flushText(); startSection(title, isInlineVisible($, node)); return; }
+    }
+    // 제목·보조 표시·조작 버튼은 일반 안내문에 섞지 않습니다.
+    if (element.is(CONTENT_CONTROL_SELECTOR) ||
+      element.is("a") && /^(?:#|javascript:)/i.test(element.attr("href") || "")) return;
+    const boundary = element.is("p,div,li,ul,ol,section,article,pre,table");
+    if (boundary) flushText();
+    if (element.is("br") && !element.parents().toArray().some(parent => representedTables.has(parent) || fieldByCell.has(parent)) && (active || kind === "modal")) {
+      appendText("\n", isInlineVisible($, node)); return;
     }
     if (element.is("table")) {
       const table = extractDetailTable($, element, readCell);
       if (table) {
+        representedTables.add(node);
         const owner = element.parents("td").toArray().map((cell) => fieldByCell.get(cell)).find(Boolean);
         if (owner) (owner.tables ||= []).push(table);
         else target().tables.push(table);
@@ -92,16 +129,18 @@ export function extractCommonSections(html: string, kind: ContentKind): Structur
       }
     }
     for (const child of node.children || []) walk(child);
+    if (boundary) flushText();
   };
   // 페이지의 공고 본문과 열린 모달만 순회해 공통 탐색 영역을 제외합니다.
   if (kind === "modal") {
     const dialog = $("[role='dialog']").first();
-    for (const child of (dialog.length ? dialog : $("body")).children().toArray()) walk(child);
+    for (const child of (dialog.length ? dialog : $("body")).contents().toArray()) walk(child);
   } else {
     const pane = $(".pop_contents > .sub_contents").filter((_, node) => $(node).find(SECTION_TITLE_SELECTOR).length > 0).first();
     if (pane.length) {
-      for (const child of pane.children().toArray()) if ($(child).find(SECTION_TITLE_SELECTOR).length) walk(child);
-    } else walk($("body")[0]);
+      for (const child of pane.contents().toArray()) walk(child);
+    } else walk($("main").first()[0] || $("body")[0]);
   }
+  flushText();
   return sections;
 }

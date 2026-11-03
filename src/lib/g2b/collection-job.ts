@@ -19,6 +19,7 @@ import { shouldReplacePaginatedDetail } from "./pagination-coverage";
 import type { CollectionNoticeResult, CollectionProgress } from "./collection-progress";
 import { createCollectionObserver, observeCollectionPages } from "./collection-observer";
 import type { CollectionTimings } from "./collection-timings";
+import { checkPreservedContent, runContentCheck } from "./content-check";
 
 export type CollectionJob = DiagnosticState & {
   id: string;
@@ -164,7 +165,9 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies, l
     const identity = parts(key);
     let result: ScrapeResult;
     try { result = await scrape(serviceDetailUrl(identity.number, identity.order), {
-      onProgress: stage => observation.progress(stage, noticeResult) }); }
+      onProgress: stage => observation.progress(stage, noticeResult),
+      onContentWarning: warning => addDiagnostic(job, { severity: "warning", stage: warning.stage, operation: warning.operation, target: { key }, error: warning.message }),
+    }); }
     catch (error) {
       observation.assert();
       if (maintenanceFromError(error)) throw error;
@@ -182,6 +185,9 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies, l
     observation.assert();
     await observation.progress("structuring", noticeResult);
     const structured = structureNoticeDetail(key, result.detail);
+    await runContentCheck("preservation-check", () => checkPreservedContent(key, result.detail, structured),
+      issue => addDiagnostic(job, { severity: "warning", stage: "transform", operation: "preservation-check", target: { key }, error: `${issue.section}: ${issue.message}` }),
+      stage => observation.progress(stage, noticeResult));
     for (const warning of result.warnings || [])
       addDiagnostic(job, { severity: "warning", stage: warning.stage, operation: warning.operation, target: { key }, error: warning.message });
     for (const warning of result.detail.modalDiscovery?.failures || [])
@@ -341,7 +347,9 @@ async function runRefresh(job: CollectionJob, deps: CollectionDependencies, leas
       await observation.progress("opening", result);
       let scraped: ScrapeResult;
       try {
-        scraped = await scrape(serviceDetailUrl(number, order), { onProgress: stage => observation.progress(stage, result) });
+        scraped = await scrape(serviceDetailUrl(number, order), { onProgress: stage => observation.progress(stage, result),
+          onContentWarning: warning => addDiagnostic(job, { severity: "warning", stage: warning.stage, operation: warning.operation, target: { key: result.key }, error: warning.message }),
+        });
       } catch (error) {
         observation.assert();
         if (maintenanceFromError(error)) throw error;
@@ -360,6 +368,9 @@ async function runRefresh(job: CollectionJob, deps: CollectionDependencies, leas
       observation.assert();
       await observation.progress("structuring", result);
       const structured = structureNoticeDetail(result.key, scraped.detail);
+      await runContentCheck("preservation-check", () => checkPreservedContent(result.key, scraped.detail, structured),
+        issue => addDiagnostic(job, { severity: "warning", stage: "transform", operation: "preservation-check", target: { key: result.key }, error: `${issue.section}: ${issue.message}` }),
+        stage => observation.progress(stage, result));
       for (const warning of scraped.warnings || [])
         addDiagnostic(job, { severity: "warning", stage: warning.stage, operation: warning.operation, target: { key: result.key }, error: warning.message });
       for (const warning of scraped.detail.modalDiscovery?.failures || [])
