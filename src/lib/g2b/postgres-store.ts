@@ -6,11 +6,12 @@ import type { StoredNotice } from "./notices";
 import type { IndependentDetail, StructuredNoticeDetail } from "./structured-data";
 import type { ModalCapture } from "./detail-page";
 import type { NoticeFilters } from "./notice-filters";
+import type { ApiNotice } from "./types";
 import regions from "@/data/regions.json";
 import { shouldReplacePaginatedDetail } from "./pagination-coverage";
 
 type Category = "order-plan" | "pre-specification" | "other" | "opening";
-type Queryable = Pick<pg.PoolClient, "query">;
+export type Queryable = Pick<pg.PoolClient, "query">;
 type StoredRow = { key: string; api: StoredNotice["api"]; detail: StoredNotice["detail"];
   detail_error: string | null; detail_diagnostic: StoredNotice["detailDiagnostic"] };
 export type StoredNoticeListRow = { key: string; notice_number: string; notice_order: string;
@@ -23,8 +24,8 @@ type ReferenceRow = { detail_key: string; category: Category; triggers: ModalCap
 const runtime = globalThis as typeof globalThis & { __g2bPgPool?: pg.Pool };
 
 /** 풀러 세션의 search_path와 무관하게 지정한 스키마의 테이블을 가리킵니다. */
-function table(name: "notices" | "independent_details" | "notice_independent_refs" | "notice_relations"): string {
-  const schema = process.env.G2B_DB_SCHEMA || "public";
+function table(name: "notices" | "independent_details" | "notice_independent_refs" | "notice_relations",
+  schema = process.env.G2B_DB_SCHEMA || "public"): string {
   if (!/^[a-z][a-z0-9_]*$/.test(schema)) throw new Error("잘못된 DB 스키마 이름입니다.");
   return `${schema}.${name}`;
 }
@@ -60,9 +61,9 @@ export function noticeSummary(key: string, record: Pick<StoredNotice, "api" | "d
 }
 
 /** 공고의 본문과 분석 컬럼을 같은 문장으로 갱신합니다. */
-async function upsertNotice(db: Queryable, key: string, record: StoredNotice): Promise<void> {
+async function upsertNotice(db: Queryable, key: string, record: StoredNotice, schema?: string): Promise<void> {
   const summary = noticeSummary(key, record);
-  await db.query(`INSERT INTO ${table("notices")}
+  await db.query(`INSERT INTO ${table("notices", schema)}
     (key, notice_number, notice_order, api, detail, detail_error, title, demand_agency, notice_agency, posted_at, deadline_at,
      amount, region, description, service_period, qualifications, detail_diagnostic)
     VALUES ($1,$2,$3,$4::jsonb,$5::jsonb,$6,$7,$8,$9,$10::timestamp,$11::timestamp,$12::numeric,$13,$14,$15,$16,$17::jsonb)
@@ -96,58 +97,85 @@ async function transaction<T>(work: (db: pg.PoolClient) => Promise<T>): Promise<
 /** 공고와 새 독립 상세 및 참조를 원자적으로 저장합니다. */
 export async function saveStoredNotice(key: string, record: StoredNotice,
   structured?: StructuredNoticeDetail): Promise<void> {
-  await transaction(async (db) => {
-    if (record.detail?.paginationAudit) {
-      const old = await db.query<{ detail: StoredNotice["detail"] }>(
-        `SELECT detail FROM ${table("notices")} WHERE key=$1`, [key]);
-      if (!shouldReplacePaginatedDetail(old.rows[0]?.detail, record.detail)) {
-        record = { ...record, detail: old.rows[0].detail };
-        structured = undefined;
-      }
+  await transaction(db => saveStoredNoticeInTransaction(db, key, record, structured));
+}
+
+/** 공고 행을 잠그고 최신 상세에서 요약을 계산하되 API와 요약 컬럼만 수정합니다. */
+export async function saveNoticeApiInTransaction(db: Queryable, key: string, api: ApiNotice,
+  schema?: string): Promise<void> {
+  const [number, order] = key.split("--");
+  if (noticeKeyFromParts(number, order) !== key) throw new Error("잘못된 공고 키입니다.");
+  await db.query(`INSERT INTO ${table("notices", schema)}(key,notice_number,notice_order)
+    VALUES($1,$2,$3) ON CONFLICT(key) DO NOTHING`, [key, number, order]);
+  const current = await db.query<{ detail: StoredNotice["detail"] }>(
+    `SELECT detail FROM ${table("notices", schema)} WHERE key=$1 FOR UPDATE`, [key]);
+  const summary = noticeSummary(key, { api, detail: current.rows[0].detail });
+  await db.query(`UPDATE ${table("notices", schema)} SET api=$2::jsonb,title=$3,demand_agency=$4,
+    notice_agency=$5,posted_at=$6::timestamp,deadline_at=$7::timestamp,amount=$8::numeric,
+    region=$9,description=$10,service_period=$11,qualifications=$12,updated_at=now() WHERE key=$1`,
+  [key, JSON.stringify(api), summary.title, summary.demandAgency, summary.noticeAgency,
+    summary.postedAt, summary.deadlineAt, summary.amount, summary.region, summary.description,
+    summary.servicePeriod, summary.qualifications]);
+}
+
+/** 호출자의 트랜잭션에서 공고·독립 상세·참조를 함께 저장하며 커밋은 호출자에게 맡깁니다. */
+export async function saveStoredNoticeInTransaction(db: Queryable, key: string, record: StoredNotice,
+  structured?: StructuredNoticeDetail, schema?: string): Promise<void> {
+  if (record.detail?.paginationAudit) {
+    const old = await db.query<{ detail: StoredNotice["detail"] }>(
+      `SELECT detail FROM ${table("notices", schema)} WHERE key=$1`, [key]);
+    if (!shouldReplacePaginatedDetail(old.rows[0]?.detail, record.detail)) {
+      record = { ...record, detail: old.rows[0].detail };
+      structured = undefined;
     }
-    await upsertNotice(db, key, record);
-    if (!structured) return;
-    const groups: [Category, IndependentDetail[]][] = [
-      ["order-plan", structured.orderPlans], ["pre-specification", structured.preSpecifications],
-      ["other", structured.otherDetails], ["opening", structured.openingDetails]
-    ];
-    // 상세와 참조를 함께 교체해야 재수집 중 실패가 기존 연결을 훼손하지 않습니다.
-    await db.query(`DELETE FROM ${table("notice_independent_refs")} WHERE notice_key=$1`, [key]);
-    for (const [category, details] of groups) {
-      for (const [position, detail] of details.entries()) {
-        const match = category === "other" ? /^(R\d{2}BK\d{8})-(\d{3})$/.exec(detail.number) : null;
-        const existingNotice = match ? await db.query(`SELECT detail FROM ${table("notices")} WHERE key=$1`, [`${match[1]}--${match[2]}`]) : null;
-        if (!existingNotice?.rows[0]?.detail) {
-          const previous = await db.query<{ payload: IndependentDetail }>(
-            `SELECT payload FROM ${table("independent_details")} WHERE detail_key=$1`, [detail.number]);
-          if (!previous.rows[0]?.payload || previous.rows[0].payload.schemaVersion !== 5 || (detail.paginationAudit &&
-            previous.rows[0].payload.sourceNoticeKey === detail.sourceNoticeKey &&
-            shouldReplacePaginatedDetail(previous.rows[0].payload, detail))) {
-            await db.query(`INSERT INTO ${table("independent_details")}(detail_key,category,payload) VALUES($1,$2,$3::jsonb)
-              ON CONFLICT(detail_key) DO UPDATE SET payload=EXCLUDED.payload`,
-              [detail.number, category, JSON.stringify(detail)]);
-          }
+  }
+  await upsertNotice(db, key, record, schema);
+  if (!structured) return;
+  const groups: [Category, IndependentDetail[]][] = [
+    ["order-plan", structured.orderPlans], ["pre-specification", structured.preSpecifications],
+    ["other", structured.otherDetails], ["opening", structured.openingDetails]
+  ];
+  // 상세와 참조를 함께 교체해야 재수집 중 실패가 기존 연결을 훼손하지 않습니다.
+  await db.query(`DELETE FROM ${table("notice_independent_refs", schema)} WHERE notice_key=$1`, [key]);
+  for (const [category, details] of groups) {
+    for (const [position, detail] of details.entries()) {
+      const match = category === "other" ? /^(R\d{2}BK\d{8})-(\d{3})$/.exec(detail.number) : null;
+      const existingNotice = match ? await db.query(`SELECT detail FROM ${table("notices", schema)} WHERE key=$1`, [`${match[1]}--${match[2]}`]) : null;
+      if (!existingNotice?.rows[0]?.detail) {
+        const previous = await db.query<{ payload: IndependentDetail }>(
+          `SELECT payload FROM ${table("independent_details", schema)} WHERE detail_key=$1`, [detail.number]);
+        if (!previous.rows[0]?.payload || previous.rows[0].payload.schemaVersion !== 5 || (detail.paginationAudit &&
+          previous.rows[0].payload.sourceNoticeKey === detail.sourceNoticeKey &&
+          shouldReplacePaginatedDetail(previous.rows[0].payload, detail))) {
+          await db.query(`INSERT INTO ${table("independent_details", schema)}(detail_key,category,payload) VALUES($1,$2,$3::jsonb)
+            ON CONFLICT(detail_key) DO UPDATE SET payload=EXCLUDED.payload`,
+            [detail.number, category, JSON.stringify(detail)]);
         }
-        const triggers = structured.independentTriggers.filter((item) => item.number === detail.number).map((item) => item.trigger);
-        await db.query(`INSERT INTO ${table("notice_independent_refs")}(notice_key,detail_key,category,position,triggers)
-          VALUES($1,$2,$3,$4,$5::jsonb)`, [key, detail.number, category, position, JSON.stringify(triggers)]);
       }
+      const triggers = structured.independentTriggers.filter((item) => item.number === detail.number).map((item) => item.trigger);
+      await db.query(`INSERT INTO ${table("notice_independent_refs", schema)}(notice_key,detail_key,category,position,triggers)
+        VALUES($1,$2,$3,$4,$5::jsonb)`, [key, detail.number, category, position, JSON.stringify(triggers)]);
     }
-  });
+  }
 }
 
 /** 공고 관계를 양쪽 방향으로 한 번에 저장합니다. */
 export async function saveNoticeRelation(source: string, related: string): Promise<void> {
   if (source === related) return;
-  await transaction(async (db) => {
-    for (const key of [source, related]) {
-      const [number, order] = key.split("--");
-      if (noticeKeyFromParts(number, order) !== key) throw new Error(`잘못된 공고 키: ${key}`);
-      await db.query(`INSERT INTO ${table("notices")}(key,notice_number,notice_order) VALUES($1,$2,$3) ON CONFLICT(key) DO NOTHING`, [key, number, order]);
-    }
-    await db.query(`INSERT INTO ${table("notice_relations")}(source_key,related_key) VALUES($1,$2),($2,$1) ON CONFLICT DO NOTHING`,
-      [source, related]);
-  });
+  await transaction(db => saveNoticeRelationInTransaction(db, source, related));
+}
+
+/** 관계와 공고 자리표시자를 호출자의 트랜잭션에서 함께 저장합니다. */
+export async function saveNoticeRelationInTransaction(db: Queryable, source: string, related: string,
+  schema?: string): Promise<void> {
+  if (source === related) return;
+  for (const key of [source, related]) {
+    const [number, order] = key.split("--");
+    if (noticeKeyFromParts(number, order) !== key) throw new Error(`잘못된 공고 키: ${key}`);
+    await db.query(`INSERT INTO ${table("notices", schema)}(key,notice_number,notice_order) VALUES($1,$2,$3) ON CONFLICT(key) DO NOTHING`, [key, number, order]);
+  }
+  await db.query(`INSERT INTO ${table("notice_relations", schema)}(source_key,related_key) VALUES($1,$2),($2,$1) ON CONFLICT DO NOTHING`,
+    [source, related]);
 }
 
 /** DB에서 공고 원본과 직접 관계·독립 상세 참조를 읽습니다. */

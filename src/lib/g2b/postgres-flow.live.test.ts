@@ -148,7 +148,8 @@ it.skipIf(!process.env.LIVE_DB_TEST || !process.env.DATABASE_URL)(
             modal: { title: "계획", fields: [{ label: "내용", value: [{ text: "변경된 예산", visible: true }] }], tables: [] }
           }] }, relatedNoticeKeys: [] }) });
       const refreshed = await finished(refresh.id);
-      expect(refreshed?.results, JSON.stringify(refreshed?.errors)).toEqual([{ key: "R26BK1--000", status: "succeeded" }]);
+      // 공고별 결과는 엄격히 확인하되 정상적으로 추가되는 진행·시간 메타데이터는 허용합니다.
+      expect(refreshed?.results, JSON.stringify(refreshed?.errors)).toMatchObject([{ key: "R26BK1--000", status: "succeeded" }]);
       expect((await getNoticeRecord("R26BK1--000"))?.normalized.title.value).toBe("갱신된 용역");
       const refreshedRefs = await runtime.__g2bPgPool!.query(`SELECT detail_key,category FROM ${schema}.notice_independent_refs WHERE notice_key=$1`, ["R26BK1--000"]);
       expect(refreshedRefs.rows, JSON.stringify(refreshed?.errors)).toHaveLength(1);
