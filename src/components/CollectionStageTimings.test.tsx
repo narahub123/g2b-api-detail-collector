@@ -6,6 +6,29 @@ import type { CollectionTimings } from "@/lib/g2b/collection-timings";
 
 afterEach(cleanup);
 
+it('세부 구간의 집계와 시간 초과·미완료를 펼침 영역에 표시합니다',()=>{
+  render(<CollectionStageTimings label="상세 시간" running={false} timings={{outcome:'interrupted',totals:{modals:500},details:{modals:{
+    steps:{'modal.wait-settled':{elapsedMs:500,count:2,maxMs:400,outcomes:{timeout:1,interrupted:1}}},active:[],
+  }}}}/>);
+  expect(screen.getByText('세부 작업 시간')).toBeInTheDocument();
+  expect(screen.getByText('데이터 안정화 대기')).toBeInTheDocument();
+  expect(screen.getByText('2회')).toBeInTheDocument();
+  expect(screen.getByText('400ms')).toBeInTheDocument();
+  expect(screen.getByText(/시간 초과 1회/)).toBeInTheDocument();
+  expect(screen.getByText(/중단 · 미완료 1회/)).toBeInTheDocument();
+});
+
+it('실행 중인 세부 작업은 후보와 깊이를 표시하고 과거 기록에는 상세를 만들지 않습니다',()=>{
+  const {rerender}=render(<CollectionStageTimings label="상세 시간" running timings={{outcome:'running',totals:{},details:{modals:{steps:{},active:[{
+    id:'span',step:'modal.open',startedAt:'2026-11-03T00:00:00Z',lastObservedAt:'2026-11-03T00:00:00Z',elapsedMs:50,context:{candidateId:'button-1',depth:2},
+  }]}}}}/>);
+  expect(screen.getByText(/button-1/)).toBeInTheDocument();
+  expect(screen.getByText(/깊이 2/)).toBeInTheDocument();
+  expect(screen.getByText(/진행 중 · 50ms/)).toBeInTheDocument();
+  rerender(<CollectionStageTimings label="상세 시간" running={false} timings={{outcome:'completed',totals:{opening:100}}}/>);
+  expect(screen.queryByText('세부 작업 시간')).not.toBeInTheDocument();
+});
+
 /** 단계 이름으로 행을 골라 서로 다른 검사 시간이 섞이지 않는지 확인합니다. */
 function row(name: string): HTMLElement {
   return screen.getByRole("rowheader", { name }).closest("tr")!;

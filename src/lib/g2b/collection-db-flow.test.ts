@@ -58,6 +58,8 @@ it("수동 수집 결과는 작업과 공고의 단계 시간을 기존 작업 �
     fetcher: async () => Response.json({ response: { body: { totalCount: 1, numOfRows: 100, pageNo: 1,
       items: [{ bidNtceNo: "R26BK1", bidNtceOrd: "000" }] } } }),
     scrape: async (url, options) => {
+      options?.onDetailTiming?.({id:'opening-span',step:'page.goto',stage:'opening',phase:'start',outcome:'running',elapsedMs:0,at:new Date().toISOString()});
+      options?.onDetailTiming?.({id:'opening-span',step:'page.goto',stage:'opening',phase:'end',outcome:'completed',elapsedMs:25,at:new Date().toISOString()});
       for (const stage of ["extracting", "tables", "modals", "closing"] as const) await options?.onProgress?.(stage);
       return { detail: { sourceUrl: url, sections: [], attachments: [], links: [] }, relatedNoticeKeys: [] };
     },
@@ -73,6 +75,8 @@ it("수동 수집 결과는 작업과 공고의 단계 시간을 기존 작업 �
   expect(saved?.timings?.totals["extraction-check"]).toBeUndefined();
   expect(saved?.timings?.totals["preservation-check"]).toBeGreaterThanOrEqual(0);
   expect(saved?.timings?.active).toBeUndefined();
+  expect(saved?.results?.[0].timings?.details?.opening?.steps['page.goto']).toEqual({elapsedMs:25,count:1,maxMs:25,outcomes:{completed:1}});
+  expect(saved?.timings?.details).toEqual(saved?.results?.[0].timings?.details);
 });
 
 it("수동 구간 재실행도 완료 부모를 다시 수집하지 않고 점검으로 남은 관련 공고를 처리합니다",async()=>{
@@ -279,6 +283,8 @@ it("상세 재수집 성공 시 시작·종료와 저장 뒤 복귀 단계를 �
   db.notices.set(key, { key, api: { bidNtceNo: "R26BK1", bidNtceOrd: "000" }, detail: null, relatedNoticeKeys: [] });
   const job = await startRefresh([key], { scrape: async (url, options) => {
     expect((db.jobs.get(jobId()) as CollectionJob).results?.[0].startedAt).toEqual(expect.any(String));
+    options?.onDetailTiming?.({id:'refresh-span',step:'page.goto',stage:'opening',phase:'start',outcome:'running',elapsedMs:0,at:new Date().toISOString()});
+    options?.onDetailTiming?.({id:'refresh-span',step:'page.goto',stage:'opening',phase:'end',outcome:'completed',elapsedMs:12,at:new Date().toISOString()});
     await options?.onProgress?.("tables");
     return { detail: { sourceUrl: url, sections: [], attachments: [], links: [] }, relatedNoticeKeys: [] };
   } });
@@ -286,6 +292,7 @@ it("상세 재수집 성공 시 시작·종료와 저장 뒤 복귀 단계를 �
   function jobId() { return [...db.jobs.keys()][0]; }
   await vi.waitFor(() => expect(db.releaseDbLease).toHaveBeenCalled());
   expect((await getCollectionJob(job.id))?.results?.[0]).toMatchObject({ status: "succeeded", startedAt: expect.any(String), finishedAt: expect.any(String), progress: { stage: "structuring" } });
+  expect((await getCollectionJob(job.id))?.results?.[0].timings?.details?.opening?.steps['page.goto']).toEqual({elapsedMs:12,count:1,maxMs:12,outcomes:{completed:1}});
 });
 
 it("다음 API 페이지를 요청하기 전에 이전 공고의 현재 단계를 해제합니다", async () => {

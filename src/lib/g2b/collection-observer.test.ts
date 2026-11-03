@@ -12,6 +12,39 @@ function job(): CollectionJob {
 beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(0); });
 afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); });
 
+it('세부 구간을 기존 저장 주기에 병합하고 종료 시 공고와 작업에 보존합니다',async()=>{
+  const value=job(),snapshots:CollectionJob[]=[];
+  const result:CollectionNoticeResult={key:'A--000',status:'pending'};value.results=[result];
+  const observer=createCollectionObserver(value,async()=>{snapshots.push(structuredClone(value));});
+  await observer.begin(result);await observer.progress('opening',result);
+  observer.detail({id:'span',step:'page.goto',stage:'opening',phase:'start',outcome:'running',elapsedMs:0,at:new Date().toISOString()},result);
+  await vi.advanceTimersByTimeAsync(2000);
+  expect(snapshots).toHaveLength(2);
+  expect(snapshots[1].results![0].timings!.details!.opening!.active[0].elapsedMs).toBeGreaterThanOrEqual(0);
+  observer.detail({id:'span',step:'page.goto',stage:'opening',phase:'end',outcome:'completed',elapsedMs:2000,at:new Date().toISOString()},result);
+  result.status='succeeded';await observer.finish(result);
+  expect(snapshots.at(-1)!.timings!.details!.opening!.steps['page.goto']).toMatchObject({count:1,elapsedMs:2000});
+  expect(snapshots.at(-1)!.results![0].timings!.details).toEqual(value.timings!.details);
+});
+
+it('느린 저장 뒤에서 대기한 시작 알림도 큐 진입 시각부터 경과 시간을 보존합니다',async()=>{
+  const value=job();let time=0,writes=0;
+  let release!:()=>void;
+  const gate=new Promise<void>(resolve=>{release=resolve;});
+  const result:CollectionNoticeResult={key:'A--000',status:'pending'};value.results=[result];
+  const observer=createCollectionObserver(value,async()=>{if(++writes===2)await gate;},()=>time,()=>time);
+  await observer.begin(result);await observer.progress('opening',result);
+  time=2100;
+  observer.detail({id:'first',step:'browser.launch',stage:'opening',phase:'start',outcome:'running',elapsedMs:0,at:new Date(time).toISOString()},result);
+  await Promise.resolve();expect(writes).toBe(2);
+  time=2200;
+  observer.detail({id:'next',step:'page.goto',stage:'opening',phase:'start',outcome:'running',elapsedMs:0,at:new Date(time).toISOString()},result);
+  time=3200;release();await observer.persist();
+  expect(result.timings!.details!.opening!.active.find(item=>item.id==='next')?.elapsedMs).toBe(1000);
+  value.status='interrupted';await observer.persist();
+  expect(result.timings!.details!.opening!.steps['page.goto']).toMatchObject({elapsedMs:1000,outcomes:{interrupted:1}});
+});
+
 it("단계가 달라도 2초 이내 병합하고 시작·종료는 즉시 저장합니다", async () => {
   const value = job(), snapshots: CollectionJob[] = [];
   let time = 0;

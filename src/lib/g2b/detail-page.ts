@@ -2,6 +2,8 @@ import { serviceDetailUrl } from "./detail-url";
 import { assertNotMaintenance } from "./maintenance";
 export { serviceDetailUrl } from "./detail-url";
 import {measure, measureSync} from './collection-performance';
+import {withCollectionDetailTiming} from './collection-detail-measure';
+import type {CollectionDetailCallback} from './collection-detail-steps';
 import * as cheerio from "cheerio";
 import { chromium } from "playwright-core";
 import { noticeKeyFromParts } from "./identity";
@@ -129,7 +131,13 @@ export type ScrapeResult = { detail: ScrapedDetail; relatedNoticeKeys: string[];
 
 /** 기존 상세 수집 순서를 유지하면서 선택적인 단계 알림과 시간 계측을 제공합니다. */
 export async function scrapeDetailPage(url: string, options?: { onProgress?: (stage: CollectionStage) => Promise<void>;
+  onDetailTiming?: CollectionDetailCallback;
   onContentWarning?: (warning: NonNullable<ScrapeResult["warnings"]>[number]) => void }): Promise<ScrapeResult> {
+  return withCollectionDetailTiming(options?.onDetailTiming,()=>scrapeDetailPageMeasured(url,options));
+}
+
+/** 기존 브라우저 수집 순서 안에서 세부 계측 알림을 전달합니다. */
+async function scrapeDetailPageMeasured(url:string,options?:NonNullable<Parameters<typeof scrapeDetailPage>[1]>):Promise<ScrapeResult> {
   assertG2bUrl(url);
   await options?.onProgress?.("opening");
   const browser = await measure("browser.launch", () => chromium.launch({ channel: "chrome", executablePath: process.env.G2B_CHROME_PATH || undefined, headless: true }));
@@ -153,7 +161,7 @@ export async function scrapeDetailPage(url: string, options?: { onProgress?: (st
     });
     await measure("page.goto", () => page.goto(url, { waitUntil: "domcontentloaded", timeout: 45_000 }));
     // 정상 화면의 요소를 기다리기 전에 현재 응답의 점검 안내를 구분합니다.
-    assertNotMaintenance(await page.content(), "detail");
+    await measure('page.maintenance',async()=>assertNotMaintenance(await page.content(), "detail"));
     await measure("wait.notice", () => page.locator('td[data-title="공고명"]').first().waitFor({ timeout: 45_000 }));
     await measure("wait.attachment-table", () => page.locator('table[id$="_grdFile_body_table"]').first().waitFor({ timeout: 20_000 }));
     await measure("wait.network-idle", () => page.waitForLoadState("networkidle", { timeout: 15_000 })).catch((error) => {
@@ -189,6 +197,7 @@ export async function scrapeDetailPage(url: string, options?: { onProgress?: (st
     try {
       const { captures, discovery } = await measure("modal.collect", () => collectModalContents(page, detail.noticeKey, {
         onProgress: options?.onProgress,
+        onDetailTiming: options?.onDetailTiming,
         onContentIssue: reportContentIssue,
       }));
       detail.modalCaptures = captures;

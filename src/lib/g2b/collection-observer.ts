@@ -1,6 +1,8 @@
 import type { CollectionJob } from "./collection-job";
 import { recordCollectionProgress, type CollectionNoticeResult, type CollectionStage } from "./collection-progress";
 import { createCollectionTimings } from "./collection-timings";
+import type {CollectionDetailEvent} from './collection-detail-steps';
+import {performance} from 'node:perf_hooks';
 
 /**
  * 기존 상태 저장과 진행 저장을 하나의 직렬 큐로 처리합니다.
@@ -69,6 +71,20 @@ export function createCollectionObserver(job: CollectionJob, save: () => Promise
   }
 
   return {
+    /** 세부 알림도 같은 직렬 큐와 저장 주기에 합쳐 쓰기 횟수를 제한합니다. */
+    detail(event:CollectionDetailEvent,result:CollectionNoticeResult):void {
+      const time=now();
+      // 앞선 저장이 큐를 막아도 실제 구간의 시작 시각을 잃지 않도록 합니다.
+      const observed=monotonic?.()??performance.now();
+      void enqueue(async()=>{
+        if(job.status!=='running'||result.finishedAt||failure!==undefined)return;
+        timings.detail(event,result,observed);
+        recordCollectionProgress(job,result.progress?.stage??event.stage,new Date(time).toISOString(),result);
+        const remaining=2000-(time-lastWrite);
+        if(remaining<=0)await write();
+        else scheduleWrite(Math.min(2000,remaining));
+      }).catch(()=>undefined);
+    },
     /** 기존 저장에도 보류된 마지막 진행을 같은 쓰기로 포함합니다. */
     persist(stage?: CollectionStage, result?: CollectionNoticeResult) {
       cancelPending();

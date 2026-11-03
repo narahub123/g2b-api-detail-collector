@@ -1,6 +1,7 @@
 import {AsyncLocalStorage} from 'node:async_hooks';
 import {randomUUID} from 'node:crypto';
 import {performance} from 'node:perf_hooks';
+import {beginCollectionDetail} from './collection-detail-measure';
 
 export type TimingEvent={runId:string;key:string;attempt:number;spanId:string;parentSpanId?:string;operation:string;startedAt:string;finishedAt:string;durationMs:number;status:'succeeded'|'failed';details?:Record<string,string|number|boolean>};
 type Context={runId:string;key:string;attempt:number;sink:(event:TimingEvent)=>unknown;parentSpanId?:string};
@@ -14,15 +15,19 @@ function finish(value:Context,spanId:string,operation:string,startedAt:string,st
 }
 /** 비활성 시 원래 작업만 실행하고 활성 시 중첩 비동기 구간을 기록합니다. */
 export async function measure<T>(operation:string,work:()=>Promise<T>,details?:TimingEvent['details']):Promise<T>{
- const value=context.getStore();if(!value)return work();
+ const detail=beginCollectionDetail(operation,details);
+ const value=context.getStore();
+ if(!value){let succeeded=false;try{const result=await work();succeeded=true;return result;}finally{detail?.(succeeded);}}
  const spanId=randomUUID(),startedAt=new Date().toISOString(),start=performance.now();let status:TimingEvent['status']='failed';
  try{const result=await context.run({...value,parentSpanId:spanId},work);status='succeeded';return result;}
- finally{finish(value,spanId,operation,startedAt,start,status,details);}
+ finally{detail?.(status==='succeeded');finish(value,spanId,operation,startedAt,start,status,details);}
 }
 /** 동기 변환 구간도 같은 부모 문맥에 연결하고 원래 반환값을 유지합니다. */
 export function measureSync<T>(operation:string,work:()=>T,details?:TimingEvent['details']):T{
- const value=context.getStore();if(!value)return work();
+ const detail=beginCollectionDetail(operation,details);
+ const value=context.getStore();
+ if(!value){let succeeded=false;try{const result=work();succeeded=true;return result;}finally{detail?.(succeeded);}}
  const spanId=randomUUID(),startedAt=new Date().toISOString(),start=performance.now();let status:TimingEvent['status']='failed';
  try{const result=context.run({...value,parentSpanId:spanId},work);status='succeeded';return result;}
- finally{finish(value,spanId,operation,startedAt,start,status,details);}
+ finally{detail?.(status==='succeeded');finish(value,spanId,operation,startedAt,start,status,details);}
 }
