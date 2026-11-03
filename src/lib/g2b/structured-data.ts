@@ -73,6 +73,15 @@ const filterNonemptySections = (sections: StructuredSection[] | undefined,
 const allTables = (fields: StructuredField[], tables: StructuredTable[]): StructuredTable[] =>
   [...tables, ...fields.flatMap((field) => field.tables ?? [])];
 
+/** 구조화 결과의 본문 수정이 검사 기준인 원본까지 바꾸지 않도록 참조를 분리합니다. */
+function copySections(sections: StructuredSection[] | undefined): StructuredSection[] | undefined {
+  return sections?.map(section => ({ ...section,
+    ...(section.textBlocks ? { textBlocks: section.textBlocks.map(block => ({ ...block })) } : {}),
+    ...(section.details ? { details: section.details.map(detail => ({ ...detail,
+      ...(detail.sections ? { sections: copySections(detail.sections) } : {}) })) } : {}),
+  }));
+}
+
 /**
  * 클릭 출처의 번호와 최상위 섹션을 기준으로 수집된 모달의 저장 위치를 결정합니다.
  * @param key 현재 공고의 번호와 차수로 만든 저장 키
@@ -89,7 +98,7 @@ export function structureNoticeDetail(key: string, detail: ScrapedDetail): Struc
   const otherDetailNumbers: string[] = [];
   const openingDetailKeys: string[] = [];
   const independentTriggers: StructuredNoticeDetail["independentTriggers"] = [];
-  const sections = detail.sections?.map((section) => ({ ...section, details: [...(section.details || [])] }));
+  const sections = copySections(detail.sections)?.map((section) => ({ ...section, details: [...(section.details || [])] }));
   const modalCaptures: ModalCapture[] = [];
   const warnings: string[] = [];
   // 귀속되지 않은 모달이 있으면 해당 섹션이 실제로 비었다고 확정할 수 없어 보존합니다.
@@ -99,7 +108,8 @@ export function structureNoticeDetail(key: string, detail: ScrapedDetail): Struc
   for (const original of [...(detail.modalCaptures || []), ...(detail.baseAmountCaptures || []),
     ...(detail.changeNoticeCaptures || [])]) {
     const sectionHint = original.trigger.sectionHint;
-    const capture: ModalCapture = { ...original, trigger: { ...original.trigger }, modal: { ...original.modal } };
+    const capture: ModalCapture = { ...original, trigger: { ...original.trigger }, modal: { ...original.modal,
+      ...(original.modal.sections ? { sections: copySections(original.modal.sections) } : {}) } };
     delete capture.modal.html;
     delete capture.modal.text;
     const title = capture.modal.title;

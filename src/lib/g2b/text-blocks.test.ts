@@ -57,6 +57,13 @@ it("태그로 감싸지 않은 모달 본문도 줄바꿈과 함께 보존합니
     .toEqual([{ text: "안내문\n추가 안내문", visible: true }]);
 });
 
+it.each([false, true])("중첩 배치 표의 본문이 상위 %s 표현에도 없으면 일반 본문으로 보존합니다", grid => {
+  const source = `<main>${section("안내", `<table${grid ? ' id="outer_grid"' : ''}><tr><td data-title="조건"><table><tr><td><p>중첩 안내문<br>둘째 줄</p></td></tr></table></td></tr></table>`)}</main>`;
+  const sections = extractCommonSections(source, "page");
+  expect(sections[0].textBlocks).toEqual([{ text: "중첩 안내문\n둘째 줄", visible: true }]);
+  expect(checkExtractedContent(source, "page", sections)).toEqual([]);
+});
+
 it("본문만 있는 페이지·귀속 모달·독립 상세를 구조화 후에도 유지합니다", () => {
   const sections = extractCommonSections(`<main>${section("공고안내", "<p>청렴계약 안내</p>")}${section("연관정보", "")}</main>`, "page");
   const modalSections = extractCommonSections(`<div role="dialog"><h2>상세 제목</h2><p>모달 본문</p></div>`, "modal");

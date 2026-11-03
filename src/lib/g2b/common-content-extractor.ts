@@ -78,7 +78,8 @@ export function extractCommonSections(html: string, kind: ContentKind): Structur
   const walk = (node: any): void => {
     if (node.type === "text") {
       const parents = $(node.parent).parents().addBack();
-      const owned = parents.toArray().some(parent => representedTables.has(parent) || fieldByCell.has(parent));
+      // 상위 셀의 값 추출은 중첩 표를 제외하므로 가장 가까운 표·셀의 소유권만 적용합니다.
+      const owned = representedTables.has($(node.parent).closest("table")[0]) || fieldByCell.has($(node.parent).closest("td")[0]);
       if ((active || kind === "modal") && !owned && !$(node.parent).closest(".dfbox,th").length) {
         const preserveLines = parents.toArray().some(parent => $(parent).is("pre") ||
           /white-space\s*:\s*(?:pre|pre-wrap|break-spaces)/i.test($(parent).attr("style") || ""));
@@ -97,7 +98,7 @@ export function extractCommonSections(html: string, kind: ContentKind): Structur
       element.is("a") && /^(?:#|javascript:)/i.test(element.attr("href") || "")) return;
     const boundary = element.is("p,div,li,ul,ol,section,article,pre,table");
     if (boundary) flushText();
-    if (element.is("br") && !element.parents().toArray().some(parent => representedTables.has(parent) || fieldByCell.has(parent)) && (active || kind === "modal")) {
+    if (element.is("br") && !representedTables.has(element.closest("table")[0]) && !fieldByCell.has(element.closest("td")[0]) && (active || kind === "modal")) {
       appendText("\n", isInlineVisible($, node)); return;
     }
     if (element.is("table")) {
