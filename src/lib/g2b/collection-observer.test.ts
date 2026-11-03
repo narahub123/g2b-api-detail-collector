@@ -151,3 +151,67 @@ it("일시 저장 실패 후 기존 상태 저장이 성공하면 원래 재시�
   await vi.advanceTimersByTimeAsync(2000);
   expect(writes).toBe(3);
 });
+
+it("기존 저장 주기로 단조 시간 스냅샷을 보존하고 두 검사 종료 후 원래 단계로 복귀합니다", async () => {
+  const value = job(), snapshots: CollectionJob[] = []; let mono = 0;
+  const result: CollectionNoticeResult = { key: "A--000", status: "pending" };
+  value.results = [result];
+  const observer = createCollectionObserver(value, async () => { snapshots.push(structuredClone(value)); }, Date.now, () => mono);
+  await observer.begin(result);
+  mono = 5; await observer.progress("extracting", result);
+  await observer.during("extraction-check", async () => { mono = 15; }, result);
+  expect(result.progress?.stage).toBe("extracting");
+  mono = 20;
+  await expect(observer.during("preservation-check", async () => { mono = 27; throw Error("검사 실패"); }, result)).rejects.toThrow("검사 실패");
+  expect(result.progress?.stage).toBe("extracting");
+  mono = 30; result.status = "succeeded"; await observer.finish(result);
+  value.status = "completed"; await observer.persist();
+  expect(snapshots).toHaveLength(3);
+  expect(snapshots.at(-1)?.timings).toMatchObject({ outcome: "completed", totals: {
+    preparing: 5, extracting: 8, "extraction-check": 10, "preservation-check": 7,
+  } });
+  expect(result.timings?.totals).toEqual(value.timings?.totals);
+  expect(result.timings?.outcome).toBe("completed");
+  expect(value.timings?.active).toBeUndefined();
+});
+
+it("점검 유예의 최종 저장은 진행 중 공고의 시간도 확정합니다", async () => {
+  const value = job(); let mono = 0;
+  const result: CollectionNoticeResult = { key: "A--000", status: "pending" };
+  const observer = createCollectionObserver(value, async () => {}, Date.now, () => mono);
+  await observer.begin(result);
+  mono = 5; await observer.progress("opening", result);
+  mono = 25; value.status = "deferred"; await observer.persist();
+  expect(value.timings).toMatchObject({ outcome: "deferred", totals: { preparing: 5, opening: 20 } });
+  expect(result.timings?.outcome).toBe("deferred");
+  expect(result.timings?.active).toBeUndefined();
+});
+
+it("벽시계가 역전되어 진행 표시가 보류돼도 단조 시간은 실제 단계에 귀속합니다", async () => {
+  const value = job(); let wall = 10, mono = 0;
+  const observer = createCollectionObserver(value, async () => {}, () => wall, () => mono);
+  await observer.progress("opening");
+  wall = 5; mono = 10; await observer.persist("api");
+  expect(value.progress?.stage).toBe("opening");
+  expect(value.timings?.active?.stage).toBe("api");
+  wall = 6; mono = 20; await observer.progress("modals");
+  expect(value.timings?.active?.stage).toBe("modals");
+  wall = 20; mono = 30; value.status = "completed"; await observer.persist();
+  expect(value.timings?.totals).toEqual({ opening: 10, api: 10, modals: 10 });
+});
+
+it("DB 저장 예외 직후 saving을 종료해 실패 처리 시간을 더하지 않습니다", async () => {
+  const value = job(); let mono = 0;
+  const result: CollectionNoticeResult = { key: "A--000", status: "pending" };
+  const observer = createCollectionObserver(value, async () => {}, Date.now, () => mono);
+  await observer.begin(result);
+  await observer.progress("structuring", result);
+  const error = Error("DB 저장 실패");
+  await expect(observer.during("saving", async () => { mono = 10; throw error; }, result)).rejects.toBe(error);
+  expect(result.timings?.active?.stage).toBe("structuring");
+  mono = 110; result.status = "failed"; await observer.finish(result);
+  value.status = "failed"; await observer.persist();
+  expect(value.timings?.totals.saving).toBe(10);
+  expect(result.timings?.totals.saving).toBe(10);
+  expect(result.timings?.totals.structuring).toBe(100);
+});

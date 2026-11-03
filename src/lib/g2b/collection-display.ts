@@ -5,6 +5,7 @@ export const collectionStages: Record<CollectionStage, string> = {
   api: "API 조회", preparing: "공고 준비", opening: "상세 화면 열기", extracting: "본문 추출",
   tables: "표 수집", modals: "모달 수집", closing: "브라우저 정리", structuring: "상세 구조화",
   saving: "결과 저장", relations: "관련 공고 처리",
+  "extraction-check": "추출 누락 검사", "preservation-check": "구조화 보존 검사",
 };
 
 export const collectionStatuses: Record<CollectionJob["status"], string> = {

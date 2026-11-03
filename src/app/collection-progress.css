@@ -76,6 +76,38 @@
 }
 .collection-observation-table th { background: #f5f8f9; font-weight: 600; }
 .collection-observation-table a { color: #255d9a; overflow-wrap: anywhere; }
+.collection-stage-section { margin: 20px 0; }
+.collection-stage-section h3 { margin: 0 0 8px; font-size: 15px; }
+.collection-stage-timings { overflow-x: auto; }
+.collection-stage-timings table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.collection-stage-timings th,
+.collection-stage-timings td {
+  padding: 8px 10px;
+  border-bottom: 1px solid #e5ecee;
+  text-align: left;
+  vertical-align: top;
+  font-variant-numeric: tabular-nums;
+}
+.collection-stage-timings th { background: #f5f8f9; font-weight: 600; }
+.collection-stage-timings td:nth-child(2) { white-space: nowrap; }
+.collection-stage-timings .collection-stage-running > * { background: #edf5ff; color: #255d9a; }
+.collection-notice-timings-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border: 0;
+  background: transparent;
+  color: #255d9a;
+  cursor: pointer;
+  white-space: nowrap;
+  font: inherit;
+}
+.collection-notice-timings-toggle[aria-expanded="true"] svg { transform: rotate(90deg); }
+.collection-notice-timings-toggle:focus-visible { outline: 2px solid #255d9a; outline-offset: 3px; }
+.collection-observation-table .collection-stage-detail > td { padding: 12px; background: #fff; }
+.collection-observation-table .collection-stage-timings th,
+.collection-observation-table .collection-stage-timings td { min-width: auto; }
 .collection-progress-metrics {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { getPool } from "./postgres-store";
 import type { CollectionJob } from "./collection-job";
 import { diagnosticCounts, redactDiagnostic } from "./collection-diagnostics";
+import { interruptCollectionTimings } from "./collection-timings";
 
 const leaseDuration = "2 minutes";
 
@@ -84,7 +85,16 @@ export async function getDbJob(jobId: string): Promise<CollectionJob | null> {
        WHERE lock.id=1 AND lock.job_id=jobs.id AND lock.expires_at>now())`, [jobId]);
   const result = await getPool().query<{ state: CollectionJob }>(
     `SELECT state FROM ${table("collection_jobs")} WHERE id=$1::uuid`, [jobId]);
-  return result.rows[0]?.state || null;
+  const state = result.rows[0]?.state;
+  if (!state) return null;
+  const previous = JSON.stringify(state);
+  if (interruptCollectionTimings(state)) {
+    // 조회 중 다른 실행자가 갱신한 상태는 덮어쓰지 않고 중단된 동일 자료만 확정합니다.
+    await getPool().query(`UPDATE ${table("collection_jobs")} SET state=$2::jsonb
+      WHERE id=$1::uuid AND status='interrupted' AND state=$3::jsonb`,
+      [jobId, safeJobJson(state), previous]);
+  }
+  return state;
 }
 
 /** 시작 시각이 가장 최근인 DB 작업을 반환합니다. */

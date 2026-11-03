@@ -29,6 +29,29 @@ import { getCollectionJob, startCollection, startRefresh } from "./collection-jo
 import type { CollectionJob } from "./collection-job";
 import { G2bMaintenanceError } from "./maintenance";
 
+it("수동 수집 결과는 작업과 공고의 단계 시간을 기존 작업 상태에 보존합니다", async () => {
+  process.env.G2B_SERVICE_KEY = "test-key";
+  const value = await startCollection({ start: "2026-10-28", end: "2026-10-28" }, {
+    fetcher: async () => Response.json({ response: { body: { totalCount: 1, numOfRows: 100, pageNo: 1,
+      items: [{ bidNtceNo: "R26BK1", bidNtceOrd: "000" }] } } }),
+    scrape: async (url, options) => {
+      for (const stage of ["extracting", "tables", "modals", "closing"] as const) await options?.onProgress?.(stage);
+      return { detail: { sourceUrl: url, sections: [], attachments: [], links: [] }, relatedNoticeKeys: [] };
+    },
+  });
+  await vi.waitFor(() => expect(db.releaseDbLease).toHaveBeenCalledWith(value.id, "lease-token"));
+  const saved = await getCollectionJob(value.id);
+  expect(saved?.timings?.outcome).toBe("completed");
+  expect(saved?.results?.[0].timings?.outcome).toBe("completed");
+  for (const stage of ["preparing", "opening", "extracting", "tables", "modals", "closing", "structuring", "saving"] as const) {
+    expect(saved?.results?.[0].timings?.totals[stage]).toBeGreaterThanOrEqual(0);
+  }
+  expect(saved?.timings?.totals.api).toBeGreaterThanOrEqual(0);
+  expect(saved?.timings?.totals["extraction-check"]).toBeUndefined();
+  expect(saved?.timings?.totals["preservation-check"]).toBeUndefined();
+  expect(saved?.timings?.active).toBeUndefined();
+});
+
 it("수동 구간 재실행도 완료 부모를 다시 수집하지 않고 점검으로 남은 관련 공고를 처리합니다",async()=>{
   process.env.G2B_SERVICE_KEY="test-key";
   db.saveNoticeRelation.mockImplementation(async(source?:string,related?:string)=>{
@@ -228,7 +251,7 @@ it("수동 부모 종료는 관련 공고 API와 자식 실패 전에 고정됩�
   } finally { clock.mockRestore(); }
 });
 
-it("상세 재수집 성공 시 시작·종료와 마지막 저장 단계를 보존합니다", async () => {
+it("상세 재수집 성공 시 시작·종료와 저장 뒤 복귀 단계를 보존합니다", async () => {
   const key = "R26BK1--000";
   db.notices.set(key, { key, api: { bidNtceNo: "R26BK1", bidNtceOrd: "000" }, detail: null, relatedNoticeKeys: [] });
   const job = await startRefresh([key], { scrape: async (url, options) => {
@@ -239,7 +262,7 @@ it("상세 재수집 성공 시 시작·종료와 마지막 저장 단계를 보
   /** 백그라운드 작업이 이미 저장한 실행을 찾습니다. */
   function jobId() { return [...db.jobs.keys()][0]; }
   await vi.waitFor(() => expect(db.releaseDbLease).toHaveBeenCalled());
-  expect((await getCollectionJob(job.id))?.results?.[0]).toMatchObject({ status: "succeeded", startedAt: expect.any(String), finishedAt: expect.any(String), progress: { stage: "saving" } });
+  expect((await getCollectionJob(job.id))?.results?.[0]).toMatchObject({ status: "succeeded", startedAt: expect.any(String), finishedAt: expect.any(String), progress: { stage: "structuring" } });
 });
 
 it("다음 API 페이지를 요청하기 전에 이전 공고의 현재 단계를 해제합니다", async () => {

@@ -17,6 +17,24 @@ function job(id: string): CollectionJob {
 }
 
 describe("DB 수집 작업 잠금", () => {
+  it("중단 시간은 마지막 저장값으로 확정해 DB에도 보존합니다", async () => {
+    process.env.DATABASE_URL = "postgres://test";
+    const state = job("33333333-3333-4333-8333-333333333333");
+    state.status = "interrupted";
+    state.timings = { outcome: "running", totals: { opening: 10 }, active: {
+      stage: "modals", elapsedMs: 25, startedAt: state.startedAt, lastObservedAt: state.startedAt,
+    } };
+    let stored: CollectionJob | undefined;
+    runtime.__g2bPgPool = { query: async (sql: string, values: unknown[]) => {
+      if (sql.includes("SELECT state")) return { rows: [{ state: structuredClone(state) }] };
+      if (sql.includes("state=$2::jsonb")) stored = JSON.parse(values[1] as string);
+      return { rows: [], rowCount: 1 };
+    } };
+    const result = await getDbJob(state.id);
+    expect(result?.timings).toMatchObject({ outcome: "interrupted", estimated: true, totals: { opening: 10, modals: 25 } });
+    expect(stored?.timings).toEqual(result?.timings);
+    expect(result?.timings?.active).toBeUndefined();
+  });
   it("진행 병합·단계 전환·최종 저장의 실제 UPDATE 호출 횟수를 구분합니다", async () => {
     process.env.DATABASE_URL = "postgres://test";
     const updates: { sql: string; state: CollectionJob }[] = [];
