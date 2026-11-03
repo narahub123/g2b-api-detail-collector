@@ -1,6 +1,6 @@
 import { DetailQueue } from "./detail-queue";
 import { DetailRuntime } from "./detail-runtime";
-import { consumeDetails } from "./detail-worker";
+import { consumeCollectionQueue } from "./collection-queue-worker";
 import { getPool } from "./postgres-store";
 import { serializeError } from "../error-diagnostics";
 import { randomUUID } from "node:crypto";
@@ -14,9 +14,9 @@ export function detailQueueEnabled(): boolean {
   return process.env.DETAIL_COLLECTION_QUEUE_ENABLED === "true";
 }
 
-/** 아직 전환되지 않은 날짜·자동 수집과의 호환 잠금을 사용하는 큐를 만듭니다. */
+/** API 생산과 분리된 상세 소비기를 만들되 구 버전 수집의 호환 잠금은 유지합니다. */
 export function webDetailQueue(): DetailQueue {
-  return new DetailQueue(getPool(), undefined, { legacyCollectionLock: true });
+  return new DetailQueue(getPool(), undefined, { legacyCollectionLock: true, collectionMode: true });
 }
 
 /** 개발 재로딩에서도 프로세스당 하나의 소비기와 종료 처리기를 유지합니다. */
@@ -60,7 +60,7 @@ export function scheduleDetailWebRequest(authorization: string | null, schedule:
   // after가 HTTP 응답보다 먼저 실패해도 처리되지 않은 거부가 발생하지 않게 합니다.
   void work.catch(() => undefined);
   schedule(async () => {
-    try { resolve(await consumeDetails(webDetailQueue(), { signal: state.__g2bDetailRuntime?.signal })); }
+    try { resolve(await consumeCollectionQueue(webDetailQueue(), { signal: state.__g2bDetailRuntime?.signal })); }
     catch (error) { reject(error); console.error("상세 소비 요청 실패:", serializeError(error)); }
     finally { if (state.__g2bDetailWork === work) state.__g2bDetailWork = undefined; }
   });

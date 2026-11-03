@@ -15,6 +15,9 @@ import { structureNoticeDetail, type StructuredNoticeDetail } from "./structured
 import { checkPreservedContent, runContentCheck } from "./content-check";
 import type { ApiNotice } from "./types";
 import { getIncrementalCheckpoint, getNoticeAttempt, listFailedNoticeAttempts, saveNoticeAttempt } from "./incremental-store";
+import { DetailQueue } from "./detail-queue";
+import { getPool } from "./postgres-store";
+import { createQueuedCollection, produceQueuedCollection } from "./queued-collection";
 
 export type NoticeAttempt = { key: string; attempts: number; status: "failed" | "succeeded"; error: string | null; diagnostic?: SerializedError | null };
 export type IncrementalStore = {
@@ -39,6 +42,7 @@ const dbStore: IncrementalStore = {
 };
 
 type RunOptions = PostedTimeRange & {
+  queue?: DetailQueue;
   activationId?: string;
   store?: IncrementalStore;
   fetcher?: typeof fetch;
@@ -59,6 +63,12 @@ function windowFor(start: string, end: string, checkpoint: string | null) {
 
 /** 분 단위 API 구간을 수집하고 상세 실패를 작업 사이에 이어서 재시도합니다. */
 export async function runIncrementalCollection(options: RunOptions): Promise<CollectionJob> {
+  if (process.env.DETAIL_COLLECTION_QUEUE_ENABLED === "true" && !options.store) {
+    const queue = options.queue ?? new DetailQueue(getPool(), undefined, { legacyCollectionLock: true, collectionMode: true });
+    const job = await createQueuedCollection(queue, { mode: "incremental", start: options.start, end: options.end, activationId: options.activationId });
+    await produceQueuedCollection(queue, job.id, { fetcher: options.fetcher });
+    return (await queue.getRefreshJob(job.id))!;
+  }
   const store = options.store || dbStore;
   const { windowStart, windowEnd, continuation } = windowFor(options.start, options.end,
     await store.getCheckpoint(options.activationId));

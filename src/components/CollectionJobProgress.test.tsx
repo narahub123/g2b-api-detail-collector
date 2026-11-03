@@ -6,6 +6,15 @@ import { CollectionJobProgress } from "./CollectionJobProgress";
 
 afterEach(cleanup);
 
+it("API 완료를 상세 대기와 별도로 표시합니다", () => {
+  const job: CollectionJob = { id: "queued", queueVersion: 1, mode: "incremental", status: "queued", phase: "detail", range: null,
+    startedAt: "2026-11-03T00:00:00Z", apiStatus: "completed", apiCompletedAt: "2026-11-03T00:00:01Z", apiCount: 1,
+    apiTotal: 1, apiProcessed: 1, detailTotal: 1, detailQueued: 1, detailSucceeded: 0, detailFailed: 0, errors: [] };
+  render(<CollectionJobProgress job={job} />);
+  expect(screen.getByText("API 수집 완료")).toBeInTheDocument();
+  expect(screen.getByText("상세 수집 대기 1건")).toBeInTheDocument();
+});
+
 it("점검 보류를 실패로 표시하지 않고 확인 시각과 안내를 보여줍니다", () => {
   const job: CollectionJob = { id:"deferred",mode:"incremental",status:"deferred",phase:"done",range:null,
     startedAt:"2026-11-01T00:00:00Z",finishedAt:"2026-11-01T00:00:01Z",apiCount:0,detailSucceeded:0,detailFailed:0,errors:[],

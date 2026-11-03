@@ -47,6 +47,8 @@ export function CollectionJobProgress({ job }: { job: CollectionJob | null }) {
         )}
       </div>
       <div className="collection-progress-outcomes">
+        {job.apiStatus === "completed" && <span>API 수집 완료</span>}
+        {job.apiStatus === "failed" && <span>API 수집 실패</span>}
         <span>
           상세 성공 <strong>{job.detailSucceeded}건</strong>
         </span>

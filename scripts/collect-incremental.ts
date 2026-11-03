@@ -10,7 +10,7 @@ async function main() {
     console.log(JSON.stringify(result));
     if ("job" in result) {
       await writeMaintenanceSummary(result.job.maintenance);
-      process.exitCode = collectionExitCode(result.job.status);
+      process.exitCode = collectionExitCode(result.job.status, result.job.apiStatus);
     }
     return;
   }
@@ -24,11 +24,11 @@ async function main() {
   const end = args["--end"] ? new Date(args["--end"]).toISOString()
     : new Date(Math.floor(Date.now() / 60_000) * 60_000).toISOString();
   const job = await runIncrementalCollection({ start, end });
-  console.log(JSON.stringify({ id: job.id, status: job.status, windowStart: job.windowStart,
+  console.log(JSON.stringify({ id: job.id, status: job.status, apiStatus: job.apiStatus, apiCompletedAt: job.apiCompletedAt, windowStart: job.windowStart,
     windowEnd: job.windowEnd, continuation: job.continuation, apiCount: job.apiCount,
     detailSucceeded: job.detailSucceeded, detailFailed: job.detailFailed, errors: job.errors, maintenance: job.maintenance }));
   await writeMaintenanceSummary(job.maintenance);
-  process.exitCode = collectionExitCode(job.status);
+  process.exitCode = collectionExitCode(job.status, job.apiStatus);
 }
 
 main().catch((error) => { console.error(error instanceof Error ? error.message : String(error)); process.exitCode = 1; });

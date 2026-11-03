@@ -21,6 +21,7 @@ import { createCollectionObserver, observeCollectionPages } from "./collection-o
 import type { CollectionTimings } from "./collection-timings";
 import { checkPreservedContent, runContentCheck } from "./content-check";
 import { detailQueueEnabled, wakeDetailWebRuntime, webDetailQueue } from "./detail-web-runtime";
+import { createQueuedCollection } from "./queued-collection";
 
 export type CollectionJob = DiagnosticState & {
   id: string;
@@ -28,6 +29,8 @@ export type CollectionJob = DiagnosticState & {
   status: "queued" | "running" | "completed" | "failed" | "interrupted" | "deferred";
   queueVersion?: 1;
   detailQueued?: number;
+  apiStatus?: "queued" | "running" | "completed" | "failed" | "deferred";
+  apiCompletedAt?: string;
   maintenance?: MaintenanceInfo;
   phase: "api" | "detail" | "done";
   range: PostedDateRange | null;
@@ -304,6 +307,12 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies, l
 export async function startCollection(range: PostedDateRange, deps: CollectionDependencies = {}): Promise<CollectionJob> {
   range = parsePostedTimeRange(range.start, range.end);
   if (!process.env.G2B_SERVICE_KEY) throw new Error("G2B_SERVICE_KEY 환경변수를 설정하세요.");
+  if (detailQueueEnabled()) {
+    const job = await createQueuedCollection(webDetailQueue(), { mode: "collection", range,
+      start: seoulInputToUtc(range.start), end: seoulInputToUtc(range.end) });
+    wakeDetailWebRuntime();
+    return job;
+  }
   getPool();
   if (jobRuntime.__g2bActiveJobId) throw new Error("이미 수집 작업이 진행 중입니다.");
   const job: CollectionJob = {

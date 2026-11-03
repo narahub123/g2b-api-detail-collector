@@ -98,14 +98,23 @@ async function processDetail(queue: DetailQueue, token: string, run: DetailRun, 
     result.status = "succeeded";
     await observation.close();
     assertLease();
-    // 선택 재수집은 관련 공고의 추가 수집 없이 선택한 공고만 갱신합니다.
+    // 큐가 요청 작업의 종류를 확인하여 날짜·자동 수집에만 관련 공고를 연결합니다.
     await queue.finish(token, run.id, { status: "succeeded", detail: structured.detail, structured,
+      discoveredKeys: scraped.relatedNoticeKeys,
+      onWarning: warning => {
+        job.errors.push(warning);
+        addDiagnostic(job, { severity: "warning", stage: "detail", operation: "related-notice-limit",
+          target: { key: run.notice_key }, error: warning });
+      },
       snapshot: preserved => {
         if (preserved) {
           const warning = "불완전한 재수집 결과를 저장하지 않아 기존 상세를 유지했습니다.";
           job.errors.push(`${run.notice_key}: ${warning}`);
           addDiagnostic(job, { severity: "warning", stage: "transform", operation: "preserve-existing-detail",
             target: { key: run.notice_key }, error: warning });
+        } else if (record.detailError) {
+          addDiagnostic(job, { severity: "retry", stage: "detail", operation: "scrape-detail",
+            target: { key: run.notice_key }, outcome: "recovered", error: record.detailError });
         }
         observation.finishSnapshot(result);
         return snapshot();

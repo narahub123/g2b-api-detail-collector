@@ -9,6 +9,7 @@ import type { StructuredNoticeDetail } from "./structured-data";
 import type { ApiNotice } from "./types";
 import { getDetailRefresh, submitDetailRefresh, type DetailSnapshot } from "./detail-refresh-store";
 import { shouldReplacePaginatedDetail } from "./pagination-coverage";
+import { expandCollectionRelations, finishCollectionAttempt } from "./collection-targets";
 
 export type DetailRequest = {
   key: string;
@@ -25,8 +26,9 @@ export type DetailRun = {
   owner_token: string | null;
 };
 type Finish = ({ status: "succeeded"; detail: NonNullable<StoredNotice["detail"]>;
-  structured?: StructuredNoticeDetail; relatedKeys?: string[]; followups?: DetailRequest[] }
-  | { status: "failed"; error: string; diagnostic?: unknown }) & { snapshot?: DetailSnapshot | ((preserved: boolean) => DetailSnapshot) };
+  structured?: StructuredNoticeDetail; relatedKeys?: string[]; discoveredKeys?: string[]; followups?: DetailRequest[] }
+  | { status: "failed"; error: string; diagnostic?: unknown }) & { snapshot?: DetailSnapshot | ((preserved: boolean) => DetailSnapshot);
+    onWarning?: (message: string) => void };
 const cancelledClaim = Symbol("cancelledClaim");
 
 /** 공고 키 오류가 DB 잠금을 잡기 전에 드러나도록 검증합니다. */
@@ -40,9 +42,12 @@ function parts(key: string) {
 export class DetailQueue {
   /** 연결 풀과 검사된 스키마를 사용하며 기존 수집 경로는 변경하지 않습니다. */
   constructor(readonly pool: pg.Pool, readonly schema = process.env.G2B_DB_SCHEMA || "public",
-    private readonly options: { legacyCollectionLock?: boolean } = {}) {
+    private readonly options: { legacyCollectionLock?: boolean; collectionMode?: boolean } = {}) {
     if (!/^[a-z][a-z0-9_]*$/.test(schema)) throw new Error("잘못된 DB 스키마 이름입니다.");
   }
+
+  /** API 생산자도 공고를 쓰기 전에 같은 큐 잠금 순서를 따르게 합니다. */
+  async lockMutation(db: pg.PoolClient): Promise<void> { await this.lockLease(db); }
 
   /** 동일 연결에서 작업을 확정하거나 롤백하고 연결을 반환합니다. */
   async transaction<T>(work: (db: pg.PoolClient) => Promise<T>): Promise<T> {
@@ -264,6 +269,7 @@ export class DetailQueue {
         for (const key of [...new Set(result.relatedKeys ?? [])].sort())
           await saveNoticeRelationInTransaction(db, run.notice_key, key, this.schema);
         for (const request of result.followups ?? []) await this.enqueueInTransaction(db, request);
+        if (this.options.collectionMode) await expandCollectionRelations(db, this, run, result.discoveredKeys ?? [], result.onWarning ?? (() => undefined));
       } else if (result.status === "failed") {
         await saveStoredNoticeInTransaction(db, run.notice_key, { ...current,
           detailError: redactDiagnostic(result.error), detailDiagnostic: result.diagnostic ? serializeError(result.diagnostic) : null }, undefined, this.schema);
@@ -275,6 +281,9 @@ export class DetailQueue {
         result.status === "failed" ? redactDiagnostic(result.error) : null,
         result.status === "failed" && result.diagnostic ? JSON.stringify(serializeError(result.diagnostic)) : null,
         snapshot ? JSON.stringify(snapshot) : null]);
+      if (this.options.collectionMode) await finishCollectionAttempt(db, this, run, result.status,
+        result.status === "failed" ? redactDiagnostic(result.error) : null,
+        result.status === "failed" && result.diagnostic ? JSON.stringify(serializeError(result.diagnostic)) : null, preserved);
     });
   }
 
@@ -301,7 +310,7 @@ export class DetailQueue {
   /** 요청 작업을 실행 결과에서 집계하여 반환합니다. */
   async getRefreshJob(id: string) { return getDetailRefresh(this, id); }
 
-  /** 최신 선택 재수집을 읽어 웹 재접속 시 대기를 복원합니다. */
+  /** 최신 큐 수집 작업을 읽어 웹 재접속 시 API·상세 대기를 복원합니다. */
   async latestRefreshJob() {
     const row = (await this.pool.query(`SELECT id FROM ${this.schema}.detail_collection_jobs ORDER BY requested_at DESC,id DESC LIMIT 1`)).rows[0];
     return row ? this.getRefreshJob(row.id) : null;

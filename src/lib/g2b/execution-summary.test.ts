@@ -7,6 +7,11 @@ import { expect, it } from "vitest";
 import { collectionExitCode, writeMaintenanceSummary } from "./execution-summary";
 import { G2bMaintenanceError } from "./maintenance";
 
+it("API 실패가 있는 상세 대기를 정상 접수와 구분합니다", () => {
+  expect(collectionExitCode("queued", "completed")).toBe(0);
+  expect(collectionExitCode("queued", "failed")).toBe(1);
+});
+
 it("점검 보류만 정상 종료하고 Actions 요약에 근거와 시각을 기록합니다", async () => {
   expect(collectionExitCode("deferred")).toBe(0);
   expect(collectionExitCode("completed")).toBe(0);

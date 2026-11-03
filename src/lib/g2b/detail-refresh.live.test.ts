@@ -18,13 +18,14 @@ describe.skipIf(process.env.LIVE_DB_TEST !== "1" || !process.env.DATABASE_URL)("
   const keys = ["R26BK10000001--000", "R26BK10000002--000"];
   beforeAll(async () => {
     await pool.query(`CREATE SCHEMA ${schema}`);
-    for (const file of ["db/schema.sql", "db/migrations/0014-detail-queue.sql", "db/migrations/0015-detail-refresh-jobs.sql"])
+    for (const file of ["db/schema.sql", "db/migrations/0014-detail-queue.sql", "db/migrations/0015-detail-refresh-jobs.sql", "db/migrations/0016-queued-collection.sql"])
       await pool.query((await readFile(file, "utf8")).replaceAll("public.", `${schema}.`));
   }, 60_000);
   beforeEach(async () => {
     await pool.query(`TRUNCATE ${schema}.detail_collection_jobs,${schema}.detail_collection_requests,
       ${schema}.detail_collection_runs,${schema}.notices CASCADE`);
     await pool.query(`UPDATE ${schema}.detail_collection_worker_lease SET owner_token=NULL,expires_at=NULL`);
+    await pool.query(`INSERT INTO ${schema}.detail_collection_producer_lease(id) VALUES(1) ON CONFLICT DO NOTHING`);
     await pool.query(`INSERT INTO ${schema}.collection_lock(id) VALUES(1) ON CONFLICT DO NOTHING`);
     await pool.query(`UPDATE ${schema}.collection_lock SET job_id=NULL,token=NULL,expires_at=NULL`);
     for (const key of keys) await queue.saveApi(key, { bidNtceNo: key.split("--")[0], bidNtceOrd: "000" });

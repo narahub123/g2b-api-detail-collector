@@ -3,6 +3,17 @@ import { latestDueTime, type AutomationSettings } from "./automation-schedule";
 import { runScheduledCollection } from "./scheduled-collection";
 import type { CollectionJob } from "./collection-job";
 
+it("API 접수 완료·실패·점검을 상세 대기 상태와 별도로 분류합니다", async () => {
+  for (const [apiStatus, kind] of [["completed", "queued"], ["failed", "failed"], ["deferred", "deferred"]] as const) {
+    const job = { id: "job", queueVersion: 1, status: "queued", apiStatus } as CollectionJob;
+    const result = await runScheduledCollection(new Date(), {
+      claim: async () => ({ kind: "due", dueAt: "2026-11-01T00:00:00Z", settings: { startAt: "2026-10-30T00:00:00Z", activationId: "id" } as AutomationSettings }),
+      run: async () => job,
+    });
+    expect(result.kind).toBe(kind);
+  }
+});
+
 it("예약 작업의 점검 보류를 실패와 구분합니다",async()=>{
   const job={id:"job",status:"deferred"} as CollectionJob;
   const result=await runScheduledCollection(new Date(),{

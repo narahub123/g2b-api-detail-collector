@@ -3,9 +3,10 @@ import type { CollectionJob } from "./collection-job";
 import type { MaintenanceInfo } from "./maintenance";
 import { collectionTime } from "./collection-display";
 
-/** 점검 보류와 정상 완료만 성공 종료로 처리해 실제 오류의 알림을 유지합니다. */
-export function collectionExitCode(status: CollectionJob["status"]): number {
-  return status === "completed" || status === "deferred" ? 0 : 1;
+/** 상세 대기 접수와 점검 보류도 정상 종료로 구분하고 실제 오류의 알림을 유지합니다. */
+export function collectionExitCode(status: CollectionJob["status"], apiStatus?: CollectionJob["apiStatus"]): number {
+  if (apiStatus === "failed") return 1;
+  return status === "queued" || status === "completed" || status === "deferred" ? 0 : 1;
 }
 
 /** 실행 로그와 별도로 Actions 요약에 점검 근거를 남깁니다. */

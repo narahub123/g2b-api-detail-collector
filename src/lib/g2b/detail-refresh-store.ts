@@ -54,17 +54,26 @@ function mergeDiagnostics(snapshots: DetailSnapshot[]): DiagnosticState["diagnos
 
 /** 요청 작업의 상태를 공유 실행에서 계산하여 작업 JSON의 경쟁 덮어쓰기를 피합니다. */
 export async function getDetailRefresh(queue: DetailQueue, id: string): Promise<CollectionJob | null> {
-  const job = (await queue.pool.query(`SELECT requested_at FROM ${queue.schema}.detail_collection_jobs WHERE id=$1`, [id])).rows[0];
+  const job = (await queue.pool.query(`SELECT * FROM ${queue.schema}.detail_collection_jobs WHERE id=$1`, [id])).rows[0];
   if (!job) return null;
   const rows = (await queue.pool.query(`SELECT r.*, (l.owner_token=r.owner_token AND l.expires_at>clock_timestamp()) AS live
     FROM ${queue.schema}.detail_collection_requests q JOIN ${queue.schema}.detail_collection_runs r ON r.id=q.run_id
     CROSS JOIN ${queue.schema}.detail_collection_worker_lease l WHERE q.job_id=$1 AND l.id=1
-    ORDER BY q.requested_at,r.id`, [id])).rows;
-  const active = rows.filter(row => row.status === "processing" && row.live);
-  const waiting = rows.filter(row => row.status === "queued" || (row.status === "processing" && !row.live));
-  const done = rows.filter(row => row.status === "succeeded" || row.status === "failed");
-  const snapshots: DetailSnapshot[] = rows.map(row => row.progress);
-  const results: CollectionNoticeResult[] = rows.map(row => {
+    ORDER BY r.requested_at,r.id`, [id])).rows;
+  const latest = [...new Map(rows.map(row => [row.notice_key, row])).values()];
+  const producer = job.producer_state ?? {};
+  let apiStatus = job.producer_status ?? "completed";
+  if (apiStatus === "running") {
+    const lease = await queue.pool.query(`SELECT 1 FROM ${queue.schema}.detail_collection_producer_lease
+      WHERE id=1 AND job_id=$1 AND expires_at>clock_timestamp()`, [id]);
+    if (!lease.rowCount) apiStatus = "queued";
+  }
+  const apiPending = ["queued", "running", "deferred"].includes(apiStatus);
+  const active = latest.filter(row => row.status === "processing" && row.live);
+  const waiting = latest.filter(row => row.status === "queued" || (row.status === "processing" && !row.live));
+  const done = latest.filter(row => row.status === "succeeded" || row.status === "failed");
+  const snapshots: DetailSnapshot[] = [producer, ...rows.map(row => row.progress)];
+  const results: CollectionNoticeResult[] = latest.map(row => {
     const snapshot = row.progress as DetailSnapshot;
     const pending = row.status === "queued" || (row.status === "processing" && !row.live);
     return { ...(!pending ? snapshot.result : undefined), key: row.notice_key,
@@ -72,14 +81,19 @@ export async function getDetailRefresh(queue: DetailQueue, id: string): Promise<
       startedAt: !pending && row.started_at ? row.started_at.toISOString() : undefined,
       finishedAt: row.finished_at?.toISOString(), error: row.error ?? snapshot.result?.error };
   });
-  const status = active.length ? "running" : waiting.length ? "queued" : "completed";
-  return { id, mode: "refresh", queueVersion: 1, status, phase: status === "completed" ? "done" : "detail", range: null,
+  const status = active.length || apiStatus === "running" ? "running" : waiting.length || apiPending ? "queued" : apiStatus === "failed" ? "failed" : "completed";
+  const endTimes = [...done.map(row => row.finished_at.getTime()), ...(job.producer_finished_at ? [job.producer_finished_at.getTime()] : [])];
+  return { id, mode: job.mode ?? "refresh", queueVersion: 1, status,
+    phase: apiPending ? "api" : status === "completed" || status === "failed" ? "done" : "detail", range: producer.range ?? null,
     startedAt: job.requested_at.toISOString(),
-    finishedAt: status === "completed" && done.length ? new Date(Math.max(...done.map(row => row.finished_at.getTime()))).toISOString() : undefined,
-    apiCount: 0, apiTotal: 0, apiProcessed: 0, detailTotal: rows.length, detailQueued: waiting.length,
-    detailSucceeded: rows.filter(row => row.status === "succeeded").length,
-    detailFailed: rows.filter(row => row.status === "failed").length,
+    finishedAt: ["completed", "failed"].includes(status) && endTimes.length ? new Date(Math.max(...endTimes)).toISOString() : undefined,
+    apiStatus, apiCompletedAt: job.api_completed_at?.toISOString(),
+    windowStart: producer.windowStart, windowEnd: producer.windowEnd, activationId: producer.activationId, continuation: producer.continuation,
+    cursor: producer.cursor, apiCount: producer.apiCount ?? 0, apiTotal: job.mode && job.mode !== "refresh" ? producer.apiTotal : 0,
+    apiProcessed: producer.apiProcessed ?? 0, detailTotal: latest.length, detailQueued: waiting.length,
+    detailSucceeded: latest.filter(row => row.status === "succeeded").length,
+    detailFailed: latest.filter(row => row.status === "failed").length,
     results, errors: snapshots.flatMap(snapshot => snapshot.errors ?? []), diagnostics: mergeDiagnostics(snapshots),
     progress: results.find(result => result.startedAt && !result.finishedAt)?.progress,
-    maintenance: waiting.map(row => (row.progress as DetailSnapshot).maintenance).find(Boolean) };
+    maintenance: producer.maintenance ?? waiting.map(row => (row.progress as DetailSnapshot).maintenance).find(Boolean) };
 }
