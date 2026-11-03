@@ -175,7 +175,6 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies, l
       job.detailFailed++;
       job.errors.push(`${key}: ${record.detailError}`);
       addDiagnostic(job, { severity: "failure", stage: "detail", operation: "scrape-detail", target: { key }, error });
-      await observation.progress("saving", noticeResult);
       await saveRecord(key, record);
       await observation.finish(noticeResult);
       return [];
@@ -204,7 +203,6 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies, l
     record.independentTriggers = structured.independentTriggers;
     record.detailError = null;
     record.detailDiagnostic=null;
-    await observation.progress("saving", noticeResult);
     await saveRecord(key, record, structured);
     job.errors.push(...structured.warnings);
     for (const warning of structured.warnings)
@@ -352,8 +350,7 @@ async function runRefresh(job: CollectionJob, deps: CollectionDependencies, leas
         result.error=redactDiagnostic(typeof record.detailDiagnostic.message==='string'?record.detailDiagnostic.message:'오류 객체의 세부 속성을 확인하세요.');
         record.detailError=result.error;
         await ensureLease();
-        await observation.progress("saving", result);
-        await saveStoredNotice(result.key,record);
+        await observation.during("saving", () => saveStoredNotice(result.key,record), result);
         job.detailFailed++;
         job.errors.push(`${result.key}: ${result.error}`);
         addDiagnostic(job, { severity: "failure", stage: "detail", operation: "scrape-detail", target: { key: result.key }, error });
@@ -383,8 +380,7 @@ async function runRefresh(job: CollectionJob, deps: CollectionDependencies, leas
         detailError: null, detailDiagnostic:null };
       updated.normalized = normalizeNotice(updated.api, updated.detail, { number, order });
       await ensureLease();
-      await observation.progress("saving", result);
-      await saveStoredNotice(result.key, updated, structured);
+      await observation.during("saving", () => saveStoredNotice(result.key, updated, structured), result);
       result.status = "succeeded";
       job.detailSucceeded++;
       job.errors.push(...structured.warnings);

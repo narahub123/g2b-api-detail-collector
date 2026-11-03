@@ -217,11 +217,13 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
         attempt: (previous?.attempts || 0) + 1, outcome: (previous?.attempts || 0) < 2 ? "retrying" : "failed", error });
       record.detailError = message;
       record.detailDiagnostic=diagnostic;
-      await observation.progress("saving", noticeResult);
       await ensureLease();
-      await store.saveNotice(key, record);
       const attempts = (previous?.attempts || 0) + 1;
-      await store.saveAttempt({ key, attempts, status: "failed", error: message, diagnostic });
+      // 공고와 시도 기록이 모두 확정될 때까지만 저장 시간으로 측정합니다.
+      await observation.during("saving", async () => {
+        await store.saveNotice(key, record);
+        await store.saveAttempt({ key, attempts, status: "failed", error: message, diagnostic });
+      }, noticeResult);
       if (attempts === 1) firstFailures.add(key);
       results.set(key, "failed");
       job.errors.push(`${key}: ${message}`);
@@ -244,9 +246,11 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
     record.openingDetailKeys = extracted.structured.openingDetailKeys;
     record.independentTriggers = extracted.structured.independentTriggers;
     await ensureLease();
-    await observation.progress("saving", noticeResult);
-    await store.saveNotice(key, record, extracted.structured);
-    await store.saveAttempt({ key, attempts: (previous?.attempts || 0) + 1, status: "succeeded", error: null, diagnostic:null });
+    // 저장 후 진단·집계는 원래 단계로 복귀한 뒤 수행해 DB 시간에 섞이지 않게 합니다.
+    await observation.during("saving", async () => {
+      await store.saveNotice(key, record, extracted.structured);
+      await store.saveAttempt({ key, attempts: (previous?.attempts || 0) + 1, status: "succeeded", error: null, diagnostic:null });
+    }, noticeResult);
     // 상세와 시도 기록 저장이 끝난 후 복구 성공을 작업 진단에 반영합니다.
     if (previous?.status === "failed" || retry)
       addDiagnostic(job, { severity: "retry", stage: "detail", operation: "scrape-detail", target: { key },

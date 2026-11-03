@@ -251,7 +251,7 @@ it("수동 부모 종료는 관련 공고 API와 자식 실패 전에 고정됩�
   } finally { clock.mockRestore(); }
 });
 
-it("상세 재수집 성공 시 시작·종료와 마지막 저장 단계를 보존합니다", async () => {
+it("상세 재수집 성공 시 시작·종료와 저장 뒤 복귀 단계를 보존합니다", async () => {
   const key = "R26BK1--000";
   db.notices.set(key, { key, api: { bidNtceNo: "R26BK1", bidNtceOrd: "000" }, detail: null, relatedNoticeKeys: [] });
   const job = await startRefresh([key], { scrape: async (url, options) => {
@@ -262,7 +262,7 @@ it("상세 재수집 성공 시 시작·종료와 마지막 저장 단계를 보
   /** 백그라운드 작업이 이미 저장한 실행을 찾습니다. */
   function jobId() { return [...db.jobs.keys()][0]; }
   await vi.waitFor(() => expect(db.releaseDbLease).toHaveBeenCalled());
-  expect((await getCollectionJob(job.id))?.results?.[0]).toMatchObject({ status: "succeeded", startedAt: expect.any(String), finishedAt: expect.any(String), progress: { stage: "saving" } });
+  expect((await getCollectionJob(job.id))?.results?.[0]).toMatchObject({ status: "succeeded", startedAt: expect.any(String), finishedAt: expect.any(String), progress: { stage: "structuring" } });
 });
 
 it("다음 API 페이지를 요청하기 전에 이전 공고의 현재 단계를 해제합니다", async () => {

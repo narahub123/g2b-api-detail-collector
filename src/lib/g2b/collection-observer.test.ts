@@ -199,3 +199,19 @@ it("벽시계가 역전되어 진행 표시가 보류돼도 단조 시간은 실
   wall = 20; mono = 30; value.status = "completed"; await observer.persist();
   expect(value.timings?.totals).toEqual({ opening: 10, api: 10, modals: 10 });
 });
+
+it("DB 저장 예외 직후 saving을 종료해 실패 처리 시간을 더하지 않습니다", async () => {
+  const value = job(); let mono = 0;
+  const result: CollectionNoticeResult = { key: "A--000", status: "pending" };
+  const observer = createCollectionObserver(value, async () => {}, Date.now, () => mono);
+  await observer.begin(result);
+  await observer.progress("structuring", result);
+  const error = Error("DB 저장 실패");
+  await expect(observer.during("saving", async () => { mono = 10; throw error; }, result)).rejects.toBe(error);
+  expect(result.timings?.active?.stage).toBe("structuring");
+  mono = 110; result.status = "failed"; await observer.finish(result);
+  value.status = "failed"; await observer.persist();
+  expect(value.timings?.totals.saving).toBe(10);
+  expect(result.timings?.totals.saving).toBe(10);
+  expect(result.timings?.totals.structuring).toBe(100);
+});

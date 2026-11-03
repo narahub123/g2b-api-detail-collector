@@ -436,7 +436,7 @@ it("증분 부모 종료와 자식 API 시작 경계를 보존하고 재시도 �
       },
     });
     expect(job.results?.[0]).toMatchObject({ status: "succeeded", finishedAt: new Date(base + 10).toISOString() });
-    expect(job.results?.[1]).toMatchObject({ status: "succeeded", startedAt: new Date(base + 10).toISOString(), finishedAt: new Date(base + 210).toISOString(), progress: { stage: "saving" } });
+    expect(job.results?.[1]).toMatchObject({ status: "succeeded", startedAt: new Date(base + 10).toISOString(), finishedAt: new Date(base + 210).toISOString(), progress: { stage: "structuring" } });
     expect(childAttempts).toBe(2);
     expect(memory.jobs.some(j => j.results?.[1]?.status === "failed" && j.results[1].finishedAt === new Date(base + 100).toISOString())).toBe(true);
   } finally { clock.mockRestore(); delete process.env.G2B_SERVICE_KEY; }
