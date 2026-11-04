@@ -6,6 +6,7 @@ import type { CollectionStage } from "@/lib/g2b/collection-progress";
 import type { CollectionTimings } from "@/lib/g2b/collection-timings";
 import {collectionDetailSteps, type CollectionDetailTimings, type CollectionDetailActive,
   type CollectionDetailOutcome} from '@/lib/g2b/collection-detail-steps';
+import { CompactAccordion } from "./common/CompactAccordion";
 
 export const CollectionTimingClock = createContext<number | undefined>(undefined);
 
@@ -44,7 +45,7 @@ function RunningDetailDuration({active}:{active:CollectionDetailActive}) {
 
 /** 반복 작업의 비용과 횟수를 비교하고 현재 후보는 완료 집계와 분리합니다. */
 function DetailTimings({group,running}:{group:NonNullable<CollectionDetailTimings['opening']>;running:boolean}) {
-  return <details><summary>세부 작업 시간</summary>
+  return <CompactAccordion title="세부 작업 시간">
     {group.active.map(active=><p key={active.id}>
       {collectionDetailSteps[active.step]} · {running?'진행 중':'종료 미확인'} · {running?<RunningDetailDuration active={active}/>:duration(active.elapsedMs)}
       {active.context?.candidateId&&` · 후보 ${active.context.candidateId}`}
@@ -58,7 +59,7 @@ function DetailTimings({group,running}:{group:NonNullable<CollectionDetailTiming
           <td>{stat.count}회</td><td>{duration(stat.maxMs)}</td><td>{Object.entries(stat.outcomes).map(([outcome,count])=>`${detailOutcomes[outcome as CollectionDetailOutcome]} ${count}회`).join(' · ')}</td></tr>;
       })}</tbody>
     </table>}
-  </details>;
+  </CompactAccordion>;
 }
 
 /** 작업·공고의 누적 시간을 같은 순서로 표시하고 미실행과 과거 기록 부재를 구분합니다. */
