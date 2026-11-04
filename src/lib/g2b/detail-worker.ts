@@ -12,7 +12,7 @@ import { maintenanceFromError } from "./maintenance";
 import { DocumentQueue } from "../documents/queue";
 import { recoverDocumentRegistrations } from "../documents/registration";
 
-type Options = { scrape?: typeof scrapeDetailPage; fetcher?: typeof fetch; signal?: AbortSignal; limit?: number };
+type Options = { scrape?: typeof scrapeDetailPage; fetcher?: typeof fetch; signal?: AbortSignal; limit?: number; onDetailFinished?:()=>void };
 
 /** 공고 하나를 수집하며 중간 진행부터 최종 저장까지 같은 실행 소유권을 사용합니다. */
 async function processDetail(queue: DetailQueue, token: string, run: DetailRun, options: Options,
@@ -152,6 +152,7 @@ export async function consumeDetails(queue: DetailQueue, options: Options = {}):
       const outcome = await processDetail(queue, token, run, options, assertLease);
       if (outcome !== "finished") break;
       count++;
+      options.onDetailFinished?.();
     }
     return count;
   } finally {

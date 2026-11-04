@@ -25,3 +25,11 @@ it('보완 작업은 비활성·10분 간격·queue-only이며 토큰은 헤더�
  expect(result.job.url).not.toContain('token');expect(result.job.extendedData.headers.Authorization).toBe('Bearer token');
  expect(result.job.saveResponses).toBe(false);
 });
+it('수집 도중 호출도 자동 게이트와 고정 입력을 지키고 수동 입력으로 우회하지 않습니다',()=>{
+ const event={...base.event,inputs:{mode:'queue-only',invocation:'collection-progress',limit:'50',notice_key:''}};
+ expect(evaluatePdfEvent({...base,event,enabled:'true'})).toMatchObject({allowed:true,reason:'collection-progress',mode:'queue-only'});
+ expect(evaluatePdfEvent({...base,event,enabled:'false'})).toMatchObject({allowed:false,reason:'disabled'});
+ for(const change of [{mode:'discover-and-drain'},{limit:'1'},{notice_key:'R26BK10000001--000'}]) {
+  expect(evaluatePdfEvent({...base,event:{...event,inputs:{...event.inputs,...change}},enabled:'true'}).allowed).toBe(false);
+ }
+});

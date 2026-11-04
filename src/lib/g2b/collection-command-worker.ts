@@ -1,6 +1,7 @@
 import type { DetailQueue } from "./detail-queue";
 import type { CollectionCommand, QueueReport } from "./collection-command";
 import { consumeCollectionQueue } from "./collection-queue-worker";
+import type { PdfDispatchRuntime } from "../documents/dispatch-runtime";
 
 /** 준비·미래 대기와 다른 실행자의 임대를 구분하여 후속 실행 필요성을 보고합니다. */
 export async function inspectCollectionQueue(queue: DetailQueue): Promise<Omit<QueueReport, "processed" | "reason"> & { busy: boolean }> {
@@ -15,14 +16,17 @@ export async function inspectCollectionQueue(queue: DetailQueue): Promise<Omit<Q
   return { ...row, apiPending: api.pending, busy: !!worker.rowCount };
 }
 
-/** CLI·Actions에서도 웹과 같은 소비기를 사용하고 한도 뒤에는 남은 요청을 DB에 보존합니다. */
-export async function drainCollectionCommand(queue: DetailQueue, command: CollectionCommand, signal?: AbortSignal): Promise<QueueReport> {
+/** CLI·Actions가 공통 소비기를 사용하고 Actions의 공고 완료 신호만 실행 요청 조정기에 전달합니다.
+ * @param dispatcher 웹·일반 CLI에서는 주입하지 않는 Actions 전용 조정기
+ */
+export async function drainCollectionCommand(queue: DetailQueue, command: CollectionCommand, signal?: AbortSignal,
+  dispatcher?: PdfDispatchRuntime | null): Promise<QueueReport> {
   const deadline = new AbortController();
   const timer = setTimeout(() => deadline.abort(), command.maxMinutes * 60_000);
   timer.unref?.();
   try {
     const processed = await consumeCollectionQueue(queue, { limit: command.limit,
-      signal: signal ? AbortSignal.any([deadline.signal, signal]) : deadline.signal });
+      signal: signal ? AbortSignal.any([deadline.signal, signal]) : deadline.signal,onDetailFinished:()=>dispatcher?.wake() });
     const state = await inspectCollectionQueue(queue);
     const reason = signal?.aborted ? "interrupted" : deadline.signal.aborted ? "deadline" :
       processed >= command.limit && (state.ready || state.processing || state.apiPending) ? "limit" :

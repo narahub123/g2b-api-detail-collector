@@ -13,6 +13,7 @@ import type { ExtractionPurpose, ReadyCounts } from './priority';
 import { discoveryCandidatesSql } from './discovery';
 import { documentRegistrationEnabled, recoverDocumentRegistrations, registerNoticeDocumentsInTransaction } from './registration';
 import { attachmentObsoleteMessage, isCurrentAttachmentRun, synchronizeNoticeAttachments } from './attachment-lifecycle';
+import { dispatchRepository, PdfDispatchState } from './dispatch-state';
 
 import { EXTRACTOR_VERSION } from "./extractor-version";
 export { EXTRACTOR_VERSION } from "./extractor-version";
@@ -117,6 +118,8 @@ export class DocumentQueue {
     if (pending.length) await db.query(`UPDATE ${this.schema}.attachment_documents d
       SET active_chain_id=a.run_id,latest_run_id=a.run_id,current_run_id=a.run_id,updated_at=now()
       FROM jsonb_to_recordset($1::jsonb) AS a(run_id uuid,document_id uuid) WHERE d.id=a.document_id`, [JSON.stringify(pending)]);
+    const repository=dispatchRepository();
+    if (pending.length && repository) await new PdfDispatchState(this.pool,this.schema).request(db,repository);
     return states.map(row => {
       const reused = row.active ?? (source === "automatic" ? row.done : null);
       // JSON으로 함께 조회한 기존 실행도 단건 접수와 같은 pg 날짜 표현을 유지합니다.
@@ -319,6 +322,8 @@ export class DocumentQueue {
       ON CONFLICT(retry_of) WHERE retry_of IS NOT NULL DO NOTHING RETURNING id`,[run.id,id])).rows[0];
     const child=inserted ?? (await db.query(`SELECT id FROM ${this.schema}.attachment_extraction_runs WHERE retry_of=$1`,[run.id])).rows[0];
     if(child) await db.query(`UPDATE ${this.schema}.attachment_documents SET current_run_id=$2,latest_run_id=$2,updated_at=now() WHERE id=$1`,[run.document_id,child.id]);
+    const repository=dispatchRepository();
+    if (inserted && repository) await new PdfDispatchState(this.pool,this.schema).request(db,repository);
     return child?.id ?? null;
   }
   /** 실패 상태와 다음 시도·현재 포인터를 함께 커밋하며 저장 실패는 만료 복구에 맡깁니다. */

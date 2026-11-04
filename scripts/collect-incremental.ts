@@ -8,6 +8,7 @@ import { DetailQueue } from "../src/lib/g2b/detail-queue";
 import { getPool } from "../src/lib/g2b/postgres-store";
 import { createQueuedCollection } from "../src/lib/g2b/queued-collection";
 import { serializeError } from "../src/lib/error-diagnostics";
+import { createActionsPdfDispatcher } from "../src/lib/documents/dispatch-runtime";
 
 /** CLI와 Actions가 예약 상태에 관계없이 같은 큐를 소비하고 남은 대기를 보고하게 합니다. */
 async function main(): Promise<void> {
@@ -27,6 +28,8 @@ async function main(): Promise<void> {
   let queue: DetailQueue | undefined;
   /** 실제 DB 작업이 필요할 때만 연결 풀과 공통 큐를 만듭니다. */
   const getQueue = () => queue ??= new DetailQueue(getPool(), undefined, { legacyCollectionLock: true, collectionMode: true });
+  const dispatcher=enabled?createActionsPdfDispatcher(getQueue().pool,getQueue().schema,abort.signal):null;
+  dispatcher?.start();
   try {
     const result = await runCollectionCommand(command, {
       enabled,
@@ -34,7 +37,7 @@ async function main(): Promise<void> {
       scheduled: () => runScheduledCollection(new Date(), enabled ? {
         run: options => createQueuedCollection(getQueue(), { ...options, mode: "incremental" }),
       } : {}),
-      drain: options => drainCollectionCommand(getQueue(), options, abort.signal),
+      drain: options => drainCollectionCommand(getQueue(), options, abort.signal,dispatcher),
       getJob: id => getQueue().getRefreshJob(id),
     });
     // 구간 조회의 기존 최상위 요약 필드는 유지하고 큐 처리 결과만 덧붙입니다.
@@ -48,6 +51,7 @@ async function main(): Promise<void> {
     if (result.job) await writeMaintenanceSummary(result.job.maintenance);
     process.exitCode = interrupted || (result.job ? collectionExitCode(result.job.status, result.job.apiStatus) : 0);
   } finally {
+    await dispatcher?.finish();
     process.removeListener("SIGINT", interrupt);
     process.removeListener("SIGTERM", terminate);
     const runtime = globalThis as typeof globalThis & { __g2bPgPool?: pg.Pool };

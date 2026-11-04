@@ -13,9 +13,9 @@ on:
         options: [discover-and-drain, queue-only]
         default: discover-and-drain
       invocation:
-        description: "수동 검증 또는 PDF 전용 보완 호출"
+        description: "수동 검증·PDF 보완 또는 수집 진행 호출"
         type: choice
-        options: [manual, watchdog]
+        options: [manual, watchdog, collection-progress]
         default: manual
       limit:
         description: "수동 검증 시 최대 파일 수 (1~50)"
@@ -40,6 +40,9 @@ jobs:
     timeout-minutes: 60
     env:
       DETAIL_PDF_REGISTRATION_ENABLED: ${{ vars.DETAIL_PDF_REGISTRATION_ENABLED || 'false' }}
+      PDF_PROGRESS_DISPATCH_ENABLED: ${{ vars.PDF_PROGRESS_DISPATCH_ENABLED || 'false' }}
+      G2B_PDF_EXTRACTION_ENABLED: ${{ vars.G2B_PDF_EXTRACTION_ENABLED || 'false' }}
+      PDF_DISPATCH_REPOSITORY: ${{ github.repository }}
     steps:
       # 원본 수집의 커밋·산출물을 실행하지 않고 기본 브랜치 코드만 사용합니다.
       - uses: actions/checkout@v4
@@ -86,6 +89,7 @@ jobs:
           docker run --rm --init --cpus=2 --memory=4g --shm-size=256m --stop-timeout=30 \
             --name "g2b-pdf-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
             --env DATABASE_URL --env G2B_DB_SCHEMA --env DETAIL_PDF_REGISTRATION_ENABLED \
+            --env PDF_PROGRESS_DISPATCH_ENABLED --env G2B_PDF_EXTRACTION_ENABLED --env PDF_DISPATCH_REPOSITORY \
             g2b-pdf-extraction:local node --import tsx scripts/document-batch.ts "${args[@]}" | tee "$RUNNER_TEMP/g2b-pdf-result.jsonl"
       - name: Summarize PDF batch diagnostics
         if: always()

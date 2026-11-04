@@ -1,6 +1,6 @@
 export const PDF_DEFAULT_BRANCH='main';
 const modes=new Set(['discover-and-drain','queue-only']);
-const invocations=new Set(['manual','watchdog']);
+const invocations=new Set(['manual','watchdog','collection-progress']);
 
 /** 신뢰하는 기본 브랜치 이벤트와 제한된 입력만 PDF 배치로 전달합니다. */
 export function evaluatePdfEvent({eventName,ref,repository,event,enabled}){
@@ -17,7 +17,7 @@ export function evaluatePdfEvent({eventName,ref,repository,event,enabled}){
  if(!modes.has(mode)||!invocations.has(invocation))return deny('invalid_input');
  const rawLimit=String(inputs.limit??'50'),noticeKey=inputs.notice_key??'';
  if(!/^(?:[1-9]|[1-4][0-9]|50)$/.test(rawLimit)||typeof noticeKey!=='string'||noticeKey.length>200||(noticeKey&&(!/^[A-Za-z0-9_.%~-]+--[A-Za-z0-9_.%~-]+$/.test(noticeKey)||noticeKey.includes('..'))))return deny('invalid_input');
- if(invocation==='watchdog'){
+ if(invocation==='watchdog'||invocation==='collection-progress'){
   if(mode!=='queue-only'||rawLimit!=='50'||noticeKey)return deny('invalid_input');
   if(enabled!=='true')return deny('disabled');
  }
