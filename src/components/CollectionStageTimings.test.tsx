@@ -6,6 +6,19 @@ import type { CollectionTimings } from "@/lib/g2b/collection-timings";
 
 afterEach(cleanup);
 
+it("API·저장의 큐 세부 항목과 근사·중첩 안내를 기존 아코디언에 표시합니다", () => {
+  render(<CollectionStageTimings label="큐 시간" running={false} timings={{ outcome: "completed", totals: { saving: 40 },
+    details: { api: { active: [], steps: { "queue.producer-lock.wait": { elapsedMs: 20, count: 1, maxMs: 20, outcomes: { failed: 1 } } } },
+      saving: { active: [], steps: { "queue.worker-lock.hold": { elapsedMs: 100, count: 1, maxMs: 100, outcomes: { completed: 1 } } } } } }} />);
+  expect(screen.getAllByText("세부 작업 시간")).toHaveLength(2);
+  expect(screen.getByText("API 생산자 임대 잠금 대기")).toBeInTheDocument();
+  expect(screen.getByText("상세 큐 임대 잠금 점유")).toBeInTheDocument();
+  expect(screen.getByText("세부 계측만 있음")).toBeInTheDocument();
+  expect(screen.getAllByText(/서로 겹칠 수 있어 합산하지 않습니다/)).toHaveLength(2);
+  expect(screen.getAllByText(/애플리케이션 기준 근사값/)).toHaveLength(2);
+  expect(within(row("결과 저장")).getByText("40ms")).toBeInTheDocument();
+});
+
 it('세부 구간의 집계와 시간 초과·미완료를 펼침 영역에 표시합니다',()=>{
   render(<CollectionStageTimings label="상세 시간" running={false} timings={{outcome:'interrupted',totals:{modals:500},details:{modals:{
     steps:{'modal.wait-settled':{elapsedMs:500,count:2,maxMs:400,outcomes:{timeout:1,interrupted:1}}},active:[],

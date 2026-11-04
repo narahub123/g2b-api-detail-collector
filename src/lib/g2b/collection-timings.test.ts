@@ -2,6 +2,48 @@ import { expect, it } from "vitest";
 import { createCollectionTimings, interruptCollectionTimings } from "./collection-timings";
 import type { CollectionJob } from "./collection-job";
 import type { CollectionNoticeResult } from "./collection-progress";
+import type { CollectionDetailEvent } from "./collection-detail-steps";
+
+it("생산자 단독 세부 계측은 중복 종료 없이 집계하고 열린 API 구간도 마감합니다", () => {
+  const value = job(); let mono = 0;
+  const clock = createCollectionTimings(value, () => mono);
+  clock.transition("api", new Date(0).toISOString());
+  const start: CollectionDetailEvent = { id: "tx", stage: "api", step: "queue.transaction", phase: "start",
+    at: new Date(0).toISOString(), elapsedMs: 0, outcome: "running", context: { operation: "producer.save", transactionId: "tx" } };
+  clock.detail(start);
+  clock.detail({ ...start, id: "wait", step: "queue.worker-lock.wait" });
+  mono = 5; clock.checkpoint(new Date(5).toISOString());
+  const end: CollectionDetailEvent = { ...start, phase: "end", elapsedMs: 8, outcome: "completed" };
+  clock.detail(end); clock.detail(end);
+  mono = 10; clock.finish("failed", new Date(10).toISOString());
+  expect(value.timings?.details?.api).toMatchObject({ active: [], steps: {
+    "queue.transaction": { count: 1, elapsedMs: 8, outcomes: { completed: 1 } },
+    "queue.worker-lock.wait": { count: 1, elapsedMs: 10, outcomes: { incomplete: 1 } },
+  } });
+  expect(value.timings?.totals.api).toBe(10);
+  const frozen = structuredClone(value);
+  mono = 100; clock.detail(start); clock.checkpoint(new Date(100).toISOString());
+  expect(value).toEqual(frozen);
+});
+
+it("저장 세부 구간의 중단은 마지막 저장값만 확정하고 과거 JSONB도 유지합니다", () => {
+  const value = job(); let mono = 0;
+  const result: CollectionNoticeResult = { key: "A--000", status: "pending" }; value.results = [result];
+  const clock = createCollectionTimings(value, () => mono);
+  clock.transition("saving", new Date(0).toISOString(), result);
+  clock.detail({ id: "save", stage: "saving", step: "queue.detail.save", phase: "start", at: new Date(0).toISOString(), elapsedMs: 0, outcome: "running" }, result);
+  mono = 12; clock.checkpoint(new Date(12).toISOString());
+  const saved = JSON.parse(JSON.stringify(value)) as CollectionJob; saved.status = "interrupted";
+  expect(interruptCollectionTimings(saved)).toBe(true);
+  expect(saved.results?.[0].timings?.details?.saving).toMatchObject({ active: [], steps: {
+    "queue.detail.save": { elapsedMs: 12, count: 1, outcomes: { interrupted: 1 } },
+  } });
+  expect(saved.timings?.details).toEqual(saved.results?.[0].timings?.details);
+  expect(interruptCollectionTimings(saved)).toBe(false);
+  const old = job(); old.status = "interrupted"; old.timings = { totals: { api: 7 }, outcome: "running" };
+  expect(interruptCollectionTimings(old)).toBe(true);
+  expect(old.timings).toEqual({ totals: { api: 7 }, outcome: "interrupted", estimated: true });
+});
 
 /** 외부 연결 없이 시간의 귀속을 검증할 작업을 만듭니다. */
 function job(): CollectionJob {

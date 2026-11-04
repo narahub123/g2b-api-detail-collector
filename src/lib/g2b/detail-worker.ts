@@ -72,6 +72,8 @@ async function processDetail(queue: DetailQueue, token: string, run: DetailRun, 
         return "deferred";
       }
       const entry = addDiagnostic(job, { severity: "failure", stage: "detail", operation: "scrape-detail", target: { key: run.notice_key }, error });
+      // 실패 결과를 저장하는 트랜잭션도 실패할 수 있으므로 수집 원본 오류부터 보존합니다.
+      await queue.recordError({ operation: "detail.scrape", stage: "saving", runId: run.id }, error, "detail", true);
       result.status = "failed";
       result.error = redactDiagnostic(entry.error.message);
       job.errors.push(`${run.notice_key}: ${result.error}`);
@@ -122,6 +124,9 @@ async function processDetail(queue: DetailQueue, token: string, run: DetailRun, 
         return snapshot();
       } });
     return "finished";
+  } catch (error) {
+    await queue.recordError({ operation: "detail.process", stage: "saving", runId: run.id }, error, "collection");
+    throw error;
   } finally { await observation.close(); }
 }
 
@@ -131,10 +136,12 @@ export async function consumeDetails(queue: DetailQueue, options: Options = {}):
   const token = randomUUID();
   if (!await queue.acquire(token)) return 0;
   let lost = false;
+  let activeRunId: string | undefined;
+  let failed = false;
   let renewing: Promise<void> | undefined;
   const heartbeat = setInterval(() => {
     if (renewing) return;
-    renewing = queue.renew(token).then(ok => { if (!ok) lost = true; })
+    renewing = queue.renew(token, activeRunId).then(ok => { if (!ok) lost = true; })
       .catch(() => { lost = true; }).finally(() => { renewing = undefined; });
   }, 30_000);
   heartbeat.unref?.();
@@ -148,6 +155,7 @@ export async function consumeDetails(queue: DetailQueue, options: Options = {}):
       assertLease();
       const run = await queue.claim(token, options.signal);
       if (!run) break;
+      activeRunId = run.id;
       if (options.signal?.aborted) { await queue.returnClaim(token, run.id); break; }
       const outcome = await processDetail(queue, token, run, options, assertLease);
       if (outcome !== "finished") break;
@@ -155,9 +163,15 @@ export async function consumeDetails(queue: DetailQueue, options: Options = {}):
       options.onDetailFinished?.();
     }
     return count;
+  } catch (error) {
+    failed = true;
+    await queue.recordError({ operation: "detail.consume", stage: "saving", runId: activeRunId }, error, lost ? "lease" : "collection");
+    throw error;
   } finally {
     clearInterval(heartbeat);
     await renewing;
-    await queue.release(token);
+    // 종료 정리 오류가 이미 전달 중인 원본 수집 오류를 덮어쓰지 않도록 합니다.
+    try { await queue.release(token, activeRunId); }
+    catch (error) { if (!failed) throw error; }
   }
 }
