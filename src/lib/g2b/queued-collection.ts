@@ -41,7 +41,7 @@ export async function createQueuedCollection(queue: DetailQueue, input: Input): 
 async function withProducer<T>(queue: DetailQueue, id: string, token: string,
   work: (db: pg.PoolClient) => Promise<T>): Promise<T> {
   return queue.transaction(async db => {
-    await db.query(`SELECT id FROM ${queue.schema}.detail_collection_producer_lease WHERE id=1 FOR UPDATE`);
+    await queue.measureLock(db, "producer", () => db.query(`SELECT id FROM ${queue.schema}.detail_collection_producer_lease WHERE id=1 FOR UPDATE`));
     /** 자료 저장과 체크포인트 갱신의 앞뒤에서 같은 생산자의 유효성을 확인합니다. */
     const owned = async () => {
       const row = await db.query(`SELECT 1 FROM ${queue.schema}.detail_collection_producer_lease
@@ -53,13 +53,13 @@ async function withProducer<T>(queue: DetailQueue, id: string, token: string,
     const result = await work(db);
     await owned();
     return result;
-  });
+  }, { operation: "producer.mutate", stage: "api", jobId: id });
 }
 
 /** 다른 API 생산자와만 배타적으로 실행하고 상세 소비기의 실행을 막지 않습니다. */
 async function acquireProducer(queue: DetailQueue, id: string, token: string): Promise<ProducerState | null> {
   return queue.transaction(async db => {
-    const lease = (await db.query(`SELECT *,expires_at>clock_timestamp() live FROM ${queue.schema}.detail_collection_producer_lease WHERE id=1 FOR UPDATE`)).rows[0];
+    const lease = (await queue.measureLock(db, "producer", () => db.query(`SELECT *,expires_at>clock_timestamp() live FROM ${queue.schema}.detail_collection_producer_lease WHERE id=1 FOR UPDATE`))).rows[0];
     if (!lease) throw Error("API 생산자 큐 스키마가 준비되지 않았습니다.");
     if (lease.owner_token && lease.live) return null;
     await queue.lockMutation(db);
@@ -85,7 +85,7 @@ async function acquireProducer(queue: DetailQueue, id: string, token: string): P
     await db.query(`UPDATE ${queue.schema}.detail_collection_jobs SET producer_status='running',next_api_attempt_at=NULL,
       producer_state=$2::jsonb WHERE id=$1`, [id, JSON.stringify(state)]);
     return state;
-  });
+  }, { operation: "producer.acquire", stage: "api", jobId: id });
 }
 
 /** API 결과와 진단만 갱신하며 공고별 상세 결과는 덮어쓰지 않습니다. */
@@ -104,9 +104,9 @@ export async function produceQueuedCollection(queue: DetailQueue, id: string, op
   let renewing: Promise<void> | undefined;
   const timer = setInterval(() => {
     if (renewing) return;
-    renewing = queue.pool.query(`UPDATE ${queue.schema}.detail_collection_producer_lease
+    renewing = queue.statement({ operation: "producer.renew", stage: "api", jobId: id }, () => queue.pool.query(`UPDATE ${queue.schema}.detail_collection_producer_lease
       SET expires_at=clock_timestamp()+interval '120 seconds' WHERE id=1 AND job_id=$1 AND owner_token=$2
-      AND expires_at>clock_timestamp() RETURNING id`, [id, token]).then(row => { if (!row.rowCount) lost = true; })
+      AND expires_at>clock_timestamp() RETURNING id`, [id, token])).then(row => { if (!row.rowCount) lost = true; })
       .catch(() => { lost = true; }).finally(() => { renewing = undefined; });
   }, 30_000);
   timer.unref?.();
@@ -199,8 +199,8 @@ export async function produceQueuedCollection(queue: DetailQueue, id: string, op
   } finally {
     clearInterval(timer);
     await renewing;
-    await queue.pool.query(`UPDATE ${queue.schema}.detail_collection_producer_lease SET job_id=NULL,owner_token=NULL,expires_at=NULL
-      WHERE id=1 AND job_id=$1 AND owner_token=$2`, [id, token]);
+    await queue.statement({ operation: "producer.release", stage: "api", jobId: id }, () => queue.pool.query(`UPDATE ${queue.schema}.detail_collection_producer_lease SET job_id=NULL,owner_token=NULL,expires_at=NULL
+      WHERE id=1 AND job_id=$1 AND owner_token=$2`, [id, token]));
   }
 }
 
