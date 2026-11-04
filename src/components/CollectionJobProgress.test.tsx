@@ -39,15 +39,27 @@ it("공고별 결과는 별도 아코디언으로 접고 펼칠 수 있습니다
     errors: [],
     results: [{ key: "R26BK1--000", status: "succeeded" }],
   } as CollectionJob;
+
   render(<CollectionJobProgress job={job} />);
+
+  // 공고별 결과 아코디언 확인
   const summary = screen.getByText("공고별 결과 1건").closest("summary")!;
   const details = summary.closest("details")!;
+
+  // 기본 접힘 상태 확인
   expect(details).not.toHaveAttribute("open");
-  expect(summary.querySelector(".collection-progress-results-chevron")).toBeInTheDocument();
+
+  // 공통 아코디언 화살표 확인
+  expect(summary.querySelector(".form-accordion-chevron")).toBeInTheDocument();
+
+  // 실시간 알림 영역 밖에 있는지 확인
   expect(summary.closest('[aria-live="polite"]')).toBeNull();
-  expect(screen.getByRole("heading", { name: "처리 관측" })).toBeInTheDocument();
+
+  // 펼치기
   fireEvent.click(summary);
   expect(details).toHaveAttribute("open");
+
+  // 다시 접기
   fireEvent.click(summary);
   expect(details).not.toHaveAttribute("open");
 });

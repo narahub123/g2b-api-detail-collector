@@ -117,7 +117,7 @@ function ObservationView({ job }: { job: CollectionJob }) {
   // 첫 서버 렌더와 브라우저 초기 렌더가 동일하도록 마지막 관측 시각을 기준으로 시작합니다.
   const observedNow = Date.parse(job.progress?.lastProgressAt ?? job.startedAt);
   const interrupted = job.status === "interrupted";
-  return <ObservationClock key={job.id} active={active}><FormAccordion title="처리 관측" className="collection-observation">
+  return <ObservationClock key={job.id} active={active}><FormAccordion title="수집 처리 관측" className="collection-observation">
     <p className="collection-observation-status" role="status">상태: {collectionStatuses[job.status]}</p>
     {job.detailQueued !== undefined && <p>상세 수집 대기 {job.detailQueued}건</p>}
     {job.maintenance && <div role="status"><p>{job.maintenance.message}</p><p>점검 확인: {collectionTime(job.maintenance.detectedAt)}</p></div>}

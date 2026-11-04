@@ -149,10 +149,14 @@ it("공용 시계로 현재 구간만 늘리고 완료 응답 후에는 단계 �
   expect(fetcher).toHaveBeenCalledTimes(1);
 });
 
-it("처리 관측은 기본 접힘 상태이며 펼치고 다시 접을 수 있습니다", () => {
-  render(<CollectionJobObservation initial={job({status:"completed",results:[]})} />);
-  const summary=screen.getByText("처리 관측").closest("summary")!;
-  const details=summary.closest("details")!;
+it("수집 처리 관측은 기본 접힘 상태이며 펼치고 다시 접을 수 있습니다", () => {
+  render(
+    <CollectionJobObservation
+      initial={job({ status: "completed", results: [] })}
+    />,
+  );
+  const summary = screen.getByText("수집 처리 관측").closest("summary")!;
+  const details = summary.closest("details")!;
   expect(details).toHaveClass("form-accordion", "collection-observation");
   expect(details).not.toHaveAttribute("open");
   fireEvent.click(summary);
@@ -162,28 +166,35 @@ it("처리 관측은 기본 접힘 상태이며 펼치고 다시 접을 수 있�
   expect(details).not.toHaveAttribute("open");
 });
 
-it("처리 관측을 접어도 내부 공고별 결과와 진행 시간 상태를 유지합니다", () => {
-  vi.useFakeTimers();vi.setSystemTime(new Date(start));
+it("수집 처리 관측을 접어도 내부 공고별 결과와 진행 시간 상태를 유지합니다", () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date(start));
   render(<CollectionJobObservation initial={job()} />);
-  const summary=screen.getByText("처리 관측").closest("summary")!;
-  const details=summary.closest("details")!;
+  const summary = screen.getByText("수집 처리 관측").closest("summary")!;
+  const details = summary.closest("details")!;
   fireEvent.click(summary);
   fireEvent.click(screen.getByText("공고별 결과 2건"));
-  act(()=>vi.advanceTimersByTime(2000));
-  expect(within(screen.getAllByRole("row")[1]).getByText("2.0초")).toBeInTheDocument();
+  act(() => vi.advanceTimersByTime(2000));
+  expect(
+    within(screen.getAllByRole("row")[1]).getByText("2.0초"),
+  ).toBeInTheDocument();
   fireEvent.click(summary);
   expect(details).not.toHaveAttribute("open");
-  act(()=>vi.advanceTimersByTime(1000));
-  expect(within(screen.getAllByRole("row")[1]).getByText("3.0초")).toBeInTheDocument();
+  act(() => vi.advanceTimersByTime(1000));
+  expect(
+    within(screen.getAllByRole("row")[1]).getByText("3.0초"),
+  ).toBeInTheDocument();
   fireEvent.click(summary);
   expect(details).toHaveAttribute("open");
-  expect(screen.getByText("공고별 결과 2건").closest("details")).toHaveAttribute("open");
+  expect(
+    screen.getByText("공고별 결과 2건").closest("details"),
+  ).toHaveAttribute("open");
 });
 
 it("단계별 처리 시간과 공고별 결과를 중첩 FormAccordion으로 표시하고 독립적으로 접고 펼칩니다", () => {
   render(<CollectionJobObservation initial={job({ status: "completed" })} />);
 
-  const outerSummary = screen.getByText("처리 관측").closest("summary")!;
+  const outerSummary = screen.getByText("수집 처리 관측").closest("summary")!;
   const outer = outerSummary.closest("details")!;
 
   const stageSummary = screen.getByText("단계별 처리 시간").closest("summary")!;
