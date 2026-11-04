@@ -10,6 +10,8 @@
     "test": "vitest run",
     "db:migrate": "node --env-file=.env.local scripts/migrate-db.mjs",
     "db:migrate:attachments": "node --env-file-if-exists=.env.local --import tsx scripts/migrate-attachment-urls.ts",
+    "db:migrate:detail-queue": "node --env-file-if-exists=.env.local --import tsx scripts/migrate-detail-queue.ts",
+    "collect:queue:preview": "node --env-file-if-exists=.env.local --import tsx scripts/preview-detail-queue.ts",
     "pdf:extract": "node --env-file-if-exists=.env.local --import tsx scripts/document-batch.ts",
     "pdf:worker": "node --env-file-if-exists=.env.local --import tsx scripts/document-worker.ts",
     "collect:incremental": "node --env-file-if-exists=.env.local --import tsx scripts/collect-incremental.ts"

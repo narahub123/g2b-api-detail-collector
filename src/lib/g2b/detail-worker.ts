@@ -10,7 +10,7 @@ import { structureNoticeDetail } from "./structured-data";
 import { checkPreservedContent, runContentCheck } from "./content-check";
 import { maintenanceFromError } from "./maintenance";
 
-type Options = { scrape?: typeof scrapeDetailPage; fetcher?: typeof fetch; signal?: AbortSignal };
+type Options = { scrape?: typeof scrapeDetailPage; fetcher?: typeof fetch; signal?: AbortSignal; limit?: number };
 
 /** 공고 하나를 수집하며 중간 진행부터 최종 저장까지 같은 실행 소유권을 사용합니다. */
 async function processDetail(queue: DetailQueue, token: string, run: DetailRun, options: Options,
@@ -125,7 +125,7 @@ async function processDetail(queue: DetailQueue, token: string, run: DetailRun, 
 
 /** 임대를 유지하며 준비된 공고를 처리하고 중단 신호 이후에는 새 공고를 선점하지 않습니다. */
 export async function consumeDetails(queue: DetailQueue, options: Options = {}): Promise<number> {
-  if (options.signal?.aborted) return 0;
+  if (options.signal?.aborted || (options.limit ?? Infinity) <= 0) return 0;
   const token = randomUUID();
   if (!await queue.acquire(token)) return 0;
   let lost = false;
@@ -141,7 +141,7 @@ export async function consumeDetails(queue: DetailQueue, options: Options = {}):
   let count = 0;
   try {
     await queue.recover(token);
-    while (!options.signal?.aborted) {
+    while (!options.signal?.aborted && count < (options.limit ?? Infinity)) {
       assertLease();
       const run = await queue.claim(token, options.signal);
       if (!run) break;

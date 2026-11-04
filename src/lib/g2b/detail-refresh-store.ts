@@ -87,7 +87,7 @@ export async function getDetailRefresh(queue: DetailQueue, id: string): Promise<
     phase: apiPending ? "api" : status === "completed" || status === "failed" ? "done" : "detail", range: producer.range ?? null,
     startedAt: job.requested_at.toISOString(),
     finishedAt: ["completed", "failed"].includes(status) && endTimes.length ? new Date(Math.max(...endTimes)).toISOString() : undefined,
-    apiStatus, apiCompletedAt: job.api_completed_at?.toISOString(),
+    apiStatus, apiCompletedAt: job.api_completed_at?.toISOString(), imported: producer.imported === true,
     windowStart: producer.windowStart, windowEnd: producer.windowEnd, activationId: producer.activationId, continuation: producer.continuation,
     cursor: producer.cursor, apiCount: producer.apiCount ?? 0, apiTotal: job.mode && job.mode !== "refresh" ? producer.apiTotal : 0,
     apiProcessed: producer.apiProcessed ?? 0, detailTotal: latest.length, detailQueued: waiting.length,

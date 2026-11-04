@@ -79,11 +79,17 @@ Chrome이 기본 설치 위치에 없으면 `.env.local`에 `G2B_CHROME_PATH=Chr
 
 ## 증분 수집 명령
 
+상세 우선순위 큐의 전환 절차와 승인 범위는 [4단계 운영 절차](DETAIL-QUEUE-STAGE4.md)를 확인하세요. 기본값은 `DETAIL_COLLECTION_QUEUE_ENABLED=false`입니다. 운영 승인 후 0014~0017 스키마와 이관을 준비하고 활성화합니다.
+
+큐 활성화 후 기존 대기만 처리하려면 `npm run collect:incremental -- --queue-only --limit=100 --max-minutes=20`을 사용합니다. 날짜 조회와 `--scheduled`도 같은 소비기를 호출합니다. 건수·시간 제한에 도달하면 다음 선점을 멈추며 미래 재시도와 남은 대기는 DB에 보존합니다. 관리자 작업 이력에서 기존 작업과 큐 작업의 API 상태·상세 대기를 함께 확인할 수 있습니다.
+
+운영 DB를 변경하지 않는 이관 사전 조회는 `npm run collect:queue:preview -- --limit=100`입니다. 저장된 [사전 조회 결과](DETAIL-QUEUE-ROLLOUT-PREVIEW.json)는 과거 시점의 보고이며 적용 직전에 다시 확인해야 합니다.
+
 DB 스키마를 적용한 뒤 `npm run collect:incremental -- --start=2026-10-27T00:00:00Z`로 분 단위 증분 수집을 실행합니다. `--start`는 첫 실행의 UTC 조회 시작 시각이며, 이후에는 마지막으로 정상 완료한 작업의 조회 끝 시각부터 겹쳐 조회합니다. 검증할 때는 `--end=2026-10-27T05:00:00Z`처럼 종료 시각을 고정할 수 있습니다. 한 번에 최대 4시간을 처리하고 `continuation: true`를 출력하면 같은 명령을 다시 실행해 남은 구간을 처리합니다.
 
 `/admin`의 **자동 수집 설정**에서 활성화 여부, 조회 시작 날짜와 시각, 주기 또는 하루 여러 예약 시각을 지정합니다. 화면 시각은 서울 기준입니다. 설정 후 `npm run collect:incremental -- --scheduled`를 호출하면 현재 시각에 예정된 작업 한 건만 선점해 실행합니다. 첫 실행은 활성화 직후가 아니라 다음 예약 시각에 시작합니다. 겹친 예약은 건너뛰고 다음 실행에서 마지막 정상 수집 시각부터 누락 구간을 조회합니다.
 
-GitHub Actions의 [G2B collection](https://github.com/narahub123/g2b-api-detail-collector/actions/workflows/collect.yml) 워크플로는 5분마다 예약을 확인합니다. `DATABASE_URL`과 `G2B_SERVICE_KEY`는 저장소 Secrets에서 전달합니다. 수동 Actions 실행은 `start`와 선택적인 `end`에 UTC ISO 시각을 넣어 실제 API·상세·DB 연결을 검증할 수 있습니다. 검증 전에는 `G2B_SCHEDULE_ENABLED` 저장소 변수를 설정하지 않아 예약 이벤트가 수집을 시작하지 않습니다. 실제 검증 후 이 변수를 `true`로 설정해야 예약 실행이 시작됩니다. 공개 저장소에서 60일간 활동이 없으면 GitHub가 예약 워크플로를 비활성화할 수 있으므로 관리자 화면의 마지막 예약 시각과 Actions 기록을 확인하세요.
+GitHub Actions의 [G2B collection](https://github.com/narahub123/g2b-api-detail-collector/actions/workflows/collect.yml)은 현재 `workflow_dispatch`만 제공하며 예약 트리거는 없습니다. `DATABASE_URL`과 `G2B_SERVICE_KEY`는 저장소 Secrets에서 전달합니다. 수동 실행에서 `start`와 선택적인 `end`로 UTC 조회 구간을 지정하거나 `queue_only`로 기존 대기만 처리할 수 있습니다. 큐 사용에는 승인된 스키마 전환과 저장소 변수 `DETAIL_COLLECTION_QUEUE_ENABLED=true`가 필요합니다. 외부 예약의 생성·활성화는 이번 변경에 포함하지 않습니다.
 
 전체 조회가 실패하면 같은 구간을 즉시 한 번 더 조회합니다. 두 번 모두 실패하거나 실행이 중단되면 다음 실행에서 마지막 정상 완료 구간부터 다시 조회합니다. 상세 실패는 전체 순회 후 한 번, 다음 실행에서 한 번 더 시도하며 공고별 총 세 번 실패하면 자동 시도를 멈춥니다. 관리자 화면에서 선택 재수집은 계속 사용할 수 있습니다.
 

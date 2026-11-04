@@ -16,9 +16,11 @@ export default async function CollectionHistoryPage({ searchParams }: { searchPa
     <p>실패·경고 건수는 구조화된 진단 기록을 기준으로 표시합니다.</p>
     <div className="notice-list">{history.items.map((job) => <article className="notice-card" key={job.id}>
       <h2><a href={`/admin/collections/${job.id}`}>{collectionTime(job.startedAt)}</a></h2>
-      <p>{job.mode === "incremental" ? "자동 증분 수집" : job.mode === "refresh" ? "선택 재수집" : "수동 수집"} · {collectionStatuses[job.status]}</p>
+      <p>{job.imported ? "기존 미처리 보완" : job.mode === "incremental" ? "자동 증분 수집" : job.mode === "refresh" ? "선택 재수집" : "수동 수집"} · {collectionStatuses[job.status]}</p>
+      {job.apiStatus && <p>API {job.apiStatus === "completed" ? "완료" : job.apiStatus === "failed" ? "실패" : job.apiStatus === "running" ? "조회 중" : "대기"}
+        {job.detailQueued !== undefined && <> · 상세 대기 {job.detailQueued}건</>}</p>}
       <dl className="collection-observation-data">
-        <div><dt>{job.status === "interrupted" ? "중단 확인 시각" : "종료"}</dt><dd>{job.finishedAt ? collectionTime(job.finishedAt) : job.status === "running" ? "진행 중" : "기록 없음"}</dd></div>
+        <div><dt>{job.status === "interrupted" ? "중단 확인 시각" : "종료"}</dt><dd>{job.finishedAt ? collectionTime(job.finishedAt) : job.status === "queued" ? "대기 중" : job.status === "running" ? "진행 중" : "기록 없음"}</dd></div>
         <div><dt>{job.status === "interrupted" ? "중단 확인까지" : "소요 시간"}</dt><dd>{collectionDuration(job.startedAt, job.finishedAt, job.status === "running")}</dd></div>
         <div><dt>{job.status === "running" ? "현재 단계" : "마지막 단계"}</dt><dd>{collectionStageLabel(job.progress?.stage)}</dd></div>
         <div><dt>마지막 진행</dt><dd>{collectionTime(job.progress?.lastProgressAt)}</dd></div>

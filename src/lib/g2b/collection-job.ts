@@ -31,6 +31,7 @@ export type CollectionJob = DiagnosticState & {
   detailQueued?: number;
   apiStatus?: "queued" | "running" | "completed" | "failed" | "deferred";
   apiCompletedAt?: string;
+  imported?: boolean;
   maintenance?: MaintenanceInfo;
   phase: "api" | "detail" | "done";
   range: PostedDateRange | null;

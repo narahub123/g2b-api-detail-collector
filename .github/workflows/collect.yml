@@ -11,6 +11,11 @@ on:
         description: "검증용 조회 종료 시각 (UTC ISO, 선택)"
         required: false
         type: string
+      queue_only:
+        description: "새 API 구간 없이 기존 상세 대기만 처리"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -28,6 +33,7 @@ jobs:
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       G2B_SERVICE_KEY: ${{ secrets.G2B_SERVICE_KEY }}
+      DETAIL_COLLECTION_QUEUE_ENABLED: ${{ vars.DETAIL_COLLECTION_QUEUE_ENABLED || 'false' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -48,11 +54,21 @@ jobs:
         env:
           MANUAL_START: ${{ inputs.start }}
           MANUAL_END: ${{ inputs.end }}
+          QUEUE_ONLY: ${{ inputs.queue_only }}
         run: |
-          if [[ -n "$MANUAL_START" ]]; then
+          limits=()
+          if [[ "$DETAIL_COLLECTION_QUEUE_ENABLED" == 'true' ]]; then
+            limits=("--limit=1000" "--max-minutes=300")
+          fi
+          if [[ "$QUEUE_ONLY" == 'true' ]]; then
+            if [[ -n "$MANUAL_START" || -n "$MANUAL_END" ]]; then
+              echo 'queue_only and a date range cannot be combined'; exit 1
+            fi
+            npm run collect:incremental -- --queue-only "${limits[@]}"
+          elif [[ -n "$MANUAL_START" ]]; then
             args=("--start=$MANUAL_START")
             if [[ -n "$MANUAL_END" ]]; then args+=("--end=$MANUAL_END"); fi
-            npm run collect:incremental -- "${args[@]}"
+            npm run collect:incremental -- "${args[@]}" "${limits[@]}"
           else
-            npm run collect:incremental -- --scheduled
+            npm run collect:incremental -- --scheduled "${limits[@]}"
           fi

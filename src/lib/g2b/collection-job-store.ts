@@ -4,6 +4,7 @@ import { getPool } from "./postgres-store";
 import type { CollectionJob } from "./collection-job";
 import { diagnosticCounts, redactDiagnostic } from "./collection-diagnostics";
 import { interruptCollectionTimings } from "./collection-timings";
+import { DetailQueue } from "./detail-queue";
 
 const leaseDuration = "2 minutes";
 
@@ -104,23 +105,37 @@ export async function getLatestDbJob(): Promise<CollectionJob | null> {
   return result.rows[0] ? getDbJob(result.rows[0].id) : null;
 }
 
-export type CollectionJobSummary = Pick<CollectionJob, "id" | "mode" | "phase" | "progress" | "status" | "startedAt" | "finishedAt" | "range" | "windowStart" | "windowEnd" | "detailSucceeded" | "detailFailed" | "maintenance"> & {
+export type CollectionJobSummary = Pick<CollectionJob, "id" | "mode" | "phase" | "progress" | "status" | "startedAt" | "finishedAt" | "range" | "windowStart" | "windowEnd" | "detailSucceeded" | "detailFailed" | "maintenance" | "detailQueued" | "apiStatus" | "apiCompletedAt" | "imported"> & {
   failureCount: number; warningCount: number; retryCount: number; legacyErrorCount: number; overflowCount: number;
 };
+
+/** 상세 진단을 응답에 포함하지 않고 공통 이력 카드에 필요한 요약만 만듭니다. */
+function summarizeJob(state: CollectionJob): CollectionJobSummary {
+  const counts = diagnosticCounts(state);
+  return { id: state.id, mode: state.mode, phase: state.phase, progress: state.progress, status: state.status, startedAt: state.startedAt,
+    finishedAt: state.finishedAt, range: state.range, windowStart: state.windowStart, windowEnd: state.windowEnd,
+    detailSucceeded: state.detailSucceeded, detailFailed: state.detailFailed, maintenance: state.maintenance,
+    detailQueued: state.detailQueued, apiStatus: state.apiStatus, apiCompletedAt: state.apiCompletedAt, imported: state.imported,
+    failureCount: counts.failure, warningCount: counts.warning, retryCount: counts.retry,
+    legacyErrorCount: state.diagnostics ? 0 : state.errors.length,
+    overflowCount: state.diagnostics?.overflowCount || 0 };
+}
 
 /** 최신 작업을 페이지 단위로 읽고 진단 상세를 제외한 요약만 반환합니다. */
 export async function listDbJobs(page: number): Promise<{ items: CollectionJobSummary[]; hasNext: boolean }> {
   const safePage = Number.isSafeInteger(page) && page > 0 ? Math.min(page, 1000) : 1;
+  if (process.env.DETAIL_COLLECTION_QUEUE_ENABLED === "true") {
+    const schema = process.env.G2B_DB_SCHEMA || "public";
+    const queue = new DetailQueue(getPool(), schema);
+    const rows = await getPool().query<{ id: string; kind: string }>(`SELECT id,started_at,kind FROM (
+      SELECT id,started_at,'legacy' kind FROM ${table("collection_jobs")}
+      UNION ALL SELECT id,requested_at started_at,'queue' kind FROM ${schema}.detail_collection_jobs
+      ) jobs ORDER BY started_at DESC,id DESC LIMIT $1 OFFSET $2`, [21, (safePage - 1) * 20]);
+    const jobs = await Promise.all(rows.rows.slice(0, 20).map(row => row.kind === "queue" ? queue.getRefreshJob(row.id) : getDbJob(row.id)));
+    return { items: jobs.filter((job): job is CollectionJob => !!job).map(summarizeJob), hasNext: rows.rows.length > 20 };
+  }
   const rows = await getPool().query<{ state: CollectionJob }>(
     `SELECT state FROM ${table("collection_jobs")} ORDER BY started_at DESC,id DESC LIMIT $1 OFFSET $2`,
     [21, (safePage - 1) * 20]);
-  return { items: rows.rows.slice(0, 20).map(({ state }) => {
-    const counts = diagnosticCounts(state);
-    return { id: state.id, mode: state.mode, phase: state.phase, progress: state.progress, status: state.status, startedAt: state.startedAt,
-      finishedAt: state.finishedAt, range: state.range, windowStart: state.windowStart, windowEnd: state.windowEnd,
-      detailSucceeded: state.detailSucceeded, detailFailed: state.detailFailed, maintenance: state.maintenance,
-      failureCount: counts.failure, warningCount: counts.warning, retryCount: counts.retry,
-      legacyErrorCount: state.diagnostics ? 0 : state.errors.length,
-      overflowCount: state.diagnostics?.overflowCount || 0 };
-  }), hasNext: rows.rows.length > 20 };
+  return { items: rows.rows.slice(0, 20).map(({ state }) => summarizeJob(state)), hasNext: rows.rows.length > 20 };
 }
