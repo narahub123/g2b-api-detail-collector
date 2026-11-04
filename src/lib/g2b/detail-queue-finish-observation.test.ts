@@ -10,7 +10,7 @@ vi.mock("./postgres-store", () => ({ saveStoredNoticeInTransaction: vi.fn(), sav
 vi.mock("../documents/registration", () => ({ registerNoticeDocumentsInTransaction: vi.fn() }));
 vi.mock("./collection-targets", () => ({ expandCollectionRelations: vi.fn(), finishCollectionAttempt: vi.fn() }));
 
-it("최종 상세·관계·PDF 저장과 COMMIT을 구분하고 기존 SQL 뒤에 진단 쓰기를 추가하지 않습니다", async () => {
+it("최종 상세·관계·PDF 저장과 COMMIT을 구분하고 종료 후 진단은 한 번만 저장합니다", async () => {
   let time = 0;
   const operations: string[] = [], observations: QueueObservation[] = [];
   const query = vi.fn(async (sql: string) => {
@@ -21,7 +21,8 @@ it("최종 상세·관계·PDF 저장과 COMMIT을 구분하고 기존 SQL 뒤�
     return { rowCount: 1, rows: [row] };
   });
   const db = { query, release: vi.fn() };
-  const queue = new DetailQueue({ connect: async () => db } as unknown as pg.Pool, "public", {
+  const saveObservation = vi.fn(async () => { operations.push("observation"); return { rowCount: 1, rows: [{ found: true }] }; });
+  const queue = new DetailQueue({ connect: async () => db, query: saveObservation } as unknown as pg.Pool, "public", {
     collectionMode: true, monotonic: () => time, onObservation: value => { observations.push(value); },
   });
   vi.mocked(saveStoredNoticeInTransaction).mockImplementation(async () => { time += 7; operations.push("detail"); });
@@ -44,7 +45,8 @@ it("최종 상세·관계·PDF 저장과 COMMIT을 구분하고 기존 SQL 뒤�
   });
   expect(operations.filter(value => ["detail", "relation", "expand", "pdf", "snapshot", "attempt", "COMMIT"].includes(value)))
     .toEqual(["detail", "relation", "expand", "pdf", "snapshot", "attempt", "COMMIT"]);
-  expect(operations.at(-1)).toBe("COMMIT");
+  expect(operations.slice(-2)).toEqual(["COMMIT", "observation"]);
+  expect(saveObservation).toHaveBeenCalledOnce();
   expect(query).toHaveBeenCalledTimes(10);
   expect(observations[0].context).toMatchObject({ runId: "run", operation: "detail.finish" });
 });

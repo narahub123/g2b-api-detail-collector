@@ -10,7 +10,8 @@ function fixture(handler: (sql: string) => void = () => {}) {
   const observations: QueueObservation[] = [];
   const query = vi.fn(async (sql: string) => { time += 2; handler(sql); return { rows: [{}], rowCount: 1 }; });
   const release = vi.fn(() => { time += 100; });
-  const pool = { connect: async () => ({ query, release }), query } as unknown as pg.Pool;
+  const pool = { connect: async () => ({ query, release }), query: async (sql: string | pg.QueryConfig) =>
+    typeof sql === "string" ? query(sql) : { rowCount: 1, rows: [{ found: true }] } } as unknown as pg.Pool;
   const queue = new DetailQueue(pool, "public", { monotonic: () => time,
     onObservation: value => { observations.push(structuredClone(value)); time += 1000; } });
   return { queue, observations, query, release, advance: (ms: number) => { time += ms; } };
@@ -40,7 +41,7 @@ it("동일 임대 SQL은 유지하면서 첫 대기·점유만 집계하고 COMM
 it("55P03와 롤백 오류를 별도로 보존하며 최초 예외를 그대로 전달합니다", async () => {
   const original = Object.assign(Error("lock timeout"), { code: "55P03", where: "while locking tuple", cause: Error("origin") });
   const rollback = Error("rollback failed");
-  const { queue, observations } = fixture(sql => {
+  const { queue, observations, release } = fixture(sql => {
     if (sql.includes("FOR UPDATE")) throw original;
     if (sql === "ROLLBACK") throw rollback;
   });
@@ -50,6 +51,7 @@ it("55P03와 롤백 오류를 별도로 보존하며 최초 예외를 그대로 
     "queue.worker-lock.wait": { elapsedMs: 2, outcomes: { failed: 1 } },
   });
   expect(observations[0].timings.details?.api?.steps["queue.worker-lock.hold"]).toBeUndefined();
+  expect(release).toHaveBeenCalledWith(true);
   expect(observations[0].diagnostics?.events.map(entry => entry.diagnostic)).toEqual([
     expect.objectContaining({ code: "55P03", message: "lock timeout", stack: expect.any(String), cause: expect.objectContaining({ message: "origin" }) }),
     expect.objectContaining({ message: "rollback failed" }),

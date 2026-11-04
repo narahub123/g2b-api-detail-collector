@@ -14,6 +14,9 @@ import { DocumentQueue } from "../documents/queue";
 import { registerNoticeDocumentsInTransaction } from "../documents/registration";
 import { QueueMeasurement, type QueueObservationContext, type QueueObservationOptions, type QueueLock } from "./queue-observation";
 import type { CollectionDetailStep } from "./collection-detail-steps";
+import { saveQueueObservation, logQueueObservationFailure, queueSnapshotUpdate } from "./queue-observation-store";
+import type { QueueObservation } from "./queue-observation";
+import { addDiagnostic, type DiagnosticStage } from "./collection-diagnostics";
 
 export type DetailRequest = {
   key: string;
@@ -45,6 +48,7 @@ function parts(key: string) {
 /** 요청 접수와 공고 실행을 분리하고 짧은 저장 트랜잭션에서만 임대 행을 잠급니다. */
 export class DetailQueue {
   private readonly measurements = new WeakMap<pg.PoolClient, QueueMeasurement>();
+  private readonly observedErrors = new WeakMap<object, "transaction" | "diagnostic">();
   /** 연결 풀과 검사된 스키마를 사용하며 기존 수집 경로는 변경하지 않습니다. */
   constructor(readonly pool: pg.Pool, readonly schema = process.env.G2B_DB_SCHEMA || "public",
     private readonly options: { legacyCollectionLock?: boolean; collectionMode?: boolean } & QueueObservationOptions = {}) {
@@ -60,38 +64,77 @@ export class DetailQueue {
    */
   async transaction<T>(work: (db: pg.PoolClient) => Promise<T>,
     context: QueueObservationContext = { operation: "queue.transaction", stage: "saving" }): Promise<T> {
-    const db = await this.pool.connect();
+    let db: pg.PoolClient;
+    try { db = await this.pool.connect(); }
+    catch (error) { await this.recordError(context, error); this.rememberError(error); throw error; }
     const measurement = new QueueMeasurement(context, this.options.monotonic);
     this.measurements.set(db, measurement);
     let success = false;
+    let discardConnection = false;
     const errors: { error: unknown; operation: string }[] = [];
     try {
       await db.query("BEGIN");
       await db.query("SET LOCAL lock_timeout='5s'");
       await db.query("SET LOCAL statement_timeout='15s'");
       const result = await work(db);
-      await db.query("COMMIT");
-      success = true;
+      const committed = await db.query("COMMIT");
+      // 내부에서 처리한 SQL 오류로 COMMIT이 ROLLBACK을 반환해도 계측은 성공으로 표시하지 않습니다.
+      success = committed.command !== "ROLLBACK";
       return result;
     } catch (error) {
       errors.push({ error, operation: context.operation });
-      await db.query("ROLLBACK").catch(error => { errors.push({ error, operation: "queue.rollback" }); });
+      await db.query("ROLLBACK").catch(error => {
+        discardConnection = true;
+        errors.push({ error, operation: "queue.rollback" });
+      });
       throw error;
     } finally {
       const observation = measurement.finish(success);
       this.measurements.delete(db);
-      try { db.release(); }
+      // 롤백 완료를 확인하지 못한 연결은 진단 저장이나 다음 업무에 재사용하지 않습니다.
+      try { if (discardConnection) db.release(true); else db.release(); }
       catch (error) {
         // 연결 정리 실패로 이미 커밋된 작업의 재시도를 유발하지 않도록 분리합니다.
         errors.push({ error, operation: "queue.release-connection" });
       } finally {
-        for (const entry of errors) measurement.error(entry.error, entry.operation);
+        for (const entry of errors) {
+          this.rememberError(entry.error);
+          measurement.error(entry.error, entry.operation);
+        }
         observation.diagnostics = measurement.diagnostics;
         // 저장 콜백은 측정 종료 후 호출하며 실패해도 업무 반환값과 예외를 바꾸지 않습니다.
-        try { await this.options.onObservation?.(observation); }
-        catch { /* 관측 저장 오류 보고는 별도 진단 저장 경로에서 담당합니다. */ }
+        await this.publishObservation(observation);
       }
     }
+  }
+
+  /** 종료 관측은 업무 연결을 반환한 뒤 한 번만 저장하고 저장 실패는 로그로 분리합니다. */
+  private async publishObservation(observation: QueueObservation): Promise<void> {
+    try { await saveQueueObservation(this.pool, this.schema, observation); }
+    catch (error) { logQueueObservationFailure(observation, error); }
+    try { await this.options.onObservation?.(observation); }
+    catch (error) { logQueueObservationFailure(observation, error); }
+  }
+
+  /** 트랜잭션 시작 전 또는 내부에서 처리한 오류도 원본 객체로 진단합니다.
+   * @remarks 가상의 트랜잭션 소요 시간을 만들지 않고 오류 진단만 저장합니다.
+   * @param newOccurrence 동일 객체를 다시 던지는 API 재시도도 별개의 발생으로 보존합니다.
+   */
+  async recordError(context: QueueObservationContext, error: unknown, stage: DiagnosticStage = "database", newOccurrence = false): Promise<void> {
+    if (error !== null && (typeof error === "object" || typeof error === "function")) {
+      const previous = this.observedErrors.get(error);
+      if (previous && (!newOccurrence || previous === "transaction")) return;
+      this.observedErrors.set(error, "diagnostic");
+    }
+    const observation: QueueObservation = { context: { ...context, transactionId: randomUUID() },
+      timings: { totals: {}, outcome: "failed" } };
+    addDiagnostic(observation, { severity: "failure", stage, operation: context.operation, error });
+    await this.publishObservation(observation);
+  }
+
+  /** 같은 오류 객체가 상위 처리로 전파되어도 진단 저장을 중복 실행하지 않습니다. */
+  private rememberError(error: unknown): void {
+    if (error !== null && (typeof error === "object" || typeof error === "function")) this.observedErrors.set(error, "transaction");
   }
 
   /** 같은 연결의 내부 작업만 측정하고 별도의 DB 쓰기는 만들지 않습니다. */
@@ -118,10 +161,9 @@ export class DetailQueue {
     catch (error) { original = error; throw error; }
     finally {
       const observation = measurement.finish(success);
-      if (!success) measurement.error(original);
+      if (!success) { this.rememberError(original); measurement.error(original); }
       observation.diagnostics = measurement.diagnostics;
-      try { await this.options.onObservation?.(observation); }
-      catch { /* 관측 콜백은 업무 실행 결과와 분리합니다. */ }
+      await this.publishObservation(observation);
     }
   }
 
@@ -177,24 +219,29 @@ export class DetailQueue {
     return !!row.rowCount;
   }
 
-  /** 만료된 소비기가 새 소유권을 갱신할 수 없도록 제한합니다. */
-  async renew(token: string): Promise<boolean> {
+  /** 만료된 소비기가 새 소유권을 갱신할 수 없도록 제한합니다.
+   * @param runId 진단 귀속에만 사용하며 임대 소유권 검사에는 사용하지 않습니다.
+   */
+  async renew(token: string, runId?: string): Promise<boolean> {
     if (this.options.legacyCollectionLock) return this.transaction(async db => {
       await this.lockLease(db);
-      try { await this.owned(db, token); } catch { return false; }
+      try { await this.owned(db, token); }
+      catch (error) { this.measurements.get(db)?.error(error, "detail.renew-ownership"); return false; }
       await db.query(`UPDATE ${this.schema}.detail_collection_worker_lease
         SET expires_at=clock_timestamp()+interval '120 seconds' WHERE id=1`, []);
       await db.query(`UPDATE ${this.schema}.collection_lock SET expires_at=clock_timestamp()+interval '120 seconds' WHERE id=1`);
       return true;
-    }, { operation: 'detail.renew', stage: 'saving' });
-    const row = await this.statement({ operation: 'detail.renew', stage: 'saving' }, () => this.pool.query(`UPDATE ${this.schema}.detail_collection_worker_lease
+    }, { operation: 'detail.renew', stage: 'saving', runId });
+    const row = await this.statement({ operation: 'detail.renew', stage: 'saving', runId }, () => this.pool.query(`UPDATE ${this.schema}.detail_collection_worker_lease
       SET expires_at=clock_timestamp()+interval '120 seconds'
       WHERE id=1 AND owner_token=$1 AND expires_at>clock_timestamp() RETURNING id`, [token]));
     return !!row.rowCount;
   }
 
-  /** 자신의 소비기 임대만 반환하며 새 소유자의 임대는 보존합니다. */
-  async release(token: string): Promise<void> {
+  /** 자신의 소비기 임대만 반환하며 새 소유자의 임대는 보존합니다.
+   * @param runId 진단 귀속에만 사용하며 임대 반환 조건에는 사용하지 않습니다.
+   */
+  async release(token: string, runId?: string): Promise<void> {
     if (this.options.legacyCollectionLock) {
       await this.transaction(async db => {
         await this.lockLease(db);
@@ -202,10 +249,10 @@ export class DetailQueue {
           WHERE id=1 AND owner_token=$1`, [token]);
         await db.query(`UPDATE ${this.schema}.collection_lock SET job_id=NULL,token=NULL,expires_at=NULL
           WHERE id=1 AND job_id=$1 AND token=$1`, [token]);
-      }, { operation: 'detail.release', stage: 'saving' });
+      }, { operation: 'detail.release', stage: 'saving', runId });
       return;
     }
-    await this.statement({ operation: 'detail.release', stage: 'saving' }, () => this.pool.query(`UPDATE ${this.schema}.detail_collection_worker_lease SET owner_token=NULL,expires_at=NULL
+    await this.statement({ operation: 'detail.release', stage: 'saving', runId }, () => this.pool.query(`UPDATE ${this.schema}.detail_collection_worker_lease SET owner_token=NULL,expires_at=NULL
       WHERE id=1 AND owner_token=$1`, [token]));
   }
 
@@ -252,6 +299,8 @@ export class DetailQueue {
         ORDER BY CASE WHEN source='manual' THEN 0 WHEN purpose='initial' THEN 1 ELSE 2 END,requested_at,id
         LIMIT 1 FOR UPDATE`)).rows[0];
       if (!run) return null;
+      const measurement = this.measurements.get(db);
+      if (measurement) measurement.context.runId = run.id;
       await db.query(`SELECT key FROM ${this.schema}.notices WHERE key=$1 FOR UPDATE`, [run.notice_key]);
       const claimed = (await db.query<DetailRun>(`UPDATE ${this.schema}.detail_collection_runs
         SET status='processing',owner_token=$2,started_at=clock_timestamp(),next_attempt_at=NULL
@@ -292,7 +341,7 @@ export class DetailQueue {
   /** 관측 중간 상태에도 공고 실행 소유권을 적용합니다. */
   async progress(token: string, id: string, progress: Record<string, unknown>): Promise<void> {
     await this.withRun(token, id, async db => {
-      await db.query(`UPDATE ${this.schema}.detail_collection_runs SET progress=$2::jsonb WHERE id=$1`,
+      await db.query(`UPDATE ${this.schema}.detail_collection_runs SET progress=${queueSnapshotUpdate("progress", "$2")} WHERE id=$1`,
         [id, JSON.stringify(progress)]);
     }, { operation: 'detail.progress', stage: 'saving', runId: id });
   }
@@ -348,7 +397,7 @@ export class DetailQueue {
       // 실제 자료 저장까지의 시간을 관측에 포함하고 같은 커밋으로 종료 상태와 확정합니다.
       const snapshot = typeof result.snapshot === "function" ? result.snapshot(preserved) : result.snapshot;
       await db.query(`UPDATE ${this.schema}.detail_collection_runs SET status=$2,owner_token=NULL,
-        finished_at=clock_timestamp(),error=$3,diagnostic=$4::jsonb,progress=COALESCE($5::jsonb,progress) WHERE id=$1`, [id, result.status,
+        finished_at=clock_timestamp(),error=$3,diagnostic=$4::jsonb,progress=${queueSnapshotUpdate("progress", "$5")} WHERE id=$1`, [id, result.status,
         result.status === "failed" ? redactDiagnostic(result.error) : null,
         result.status === "failed" && result.diagnostic ? JSON.stringify(serializeError(result.diagnostic)) : null,
         snapshot ? JSON.stringify(snapshot) : null]);
@@ -362,7 +411,7 @@ export class DetailQueue {
   async defer(token: string, id: string, snapshot: DetailSnapshot): Promise<void> {
     await this.withRun(token, id, async db => {
       await db.query(`UPDATE ${this.schema}.detail_collection_runs SET status='queued',owner_token=NULL,
-        started_at=NULL,next_attempt_at=clock_timestamp()+interval '60 seconds',progress=$2::jsonb WHERE id=$1`,
+        started_at=NULL,next_attempt_at=clock_timestamp()+interval '60 seconds',progress=${queueSnapshotUpdate("progress", "$2")} WHERE id=$1`,
       [id, JSON.stringify(snapshot)]);
     }, { operation: 'detail.defer', stage: 'saving', runId: id });
   }
@@ -371,7 +420,7 @@ export class DetailQueue {
   async returnClaim(token: string, id: string): Promise<void> {
     await this.withRun(token, id, async db => {
       await db.query(`UPDATE ${this.schema}.detail_collection_runs SET status='queued',owner_token=NULL,
-        started_at=NULL,progress='{}'::jsonb WHERE id=$1`, [id]);
+        started_at=NULL,progress=${queueSnapshotUpdate("progress", "empty")} WHERE id=$1`, [id]);
     }, { operation: 'detail.returnClaim', stage: 'saving', runId: id });
   }
 
@@ -393,7 +442,7 @@ export class DetailQueue {
       await this.lockLease(db);
       await this.owned(db, token);
       const rows = await db.query(`UPDATE ${this.schema}.detail_collection_runs
-        SET status='queued',owner_token=NULL,started_at=NULL,progress='{}'::jsonb
+        SET status='queued',owner_token=NULL,started_at=NULL,progress=${queueSnapshotUpdate("progress", "empty")}
         WHERE status='processing' AND owner_token<>$1`, [token]);
       await this.owned(db, token);
       return rows.rowCount ?? 0;

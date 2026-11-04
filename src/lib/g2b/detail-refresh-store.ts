@@ -4,8 +4,9 @@ import type { CollectionJob } from "./collection-job";
 import type { CollectionNoticeResult } from "./collection-progress";
 import type { DiagnosticState } from "./collection-diagnostics";
 import type { MaintenanceInfo } from "./maintenance";
+import type { QueueObservationState } from "./queue-observation-store";
 
-export type DetailSnapshot = {
+export type DetailSnapshot = QueueObservationState & {
   result?: CollectionNoticeResult;
   errors?: string[];
   diagnostics?: DiagnosticState["diagnostics"];
@@ -28,7 +29,7 @@ export async function submitDetailRefresh(queue: DetailQueue, keys: string[]): P
       if (!notice) throw Error(`저장된 공고를 찾을 수 없습니다: ${key}`);
       await queue.enqueueInTransaction(db, { key, jobId: id, source: "manual", purpose: notice.detail ? "reextract" : "initial" });
     }
-  });
+  }, { operation: "detail.submit-refresh", stage: "saving", jobId: id });
   return (await getDetailRefresh(queue, id))!;
 }
 

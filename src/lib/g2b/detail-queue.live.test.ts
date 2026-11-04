@@ -145,7 +145,7 @@ describe.skipIf(!enabled)("상세 큐 저장 경계", { timeout: 60_000 }, () =>
     await queue.claim(token);
     await queue.progress(token, run.id, { stage: "opening" });
     expect((await pool.query(`SELECT progress FROM ${schema}.detail_collection_runs WHERE id=$1`, [run.id])).rows[0].progress)
-      .toEqual({ stage: "opening" });
+      .toMatchObject({ stage: "opening", queueObservations: expect.any(Object) });
     await expect(queue.saveRelations(token, run.id, ["R26BK10000002--000", "잘못된 키"])).rejects.toThrow();
     expect((await pool.query(`SELECT * FROM ${schema}.notice_relations`)).rowCount).toBe(0);
     await queue.saveRelations(token, run.id, ["R26BK10000002--000"]);
