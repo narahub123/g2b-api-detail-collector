@@ -11,6 +11,8 @@ export type CollectionTimings = {
   active?: { stage: CollectionStage; startedAt: string; lastObservedAt: string; elapsedMs: number };
   outcome: CollectionTimingOutcome;
   estimated?: boolean;
+  /** 병행 실행을 포함한 저장 작업량 집계이며 전체 경과 시간은 아닙니다. */
+  aggregated?: boolean;
   details?: CollectionDetailTimings;
 };
 type Target = { timings?: CollectionTimings };

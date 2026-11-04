@@ -54,11 +54,20 @@ export function addDiagnostic(state: DiagnosticState, input: Input): DiagnosticE
     target: input.target ? { key: input.target.key && redactDiagnostic(input.target.key),
       date: input.target.date && redactDiagnostic(input.target.date), pageNo: input.target.pageNo } : undefined,
     diagnostic, error: describe(diagnostic) };
+  return appendDiagnosticEntry(state, entry);
+}
+
+/** 이미 정제된 저장 진단을 원래 발생 시각과 한도를 유지하며 기존 집계에 연결합니다. */
+export function appendDiagnosticEntry(state: DiagnosticState, entry: DiagnosticEntry): DiagnosticEntry {
   const diagnostics = state.diagnostics ??= { events: [], overflowCount: 0, types: {} };
   const normalized = entry.error.message.replace(/\b\d+\b/g, "#").replace(/\s+/g, " ").trim();
   const fingerprint = JSON.stringify([entry.severity, entry.stage, entry.operation, entry.error.code || "", normalized]);
   const type = diagnostics.types[fingerprint];
-  if (type) { type.count++; type.lastAt = entry.at; }
+  if (type) {
+    type.count++;
+    type.firstAt = type.firstAt < entry.at ? type.firstAt : entry.at;
+    type.lastAt = type.lastAt > entry.at ? type.lastAt : entry.at;
+  }
   else diagnostics.types[fingerprint] = { count: 1, firstAt: entry.at, lastAt: entry.at, representative: entry };
   if (diagnostics.events.length < EVENT_LIMIT) diagnostics.events.push(entry);
   else diagnostics.overflowCount++;

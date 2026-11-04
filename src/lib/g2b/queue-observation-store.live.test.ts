@@ -7,6 +7,7 @@ import { QueueMeasurement, type QueueObservation } from "./queue-observation";
 import { saveQueueObservation, queueSnapshotUpdate } from "./queue-observation-store";
 import { createQueuedCollection, produceQueuedCollection } from "./queued-collection";
 import { consumeDetails } from "./detail-worker";
+import { diagnosticCounts } from "./collection-diagnostics";
 
 // 별도 명시한 로컬 테스트 DB만 사용하여 운영 접속 문자열을 읽지 않습니다.
 const url = process.env.QUEUE_OBSERVATION_TEST_DATABASE_URL;
@@ -153,6 +154,40 @@ describe.skipIf(!enabled)("종료 관측 JSONB 보존", { timeout: 30_000 }, () 
       expect(events.some(entry => entry.error.message === "scrape original failure")).toBe(true);
       expect(events.filter(entry => entry.error.code === "55P03")).toHaveLength(1);
     } finally { finish.mockRestore(); }
+  });
+
+  it("API 생산자와 상세 소비기의 실제 경합에서 55P03와 종료 계측을 조회로 전달합니다", async () => {
+    const id = await job(), token = randomUUID(), key = "R26BK10000005--000";
+    const run = await queue.enqueue({ key, jobId: id, source: "manual", purpose: "initial" });
+    await queue.saveApi(key, { bidNtceNo: "R26BK10000005", bidNtceOrd: "000" });
+    expect(await queue.acquire(token)).toBe(true);
+    expect((await queue.claim(token))?.id).toBe(run.id);
+    const request = await createQueuedCollection(queue, { mode: "collection", start: "2026-11-01T00:00:00Z", end: "2026-11-01T00:01:00Z" });
+    let held!: () => void;
+    const acquired = new Promise<void>(resolve => { held = resolve; });
+    // 동일한 소비기 저장 경로에서 임대 잠금을 점유한 상태로 생산자를 실행합니다.
+    const consumer = queue.withRun(token, run.id, async db => { held(); await db.query("SELECT pg_sleep(6)"); });
+    const fetcher = vi.fn<typeof fetch>();
+    try {
+      await acquired;
+      await expect(produceQueuedCollection(queue, request.id, { fetcher })).rejects.toMatchObject({ code: "55P03" });
+      expect(fetcher).not.toHaveBeenCalled();
+    } finally { await consumer; }
+    const api = await queue.getRefreshJob(request.id);
+    expect(api?.status).toBe("queued"); expect(api?.apiCount).toBe(0);
+    expect(diagnosticCounts(api!).failure).toBe(1);
+    expect(api?.diagnostics?.events[0].diagnostic).toMatchObject({ code: "55P03", where: expect.stringContaining("detail_collection_worker_lease") });
+    const wait = api?.timings?.details?.api?.steps["queue.worker-lock.wait"];
+    expect(wait?.outcomes).toEqual({ failed: 1 }); expect(wait!.elapsedMs).toBeGreaterThanOrEqual(4900);
+    expect(api?.timings?.totals.api).toBeUndefined();
+    await queue.finish(token, run.id, { status: "succeeded", detail: {
+      text: "collected", sourceUrl: "https://example.com/notice", attachments: [], links: [],
+    }, snapshot: { result: { key, status: "succeeded" } } });
+    const detail = await queue.getRefreshJob(id);
+    expect(detail?.detailSucceeded).toBe(1);
+    expect(detail?.results?.[0].timings?.details?.saving?.steps["queue.transaction"]?.count).toBeGreaterThanOrEqual(1);
+    expect(detail?.timings?.details?.saving?.steps["queue.worker-lock.hold"]!.maxMs).toBeGreaterThanOrEqual(5900);
+    await queue.release(token, run.id);
   });
 
   it("진단 전용 제한시간이 업무 연결에 남지 않고 API 생산자 반복 저장도 이전 관측을 보존합니다", async () => {

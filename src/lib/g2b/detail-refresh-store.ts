@@ -5,6 +5,8 @@ import type { CollectionNoticeResult } from "./collection-progress";
 import type { DiagnosticState } from "./collection-diagnostics";
 import type { MaintenanceInfo } from "./maintenance";
 import type { QueueObservationState } from "./queue-observation-store";
+import { getQueueObservations, mergeQueueTimings, aggregateCollectionTimings, mergeQueueDiagnostics } from "./queue-observation-view";
+import type { CollectionTimings } from "./collection-timings";
 
 export type DetailSnapshot = QueueObservationState & {
   result?: CollectionNoticeResult;
@@ -73,14 +75,28 @@ export async function getDetailRefresh(queue: DetailQueue, id: string): Promise<
   const active = latest.filter(row => row.status === "processing" && row.live);
   const waiting = latest.filter(row => row.status === "queued" || (row.status === "processing" && !row.live));
   const done = latest.filter(row => row.status === "succeeded" || row.status === "failed");
-  const snapshots: DetailSnapshot[] = [producer, ...rows.map(row => row.progress)];
+  const runSnapshots = new Map<string, DetailSnapshot>(rows.map(row => [row.id, row.progress ?? {}]));
+  const rawSnapshots: DetailSnapshot[] = [producer, ...runSnapshots.values()];
+  const snapshots = rawSnapshots.map(snapshot => ({ ...snapshot,
+    diagnostics: mergeQueueDiagnostics(snapshot, getQueueObservations([snapshot]), snapshot.result?.key) }));
+  const runTimings = new Map<string, CollectionTimings | undefined>();
+  for (const row of rows) {
+    if (runTimings.has(row.id)) continue;
+    const snapshot = runSnapshots.get(row.id)!;
+    const outcome = row.status === "succeeded" ? "completed" : row.status === "failed" ? "failed"
+      : row.status === "processing" && row.live ? "running" : "interrupted";
+    runTimings.set(row.id, snapshot.result?.timings ? { ...snapshot.result.timings, outcome } : undefined);
+  }
   const results: CollectionNoticeResult[] = latest.map(row => {
-    const snapshot = row.progress as DetailSnapshot;
+    const snapshot = runSnapshots.get(row.id)!;
     const pending = row.status === "queued" || (row.status === "processing" && !row.live);
     return { ...(!pending ? snapshot.result : undefined), key: row.notice_key,
       status: row.status === "succeeded" ? "succeeded" : row.status === "failed" ? "failed" : "pending",
       startedAt: !pending && row.started_at ? row.started_at.toISOString() : undefined,
-      finishedAt: row.finished_at?.toISOString(), error: row.error ?? snapshot.result?.error };
+      finishedAt: row.finished_at?.toISOString(), error: row.error ?? snapshot.result?.error,
+      timings: mergeQueueTimings(runTimings.get(row.id), getQueueObservations([snapshot]),
+        row.status === "succeeded" ? "completed" : row.status === "failed" ? "failed"
+          : row.status === "processing" && row.live ? "running" : "interrupted") };
   });
   const status = active.length || apiStatus === "running" ? "running" : waiting.length || apiPending ? "queued" : apiStatus === "failed" ? "failed" : "completed";
   const endTimes = [...done.map(row => row.finished_at.getTime()), ...(job.producer_finished_at ? [job.producer_finished_at.getTime()] : [])];
@@ -95,6 +111,8 @@ export async function getDetailRefresh(queue: DetailQueue, id: string): Promise<
     detailSucceeded: latest.filter(row => row.status === "succeeded").length,
     detailFailed: latest.filter(row => row.status === "failed").length,
     results, errors: snapshots.flatMap(snapshot => snapshot.errors ?? []), diagnostics: mergeDiagnostics(snapshots),
+    timings: aggregateCollectionTimings([producer.timings, ...runTimings.values()], getQueueObservations(rawSnapshots),
+      status === "completed" ? "completed" : status === "failed" ? "failed" : "running"),
     progress: results.find(result => result.startedAt && !result.finishedAt)?.progress,
     maintenance: producer.maintenance ?? waiting.map(row => (row.progress as DetailSnapshot).maintenance).find(Boolean) };
 }
