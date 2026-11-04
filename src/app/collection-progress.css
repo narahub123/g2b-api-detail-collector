@@ -11,6 +11,7 @@
   padding: 16px 0 4px;
   color: #263e48;
 }
+
 .collection-progress-overview {
   display: flex;
   align-items: center;
@@ -43,8 +44,6 @@
 .collection-observation {
   min-width: 0;
   margin: 18px 0;
-  /* padding: 18px; */
-  /* border: 1px solid #dbe5e8; */
   border-radius: 12px;
   background: #fff;
   color: #263e48;
@@ -147,9 +146,16 @@
   overflow-wrap: anywhere;
 }
 .collection-progress-results {
-  border-top: 1px solid #e5ecee;
-  padding-top: 12px;
+  margin-bottom: 0;
 }
+
+/* 공고별 결과 본문에만 세로 스크롤 적용 */
+.collection-progress-results > .form-accordion-body {
+  max-height: 400px;
+  overflow-y: auto;
+  min-height: 0;
+}
+
 .collection-progress-results > summary {
   display: flex;
   align-items: center;
