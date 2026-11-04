@@ -54,15 +54,15 @@ export class DetailQueue {
   /** API 생산자도 공고를 쓰기 전에 같은 큐 잠금 순서를 따르게 합니다. */
   async lockMutation(db: pg.PoolClient): Promise<void> { await this.lockLease(db); }
 
-  /** 동일 연결에서 종료 응답까지 측정하며 원래 업무 오류를 보존합니다.
+  /** 동일 연결에서 종료 응답까지 측정하며 확정된 결과와 원래 업무 오류를 보존합니다.
    * @param context 원본 자료와 임대 토큰을 제외한 작업 식별 정보
+   * @remarks 연결 반환 오류는 별도 진단으로 남기고 COMMIT 성공을 실패로 바꾸지 않습니다.
    */
   async transaction<T>(work: (db: pg.PoolClient) => Promise<T>,
     context: QueueObservationContext = { operation: "queue.transaction", stage: "saving" }): Promise<T> {
     const db = await this.pool.connect();
     const measurement = new QueueMeasurement(context, this.options.monotonic);
     this.measurements.set(db, measurement);
-    let failed = false;
     let success = false;
     const errors: { error: unknown; operation: string }[] = [];
     try {
@@ -74,7 +74,6 @@ export class DetailQueue {
       success = true;
       return result;
     } catch (error) {
-      failed = true;
       errors.push({ error, operation: context.operation });
       await db.query("ROLLBACK").catch(error => { errors.push({ error, operation: "queue.rollback" }); });
       throw error;
@@ -83,8 +82,8 @@ export class DetailQueue {
       this.measurements.delete(db);
       try { db.release(); }
       catch (error) {
+        // 연결 정리 실패로 이미 커밋된 작업의 재시도를 유발하지 않도록 분리합니다.
         errors.push({ error, operation: "queue.release-connection" });
-        if (!failed) throw error;
       } finally {
         for (const entry of errors) measurement.error(entry.error, entry.operation);
         observation.diagnostics = measurement.diagnostics;

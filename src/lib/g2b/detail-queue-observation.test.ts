@@ -124,6 +124,25 @@ it("최초 생산자 획득도 API 문맥에서 생산자→상세 큐 순서로
   });
 });
 
+it("COMMIT 성공 후 연결 반환 실패는 확정된 결과를 유지하고 별도 진단으로 남깁니다", async () => {
+  const cleanup = Error("release failed");
+  const { queue, observations, release, advance, query } = fixture();
+  release.mockImplementation(() => { advance(100); throw cleanup; });
+  const result = { saved: true };
+  await expect(queue.transaction(async () => result)).resolves.toBe(result);
+  expect(query.mock.calls.map(([sql]) => sql)).toEqual([
+    "BEGIN", "SET LOCAL lock_timeout='5s'", "SET LOCAL statement_timeout='15s'", "COMMIT",
+  ]);
+  expect(release).toHaveBeenCalledOnce();
+  expect(observations).toHaveLength(1);
+  expect(observations[0].timings).toMatchObject({ outcome: "completed", details: { saving: { steps: {
+    "queue.transaction": { elapsedMs: 8, count: 1, outcomes: { completed: 1 } },
+  } } } });
+  expect(observations[0].diagnostics?.events).toEqual([expect.objectContaining({
+    operation: "queue.release-connection", diagnostic: expect.objectContaining({ message: "release failed", stack: expect.any(String) }),
+  })]);
+});
+
 it("연결 반환 실패가 최초 업무 오류를 덮어쓰지 않고 측정 시간도 늘리지 않습니다", async () => {
   const original = Error("work failed"), cleanup = Error("release failed");
   const { queue, observations, release, advance } = fixture();
