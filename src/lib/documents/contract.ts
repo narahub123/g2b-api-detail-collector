@@ -10,10 +10,11 @@ export class DocumentError extends Error {
   constructor(message: string, public status = 400) { super(message); }
 }
 
-/** 공고에 실제 저장된 직접 첨부 PDF만 선택하고 임의 URL·모달 첨부를 거부합니다. */
+/** 저장 배열의 잘못된 항목은 제외하고 공고 소속의 유효한 직접 PDF만 선택합니다. */
 export function pickPdfAttachment(key: unknown, fileNo: unknown, seq: unknown, files: { name: string; url: string | null;fileNo?:string;seq?:number }[]) {
   if (typeof key !== "string" || typeof fileNo !== "string" || typeof seq !== "number") throw new DocumentError("첨부 식별자가 올바르지 않습니다.");
-  const matches = files.filter(file => file.fileNo===fileNo&&file.seq===seq&&/\.pdf$/i.test(file.name.trim()));
+  const matches = (Array.isArray(files) ? files : []).filter(file => file && typeof file.name === "string" &&
+    file.fileNo===fileNo&&file.seq===seq&&/\.pdf$/i.test(file.name.trim()));
   if (matches.length !== 1 || !directAttachmentIdentity(key,matches[0]))
     throw new DocumentError("해당 공고의 직접 첨부 PDF를 찾을 수 없습니다.", 404);
   return { ...matches[0], url:matches[0].url!, key, fileNo, seq };

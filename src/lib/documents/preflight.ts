@@ -3,8 +3,9 @@ import type pg from 'pg';
 import {EXTRACTOR_VERSION} from './queue';
 import {discoveryCandidatesSql} from './discovery';
 import {fixedAttachmentExclusionSql} from '../g2b/attachment-exclusions';
+import { documentRegistrationEnabled } from './registration';
 
-export type PdfProbe={needed:boolean;leaseBusy:boolean;ready:boolean;expired:boolean;missingRetry:boolean;discovery:boolean};
+export type PdfProbe={needed:boolean;leaseBusy:boolean;ready:boolean;expired:boolean;missingRetry:boolean;discovery:boolean;registration?:boolean};
 /** 유효 임대·즉시 대기·만료 처리·재시도 누락·새 PDF를 읽기 전용으로 검사합니다. */
 export async function probePdfWork(pool:pg.Pool,schema:string,options:{discover:boolean;noticeKey?:string}):Promise<PdfProbe>{
  if(!/^[a-z][a-z0-9_]*$/.test(schema))throw new Error('DB 스키마 이름이 올바르지 않습니다.');
@@ -26,7 +27,11 @@ export async function probePdfWork(pool:pg.Pool,schema:string,options:{discover:
    if(options.discover){
     result.discovery=(await db.query(`${discoveryCandidatesSql(schema)} SELECT EXISTS(SELECT 1 FROM candidates) AS discovery`,[options.noticeKey??null,EXTRACTOR_VERSION])).rows[0].discovery;
    }
-   result.needed=result.ready||result.expired||result.missingRetry||result.discovery;
+   if(documentRegistrationEnabled()){
+    result.registration=(await db.query(`SELECT EXISTS(SELECT 1 FROM ${schema}.document_registration_handoffs
+      WHERE next_attempt_at<=clock_timestamp() AND ($1::text IS NULL OR notice_key=$1)) pending`,[options.noticeKey??null])).rows[0].pending;
+   }
+   result.needed=result.ready||result.expired||result.missingRetry||result.discovery||!!result.registration;
   }
   await db.query('COMMIT');return result;
  }catch(error){await db.query('ROLLBACK').catch(()=>undefined);throw error;}finally{db.release();}

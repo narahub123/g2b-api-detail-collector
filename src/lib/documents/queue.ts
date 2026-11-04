@@ -26,7 +26,7 @@ export class DocumentQueue {
     this.schema = schema;
   }
   /** 풀링 연결에서도 같은 연결에서 커밋·롤백하고 오류 연결을 반환합니다. */
-  private async transaction<T>(work: (db: pg.PoolClient) => Promise<T>) {
+  async transaction<T>(work: (db: pg.PoolClient) => Promise<T>) {
     const db = await this.pool.connect();
     try { await db.query("BEGIN"); await db.query("SET LOCAL lock_timeout='5s'"); await db.query("SET LOCAL statement_timeout='15s'");
       const result = await work(db); await db.query("COMMIT"); return result;
@@ -51,39 +51,80 @@ export class DocumentQueue {
   async release(token: string) {
     await this.pool.query({text:`UPDATE ${this.schema}.attachment_extraction_worker_lease SET owner_token=NULL,expires_at=NULL,updated_at=now() WHERE id=1 AND owner_token=$1`,values:[token]});
   }
-  /** 원본 직접 첨부를 검증하고 같은 파일의 활성 요청을 통합합니다. */
+  /** 독립 접수의 트랜잭션을 열고 공통 등록 로직으로 활성 요청을 통합합니다. */
   async enqueue(key: string, fileNo: string, seq: number, source: "manual" | "automatic") {
-    return this.transaction(async db=>{
-      const n=await db.query(`SELECT detail FROM ${this.schema}.notices WHERE key=$1`,[key]);
-      const file=pickPdfAttachment(key,fileNo,seq,n.rows[0]?.detail?.attachments ?? []);
-      const d=(await db.query(`INSERT INTO ${this.schema}.attachment_documents(notice_key,file_no,seq,filename,attachment_url,document_type)
-        VALUES($1,$2,$3,$4,$5,'pdf') ON CONFLICT(notice_key,file_no,seq) DO UPDATE SET filename=EXCLUDED.filename,attachment_url=EXCLUDED.attachment_url,document_type='pdf',is_current=true,updated_at=now() RETURNING *`,[key,fileNo,seq,file.name,file.url])).rows[0];
-      const active=(await db.query(`SELECT * FROM ${this.schema}.attachment_extraction_runs WHERE document_id=$1 AND status IN ('queued','processing')`,[d.id])).rows[0];
-      if(active) {
-        if(source==='manual' && active.status==='queued' && active.source==='automatic') {
-          await db.query(`UPDATE ${this.schema}.attachment_extraction_runs SET source='manual' WHERE chain_id=$1`,[active.chain_id]); active.source='manual';
-        }
-        return {...active,reused:true} as QueueRun & {reused:boolean};
+    return this.transaction(db => this.enqueueInTransaction(db, key, fileNo, seq, source));
+  }
+  /** 호출자의 연결에서 직접 첨부를 검증하고 문서 잠금으로 동시 등록을 직렬화합니다.
+   * @remarks 커밋은 호출자가 수행하며 PDF 작업기 임대는 획득하지 않습니다.
+   */
+  async enqueueInTransaction(db: pg.PoolClient, key: string, fileNo: string, seq: number, source: "manual" | "automatic") {
+    return (await this.enqueueManyInTransaction(db, key, [{ fileNo, seq }], source))[0];
+  }
+  /** 공고별 첨부를 한 번 검증하고 묶음 SQL로 등록하여 상세 잠금의 DB 왕복 시간을 줄입니다.
+   * @remarks 문서 식별자 순서로 잠그며 기존 단건 접수와 같은 활성 요청·버전 이력 정책을 사용합니다.
+   */
+  async enqueueManyInTransaction(db: pg.PoolClient, key: string, identities: { fileNo: string; seq: number }[], source: "manual" | "automatic") {
+    if (!identities.length) return [];
+    // 신규 문서의 외래 키 검사보다 먼저 공고 잠금을 확보하여 상세 저장과의 역순 대기를 막습니다.
+    const n = (await db.query(`SELECT detail FROM ${this.schema}.notices WHERE key=$1 FOR KEY SHARE`, [key])).rows[0];
+    const raw = n?.detail?.attachments;
+    const files = Array.isArray(raw) ? raw.filter(file => file && typeof file.name === "string") : [];
+    const unique = new Map<string, ReturnType<typeof pickPdfAttachment>>();
+    for (const identity of identities) {
+      const file = pickPdfAttachment(key, identity.fileNo, identity.seq, files);
+      unique.set(`${file.fileNo.toLowerCase()}:${file.seq}`, file);
+    }
+    const values = [...unique.values()].map(file => ({ file_no: file.fileNo.toLowerCase(), seq: file.seq,
+      filename: file.name, attachment_url: file.url }));
+    // 모든 접수 경로가 같은 순서로 문서를 확보해야 묶음 등록과 단건 접수가 교착하지 않습니다.
+    const docs = (await db.query(`INSERT INTO ${this.schema}.attachment_documents(notice_key,file_no,seq,filename,attachment_url,document_type)
+      SELECT $1,a.file_no::uuid,a.seq,a.filename,a.attachment_url,'pdf'
+      FROM jsonb_to_recordset($2::jsonb) AS a(file_no text,seq int,filename text,attachment_url text)
+      ORDER BY a.file_no,a.seq
+      ON CONFLICT(notice_key,file_no,seq) DO UPDATE SET filename=EXCLUDED.filename,attachment_url=EXCLUDED.attachment_url,
+        document_type='pdf',is_current=true,updated_at=now() RETURNING id`, [key, JSON.stringify(values)])).rows;
+    const states = (await db.query(`SELECT d.id,d.filename,d.attachment_url,to_jsonb(active) active,to_jsonb(done) done,
+      EXISTS(SELECT 1 FROM ${this.schema}.attachment_extraction_runs r WHERE r.document_id=d.id) has_history
+      FROM ${this.schema}.attachment_documents d
+      LEFT JOIN LATERAL (SELECT r.* FROM ${this.schema}.attachment_extraction_runs r
+        WHERE r.document_id=d.id AND r.status IN ('queued','processing') LIMIT 1) active ON true
+      LEFT JOIN LATERAL (SELECT r.* FROM ${this.schema}.attachment_extraction_runs r
+        WHERE r.document_id=d.id AND r.extractor_version=$2 ORDER BY r.requested_at DESC,r.id DESC LIMIT 1) done ON true
+      WHERE d.id=ANY($1::uuid[]) ORDER BY d.file_no,d.seq`, [docs.map(doc => doc.id), EXTRACTOR_VERSION])).rows;
+    const promoted = states.filter(row => source === "manual" && row.active?.status === "queued" && row.active.source === "automatic");
+    if (promoted.length) {
+      await db.query(`UPDATE ${this.schema}.attachment_extraction_runs SET source='manual' WHERE chain_id=ANY($1::uuid[])`,
+        [promoted.map(row => row.active.chain_id)]);
+      for (const row of promoted) row.active.source = "manual";
+    }
+    const pending = states.filter(row => !row.active && !(source === "automatic" && row.done)).map(row => ({
+      run_id: randomUUID(), document_id: row.id, filename: row.filename, attachment_url: row.attachment_url,
+      purpose: row.has_history ? "reextract" : "initial",
+    }));
+    const inserted: QueueRun[] = pending.length ? (await db.query(`INSERT INTO ${this.schema}.attachment_extraction_runs
+      (id,document_id,chain_id,source,status,filename,attachment_url,extractor_version,document_type,purpose)
+      SELECT a.run_id,a.document_id,a.run_id,$2,'queued',a.filename,a.attachment_url,$3,'pdf',a.purpose
+      FROM jsonb_to_recordset($1::jsonb) AS a(run_id uuid,document_id uuid,filename text,attachment_url text,purpose text)
+      RETURNING *`, [JSON.stringify(pending), source, EXTRACTOR_VERSION])).rows : [];
+    if (pending.length) await db.query(`UPDATE ${this.schema}.attachment_documents d
+      SET active_chain_id=a.run_id,latest_run_id=a.run_id,current_run_id=a.run_id,updated_at=now()
+      FROM jsonb_to_recordset($1::jsonb) AS a(run_id uuid,document_id uuid) WHERE d.id=a.document_id`, [JSON.stringify(pending)]);
+    return states.map(row => {
+      const reused = row.active ?? (source === "automatic" ? row.done : null);
+      // JSON으로 함께 조회한 기존 실행도 단건 접수와 같은 pg 날짜 표현을 유지합니다.
+      if (reused) for (const field of ["requested_at", "started_at", "finished_at", "next_attempt_at", "stage_started_at", "last_progress_at"]) {
+        if (typeof reused[field] === "string") reused[field] = new Date(reused[field]);
       }
-      if(source==='automatic') {
-        const done=(await db.query(`SELECT * FROM ${this.schema}.attachment_extraction_runs WHERE document_id=$1 AND extractor_version=$2 ORDER BY requested_at DESC,id DESC LIMIT 1`,[d.id,EXTRACTOR_VERSION])).rows[0];
-        if(done) return {...done,reused:true} as QueueRun & {reused:boolean};
-      }
-      const id=randomUUID();
-      const previous=(await db.query(`SELECT EXISTS(SELECT 1 FROM ${this.schema}.attachment_extraction_runs WHERE document_id=$1) AS has_history`,[d.id])).rows[0];
-      const purpose:ExtractionPurpose=previous.has_history?'reextract':'initial';
-      const r=(await db.query(`INSERT INTO ${this.schema}.attachment_extraction_runs(id,document_id,chain_id,source,status,filename,attachment_url,extractor_version,document_type,purpose)
-        VALUES($1,$2,$1,$3,'queued',$4,$5,$6,'pdf',$7) RETURNING *`,[id,d.id,source,file.name,file.url,EXTRACTOR_VERSION,purpose])).rows[0];
-      await db.query(`UPDATE ${this.schema}.attachment_documents SET active_chain_id=$2,latest_run_id=$2,current_run_id=$2,updated_at=now() WHERE id=$1`,[d.id,id]);
-      return {...r,reused:false} as QueueRun & {reused:boolean};
+      return { ...(reused ?? inserted.find(run => run.document_id === row.id)), reused: !!reused } as QueueRun & { reused: boolean };
     });
   }
   /** 신규 PDF부터 최대 20건만 접수하고 파일 처리 사이에 상위 요청을 다시 확인할 수 있게 합니다. */
   async discover(noticeKey?: string, stop:()=>boolean=()=>false) {
     if(stop())return 0;
     const sql=discoveryCandidatesSql(this.schema),parameters=[noticeKey??null,EXTRACTOR_VERSION];
-    // 대기열을 만들지 않는 단일 갱신으로 이름 변경과 사라진 첨부 상태도 계속 반영합니다.
-    await this.pool.query(`${sql}, checked AS (
+    // 묶음 등록·만료 복구와 같은 순서로 잠근 뒤 이름 변경과 사라진 첨부 상태를 반영합니다.
+    await this.pool.query(`${sql}, checked AS MATERIALIZED (
       SELECT d.id,a.filename,a.attachment_url,(a.key IS NOT NULL OR EXISTS(
        SELECT 1 FROM ${this.schema}.notices n CROSS JOIN LATERAL
         jsonb_array_elements(CASE WHEN jsonb_typeof(n.detail->'attachments')='array' THEN n.detail->'attachments' ELSE '[]'::jsonb END) raw
@@ -92,9 +133,14 @@ export class DocumentQueue {
       FROM ${this.schema}.attachment_documents d LEFT JOIN attachments a
        ON a.key=d.notice_key AND a.file_no::uuid=d.file_no AND a.seq=d.seq
       WHERE ($1::text IS NULL OR d.notice_key=$1)
+    ), locked AS MATERIALIZED (
+      SELECT d.id FROM ${this.schema}.attachment_documents d JOIN checked c ON c.id=d.id
+      WHERE (d.filename,d.attachment_url,d.is_current)
+        IS DISTINCT FROM (COALESCE(c.filename,d.filename),COALESCE(c.attachment_url,d.attachment_url),c.present)
+      ORDER BY d.notice_key,d.file_no,d.seq FOR UPDATE OF d
     ) UPDATE ${this.schema}.attachment_documents d SET filename=COALESCE(c.filename,d.filename),
       attachment_url=COALESCE(c.attachment_url,d.attachment_url),is_current=c.present,updated_at=now()
-     FROM checked c WHERE c.id=d.id AND (d.filename,d.attachment_url,d.is_current)
+     FROM checked c JOIN locked l ON l.id=c.id WHERE c.id=d.id AND (d.filename,d.attachment_url,d.is_current)
       IS DISTINCT FROM (COALESCE(c.filename,d.filename),COALESCE(c.attachment_url,d.attachment_url),c.present)`,parameters);
     if(stop())return 0;
     const rows=(await this.pool.query(`${sql} SELECT key,file_no,seq,attachment_url FROM candidates ORDER BY has_history,key,seq,file_no LIMIT 20`,parameters)).rows;
@@ -206,14 +252,15 @@ export class DocumentQueue {
       await this.owned(db,token);
     });
   }
-  /** 새 소유자만 만료된 처리와 누락된 재시도를 복구합니다. */
+  /** 묶음 등록과 같은 공고·첨부 순서로 잠그고 새 소유자만 만료 실행을 복구합니다. */
   async recover(token:string) {
     return this.transaction(async db=>{
       await this.owned(db,token);
       const docs=(await db.query(`SELECT d.* FROM ${this.schema}.attachment_documents d WHERE EXISTS(
         SELECT 1 FROM ${this.schema}.attachment_extraction_runs r WHERE r.document_id=d.id AND r.chain_id=d.active_chain_id
         AND (r.status='processing' OR (r.status IN ('failed','interrupted') AND r.retry_eligible AND r.attempt_number<3
-          AND NOT EXISTS(SELECT 1 FROM ${this.schema}.attachment_extraction_runs c WHERE c.retry_of=r.id)))) ORDER BY d.id FOR UPDATE OF d`)).rows;
+          AND NOT EXISTS(SELECT 1 FROM ${this.schema}.attachment_extraction_runs c WHERE c.retry_of=r.id))))
+        ORDER BY d.notice_key,d.file_no,d.seq FOR UPDATE OF d`)).rows;
       let recovered=0,exhausted=0;
       for(const doc of docs) {
         const run=(await db.query(`SELECT * FROM ${this.schema}.attachment_extraction_runs WHERE document_id=$1 AND chain_id=$2 ORDER BY attempt_number DESC LIMIT 1 FOR UPDATE`,[doc.id,doc.active_chain_id])).rows[0] as QueueRun;

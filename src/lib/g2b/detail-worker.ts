@@ -9,6 +9,8 @@ import { scrapeDetailPage, serviceDetailUrl } from "./detail-page";
 import { structureNoticeDetail } from "./structured-data";
 import { checkPreservedContent, runContentCheck } from "./content-check";
 import { maintenanceFromError } from "./maintenance";
+import { DocumentQueue } from "../documents/queue";
+import { recoverDocumentRegistrations } from "../documents/registration";
 
 type Options = { scrape?: typeof scrapeDetailPage; fetcher?: typeof fetch; signal?: AbortSignal; limit?: number };
 
@@ -140,6 +142,7 @@ export async function consumeDetails(queue: DetailQueue, options: Options = {}):
   const assertLease = () => { if (lost) throw Error("상세 소비기 임대 소유권을 잃었습니다."); };
   let count = 0;
   try {
+    await recoverDocumentRegistrations(new DocumentQueue(queue.pool, queue.schema), { stop: () => !!options.signal?.aborted || lost });
     await queue.recover(token);
     while (!options.signal?.aborted && count < (options.limit ?? Infinity)) {
       assertLease();

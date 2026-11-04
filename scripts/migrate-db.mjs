@@ -5,7 +5,7 @@ import pg from "pg";
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) throw new Error("DATABASE_URL 환경변수를 설정하세요.");
 const args = process.argv.slice(2);
-if (args.length > 1 || args.some(arg => arg !== "--detail-queue")) throw new Error("지원하는 인수는 --detail-queue뿐입니다.");
+if (args.length > 1 || args.some(arg => !["--detail-queue", "--document-registration"].includes(arg))) throw new Error("--detail-queue 또는 --document-registration 중 하나만 지정하세요.");
 const detailQueue = args.includes("--detail-queue");
 if (detailQueue && process.env.DETAIL_COLLECTION_QUEUE_ENABLED === "true") throw new Error("상세 큐를 비활성화하고 실행 중인 수집을 중지한 뒤 스키마를 적용하세요.");
 const schema = process.env.G2B_DB_SCHEMA || "public";
@@ -22,6 +22,11 @@ try {
   await client.query("SET LOCAL lock_timeout='5s'");
   await client.query("SET LOCAL statement_timeout='120s'");
   await client.query(`CREATE SCHEMA IF NOT EXISTS ${schema}`);
+  if (args.includes("--document-registration")) {
+    await migration("../db/migrations/0018-document-registration.sql");
+    await client.query("COMMIT");
+    console.log(`PDF 등록 복구 스키마 적용 완료 (${schema})`);
+  } else {
   if (detailQueue) await client.query(`DO $$ BEGIN
     IF to_regclass('${schema}.detail_collection_producer_lease') IS NOT NULL THEN
       PERFORM id FROM ${schema}.detail_collection_producer_lease WHERE id=1 FOR UPDATE;
@@ -61,6 +66,7 @@ try {
     "../db/migrations/0016-queued-collection.sql", "../db/migrations/0017-detail-queue-import.sql"]) await migration(file);
   await client.query("COMMIT");
   console.log(`DB 스키마 적용 완료 (${schema}${detailQueue ? ", 상세 큐 포함" : ""})`);
+  }
 } catch (error) {
   await client.query("ROLLBACK").catch(() => undefined);
   throw error;

@@ -15,4 +15,8 @@ describe('운영 PDF 입력 경계',()=>{
  it('텍스트의 줄바꿈과 단어 경계를 보존합니다',()=>{
   expect(pdfText([{str:'참가'},{str:'자격',hasEOL:true},{str:'기한'}])).toBe('참가 자격\n기한');
  });
+ it('저장 배열의 잘못된 항목은 추출 직전 검증에서도 유효한 PDF를 막지 않습니다',()=>{
+  const files=[null,{}, {name:123}, {name:'공고.pdf',url,fileNo,seq:2}] as unknown as Parameters<typeof pickPdfAttachment>[3];
+  expect(pickPdfAttachment(key,fileNo,2,files).name).toBe('공고.pdf');
+ });
 });

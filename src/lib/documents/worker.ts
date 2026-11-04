@@ -8,6 +8,7 @@ import {diagnosticError,ExtractionError,sanitizeStoredDiagnostic} from './diagno
 import type {ExtractionProgress} from './diagnostics';
 import {workKind,type WorkKind} from './priority';
 import {probeConnection} from './connection-probe';
+import { recoverDocumentRegistrations } from './registration';
 
 export type BatchOptions = { mode: "local" | "cloud"; limit?:number; budgetMinutes?:number; noticeKey?:string;
   discover?:boolean;
@@ -54,6 +55,8 @@ export async function runBatch(store:DocumentQueue,options:BatchOptions):Promise
     heartbeat=bounded(store.renew(token),renewalTimeout).then(ok=>{if(!ok)lose();else confirm(requestedAt);},lose).finally(()=>{heartbeat=undefined;});
   },options.heartbeatMs??30000);
   try {
+    if (!local) await recoverDocumentRegistrations(store, { noticeKey: options.noticeKey,
+      stop: () => abort.signal.aborted || now()-start+360000>budget });
     const initial=await store.recover(token);
     summary.checked+=initial.checked;summary.recovered+=initial.recovered;summary.exhausted+=initial.exhausted;
     while(!abort.signal.aborted) {

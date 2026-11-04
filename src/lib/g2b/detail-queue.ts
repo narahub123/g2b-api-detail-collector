@@ -10,6 +10,8 @@ import type { ApiNotice } from "./types";
 import { getDetailRefresh, submitDetailRefresh, type DetailSnapshot } from "./detail-refresh-store";
 import { shouldReplacePaginatedDetail } from "./pagination-coverage";
 import { expandCollectionRelations, finishCollectionAttempt } from "./collection-targets";
+import { DocumentQueue } from "../documents/queue";
+import { registerNoticeDocumentsInTransaction } from "../documents/registration";
 
 export type DetailRequest = {
   key: string;
@@ -259,7 +261,7 @@ export class DetailQueue {
     await this.transaction(db => this.saveApiInTransaction(db, key, api));
   }
 
-  /** 상세·참조·관계·후속 요청과 실행 종료를 함께 저장합니다. */
+  /** 상세·참조·후속 요청과 실행 종료를 저장하고 PDF 등록 실패는 복구 기록으로 분리합니다. */
   async finish(token: string, id: string, result: Finish): Promise<void> {
     await this.withRun(token, id, async (db, run, current) => {
       const preserved = result.status === "succeeded" && !!current.detail && !shouldReplacePaginatedDetail(current.detail, result.detail);
@@ -273,6 +275,9 @@ export class DetailQueue {
       } else if (result.status === "failed") {
         await saveStoredNoticeInTransaction(db, run.notice_key, { ...current,
           detailError: redactDiagnostic(result.error), detailDiagnostic: result.diagnostic ? serializeError(result.diagnostic) : null }, undefined, this.schema);
+      }
+      if (result.status === "succeeded") {
+        await registerNoticeDocumentsInTransaction(new DocumentQueue(this.pool, this.schema), db, run.notice_key);
       }
       // 실제 자료 저장까지의 시간을 관측에 포함하고 같은 커밋으로 종료 상태와 확정합니다.
       const snapshot = typeof result.snapshot === "function" ? result.snapshot(preserved) : result.snapshot;
