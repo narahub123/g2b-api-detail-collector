@@ -2,6 +2,7 @@ import { performance } from "node:perf_hooks";
 import type { CollectionJob } from "./collection-job";
 import type { CollectionNoticeResult, CollectionStage } from "./collection-progress";
 import type {CollectionDetailTimings, CollectionDetailEvent, CollectionDetailOutcome, CollectionDetailStage} from './collection-detail-steps';
+import { collectionDetailStages } from './collection-detail-steps';
 
 export type CollectionTimingOutcome = "running" | "completed" | "failed" | "deferred" | "interrupted";
 /** 누적값은 종료된 구간만 담고 현재 구간은 별도로 보존해 중복 합산을 피합니다. */
@@ -27,7 +28,7 @@ function finishDetail(timings:CollectionTimings,stage:CollectionDetailStage,id:s
 /** 종료를 관측하지 못한 세부 구간은 마지막 관측 시간으로만 마감합니다. */
 function finishDetails(target:Target,outcome:CollectionTimingOutcome):void {
   if(!target.timings)return;
-  for(const stage of ['opening','modals'] as const)
+  for(const stage of collectionDetailStages)
     for(const active of [...(target.timings.details?.[stage]?.active??[])])
       finishDetail(target.timings,stage,active.id,active.elapsedMs,outcome==='interrupted'?'interrupted':'incomplete');
 }
@@ -64,12 +65,15 @@ export function createCollectionTimings(job: CollectionJob, monotonic: () => num
     }
   }
 
-  /** 구간 경계마다 공고와 작업에 독립된 스냅샷을 반영합니다. */
-  function detail(event:CollectionDetailEvent,result:CollectionNoticeResult,observed:number=monotonic()):void {
-    if(job.status!=='running'||result.finishedAt||result.timings?.outcome!=='running')return;
+  /** 구간 경계마다 작업과 선택적인 공고에 독립된 스냅샷을 반영합니다.
+   * @param result 공고 없이 실행하는 API 생산자 계측에서는 생략합니다.
+   */
+  function detail(event:CollectionDetailEvent,result?:CollectionNoticeResult,observed:number=monotonic()):void {
+    if(job.status!=='running'||job.timings?.outcome!=='running'||
+      (result&&(result.finishedAt||result.timings?.outcome!=='running')))return;
     if(event.phase==='start'&&!detailStarts.has(event.id))detailStarts.set(event.id,observed);
     for(const target of [job,result]){
-      const timings=target.timings;if(!timings)continue;
+      const timings=target?.timings;if(!timings)continue;
       const group=(timings.details??={})[event.stage]??={steps:{},active:[]};
       if(event.phase==='start'){
         if(!group.active.some(item=>item.id===event.id))group.active.push({id:event.id,step:event.step,

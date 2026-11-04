@@ -3,6 +3,30 @@ import type { CollectionJob } from "./collection-job";
 import { createCollectionObserver } from "./collection-observer";
 import type { CollectionNoticeResult } from "./collection-progress";
 
+it("저장 종료 후 메모리 세부 계측만 마감하고 이후 알림과 저장은 무시합니다", async () => {
+  const value = job(); let mono = 0;
+  const save = vi.fn(async () => {});
+  const result: CollectionNoticeResult = { key: "A--000", status: "pending" }; value.results = [result];
+  const observer = createCollectionObserver(value, save, Date.now, () => mono);
+  await observer.begin(result); await observer.progress("saving", result);
+  await observer.close();
+  const count = save.mock.calls.length;
+  const event = { id: "tx", stage: "saving", step: "queue.transaction", phase: "start", at: new Date(0).toISOString(), elapsedMs: 0, outcome: "running" } as const;
+  observer.detailSnapshot(event, result);
+  mono = 9;
+  observer.detailSnapshot({ ...event, phase: "end", outcome: "completed", elapsedMs: 9 }, result);
+  result.status = "succeeded"; observer.finishSnapshot(result);
+  expect(result.timings?.details?.saving?.steps["queue.transaction"]).toMatchObject({ elapsedMs: 9, count: 1 });
+  expect(result.timings?.totals.saving).toBe(9);
+  const frozen = structuredClone(value);
+  mono = 99;
+  observer.detailSnapshot(event, result); observer.finishSnapshot(result);
+  observer.detail(event, result); await observer.persist();
+  await vi.advanceTimersByTimeAsync(10000);
+  expect(save).toHaveBeenCalledTimes(count);
+  expect(value).toEqual(frozen);
+});
+
 /** 저장 횟수와 경계를 검증할 실행 중 작업을 준비합니다. */
 function job(): CollectionJob {
   return { id: "job", status: "running", phase: "api", range: null, apiCount: 0,

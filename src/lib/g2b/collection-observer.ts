@@ -87,6 +87,12 @@ export function createCollectionObserver(job: CollectionJob, save: () => Promise
       recordCollectionProgress(job, result.progress?.stage ?? "preparing", at, result);
       timings.finishNotice(result, result.status === "failed" ? "failed" : "completed", at);
     },
+    /** 예약 저장 종료 후에도 트랜잭션 종료 계측을 메모리에만 반영합니다.
+     * @remarks close() 완료 후 사용하며, finishSnapshot()으로 마감된 공고의 알림은 무시합니다.
+     */
+    detailSnapshot(event: CollectionDetailEvent, result?: CollectionNoticeResult): void {
+      timings.detail(event, result);
+    },
     /** 세부 알림도 같은 직렬 큐와 저장 주기에 합쳐 쓰기 횟수를 제한합니다. */
     detail(event:CollectionDetailEvent,result:CollectionNoticeResult):void {
       const time=now();
