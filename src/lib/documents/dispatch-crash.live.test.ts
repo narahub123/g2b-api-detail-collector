@@ -121,6 +121,19 @@ describe.skipIf(!live)("PDF 실행 요청 프로세스 강제 종료",{timeout:1
     }finally{try{if(created)await pool.query(`DROP SCHEMA ${schema} CASCADE`);}finally{await pool.end();}}
   });
 
+  it("독립 웹 프로세스 두 개가 같은 요청을 점검해도 HTTP 호출은 한 번만 발생합니다",async()=>{
+    await queue.enqueue(key,fileNo,1,"automatic");
+    const workers=[start("resume-web"),start("resume-web")];
+    try {
+      for(const worker of workers) {
+        expect(await within(worker.message)).toMatchObject({type:"result"});
+        expect((await within(worker.exited))[0]).toBe(0);
+      }
+      expect(calls).toHaveLength(1);
+      expect(await state()).toMatchObject({requested_generation:"1",acknowledged_generation:"1",attempt_count:"1"});
+    }finally{await Promise.all(workers.map(kill));}
+  });
+
   it.each([
     {number:1,boundary:"registered",title:"DB 등록 직후",beforeCalls:0},
     {number:2,boundary:"claimed",title:"호출권 확보 후 GitHub 호출 직전",beforeCalls:0},

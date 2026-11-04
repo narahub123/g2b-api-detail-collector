@@ -4,7 +4,7 @@ import pg from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { PdfDispatchState } from "./dispatch-state";
 import { runPdfDispatch } from "./dispatch";
-import { PdfDispatchRuntime } from "./dispatch-runtime";
+import { PdfDispatchRuntime, createWebPdfDispatcher, createActionsPdfDispatcher } from "./dispatch-runtime";
 import { DocumentQueue } from "./queue";
 import { DetailQueue } from "../g2b/detail-queue";
 import { consumeDetails } from "../g2b/detail-worker";
@@ -43,6 +43,39 @@ describe.skipIf(!live)("PDF 실행 요청의 DB 경계",{timeout:120_000},()=>{
   afterAll(async()=>{
     vi.unstubAllEnvs();
     try{if(created)await pool.query(`DROP SCHEMA ${schema} CASCADE`);}finally{await pool.end();}
+  });
+
+  it("웹 두 프로세스와 Actions는 호출권·5분 간격을 공유하고 웹 재시작 후 실패 요청을 복구합니다",async()=>{
+    vi.stubEnv("PDF_WEB_DISPATCH_ENABLED","true");vi.stubEnv("DETAIL_COLLECTION_QUEUE_ENABLED","true");
+    vi.stubEnv("GITHUB_ACTIONS","false");vi.stubEnv("PDF_DISPATCH_TOKEN","test-server-only");
+    const fetcher=vi.fn<typeof fetch>().mockResolvedValue(new Response(null,{status:403}));
+    vi.stubGlobal("fetch",fetcher);
+    const runtimes:PdfDispatchRuntime[]=[];
+    try {
+      await queue.enqueue(key,fileNo,1,"automatic");
+      runtimes.push(createWebPdfDispatcher(pool,schema)!,createWebPdfDispatcher(pool,schema)!);
+      vi.stubEnv("GITHUB_ACTIONS","true");vi.stubEnv("GITHUB_REF","refs/heads/main");
+      vi.stubEnv("GITHUB_REPOSITORY",repository);
+      vi.stubEnv("GITHUB_WORKFLOW_REF",`${repository}/.github/workflows/collect.yml@refs/heads/main`);
+      runtimes.push(createActionsPdfDispatcher(pool,schema)!);
+      for(const runtime of runtimes)runtime.start();
+      await vi.waitFor(async()=>expect((await state()).last_outcome).toBe("http_error"),{timeout:20_000});
+      await Promise.all(runtimes.map(runtime=>runtime.finish()));runtimes.length=0;
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect(await state()).toMatchObject({requested_generation:"1",acknowledged_generation:"0",attempt_count:"1"});
+      vi.stubEnv("GITHUB_ACTIONS","false");
+      const restarted=createWebPdfDispatcher(pool,schema)!;runtimes.push(restarted);
+      restarted.wake();await restarted.finish();runtimes.length=0;
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      await due();fetcher.mockResolvedValue(new Response(null,{status:204}));
+      const recovered=createWebPdfDispatcher(pool,schema)!;runtimes.push(recovered);
+      recovered.start();
+      await vi.waitFor(async()=>expect((await state()).acknowledged_generation).toBe("1"),{timeout:20_000});
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      expect(await state()).toMatchObject({attempt_count:"2",last_outcome:"accepted"});
+    } finally {
+      await Promise.all(runtimes.map(runtime=>runtime.finish()));vi.unstubAllGlobals();
+    }
   });
 
   it("PDF 등록·포인터·실행 요청 세대는 함께 커밋되며 재접수는 세대를 늘리지 않습니다",async()=>{

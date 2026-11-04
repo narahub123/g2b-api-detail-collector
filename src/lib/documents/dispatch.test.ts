@@ -1,9 +1,17 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { dispatchPdfWorkflow, runPdfDispatch } from "./dispatch";
 import type { PdfDispatchState } from "./dispatch-state";
-import { actionsDispatchAllowed, PdfDispatchRuntime } from "./dispatch-runtime";
+import { actionsDispatchAllowed, webDispatchAllowed, PdfDispatchRuntime } from "./dispatch-runtime";
 
 const repository = "narahub123/g2b-api-detail-collector";
+it("웹 호출은 별도 승인 플래그와 서버 인증·상세 소비기 설정을 모두 요구합니다", () => {
+  const env = {PDF_WEB_DISPATCH_ENABLED:"true", DETAIL_COLLECTION_QUEUE_ENABLED:"true", DATABASE_URL:"postgres://test",
+    PDF_PROGRESS_DISPATCH_ENABLED:"true", G2B_PDF_EXTRACTION_ENABLED:"true", DETAIL_PDF_REGISTRATION_ENABLED:"true",
+    PDF_DISPATCH_REPOSITORY:repository, PDF_DISPATCH_TOKEN:"server-secret"};
+  expect(webDispatchAllowed(env)).toBe(true);
+  for (const name of Object.keys(env)) expect(webDispatchAllowed({...env,[name]:""})).toBe(false);
+  expect(webDispatchAllowed({...env,GITHUB_ACTIONS:"true"})).toBe(false);
+});
 afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); });
 
 it.each([200,204])("공통 PDF 워크플로에 고정된 자동 입력만 전송하고 %i 응답을 수락합니다", async status => {

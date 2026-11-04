@@ -4,6 +4,7 @@ import { PdfDispatchState } from "../dispatch-state";
 import type { DispatchClaim } from "../dispatch-state";
 import { runPdfDispatch } from "../dispatch";
 import type { DispatchResponse } from "../dispatch";
+import { createWebPdfDispatcher } from "../dispatch-runtime";
 
 const boundary=process.env.DISPATCH_TEST_BOUNDARY;
 
@@ -39,14 +40,25 @@ async function main(): Promise<void> {
   const pool=new pg.Pool({connectionString:process.env.DATABASE_URL,max:2,connectionTimeoutMillis:10_000,query_timeout:15_000});
   try {
     const queue=new DocumentQueue(pool,process.env.G2B_DB_SCHEMA);
-    if(boundary!=="resume")await queue.enqueue(key,fileNo,1,"automatic");
+    if(boundary!=="resume" && boundary!=="resume-web")await queue.enqueue(key,fileNo,1,"automatic");
     if(boundary==="registered")await hold();
+    const nativeFetch=fetch;
     const fetcher: typeof fetch=async(input,init)=>{
       if(String(input)!==`https://api.github.com/repos/${repository}/actions/workflows/pdf-extract.yml/dispatches`) {
         throw new Error("예상하지 않은 외부 호출입니다.");
       }
-      return fetch(endpoint,init);
+      return nativeFetch(endpoint,init);
     };
+    if(boundary==="resume-web") {
+      process.env.PDF_WEB_DISPATCH_ENABLED="true";process.env.DETAIL_COLLECTION_QUEUE_ENABLED="true";
+      process.env.PDF_DISPATCH_TOKEN="dispatch-crash-test-token";
+      globalThis.fetch=fetcher;
+      const runtime=createWebPdfDispatcher(pool,queue.schema);
+      if(!runtime)throw new Error("웹 테스트 조정기가 비활성입니다.");
+      try {runtime.wake();await runtime.finish();}
+      finally {globalThis.fetch=nativeFetch;}
+      process.send?.({type:"result"});return;
+    }
     const result=await runPdfDispatch(new HeldDispatchState(pool,queue.schema),{repository,token:"dispatch-crash-test-token",fetcher});
     process.send?.({type:"result",result});
   } finally { await pool.end(); }

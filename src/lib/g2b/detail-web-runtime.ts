@@ -5,9 +5,10 @@ import { getPool } from "./postgres-store";
 import { serializeError } from "../error-diagnostics";
 import { randomUUID } from "node:crypto";
 import process from "node:process";
+import { createWebPdfDispatcher, type PdfDispatchRuntime } from "../documents/dispatch-runtime";
 
 // 계측 초기화와 요청 번들이 서로 다른 전역 객체를 사용해도 같은 Node 프로세스 상태를 공유합니다.
-const state = process as typeof process & { __g2bDetailRuntime?: DetailRuntime; __g2bDetailToken?: string; __g2bDetailWork?: Promise<number> };
+const state = process as typeof process & { __g2bDetailRuntime?: DetailRuntime; __g2bDetailToken?: string; __g2bDetailWork?: Promise<number>; __g2bPdfDispatcher?: PdfDispatchRuntime | null };
 
 /** 운영 전환 전에는 명시적으로 활성화한 검사 환경에서만 새 경로를 사용합니다. */
 export function detailQueueEnabled(): boolean {
@@ -36,8 +37,13 @@ export function startDetailWebRuntime(): DetailRuntime | null {
     },
       error => console.error("상세 큐 실행 실패:", serializeError(error)));
     state.__g2bDetailRuntime = runtime;
+    state.__g2bPdfDispatcher = createWebPdfDispatcher(getPool(), process.env.G2B_DB_SCHEMA || "public", runtime.signal);
+    // 상세 소비가 오래 실행되어도 미처리 요청의 30초 점검을 계속합니다.
+    state.__g2bPdfDispatcher?.start();
     /** 종료 요청 이후의 새 공고 선점을 막고 현재 실행의 정리를 시도합니다. */
-    const stop = () => { void runtime.stop().catch(error => console.error("상세 큐 종료 실패:", serializeError(error))); };
+    const stop = () => { void runtime.stop()
+      .finally(() => state.__g2bPdfDispatcher?.finish())
+      .catch(error => console.error("상세 큐 종료 실패:", serializeError(error))); };
     process.once("SIGINT", stop);
     process.once("SIGTERM", stop);
     runtime.start();
@@ -60,7 +66,10 @@ export function scheduleDetailWebRequest(authorization: string | null, schedule:
   // after가 HTTP 응답보다 먼저 실패해도 처리되지 않은 거부가 발생하지 않게 합니다.
   void work.catch(() => undefined);
   schedule(async () => {
-    try { resolve(await consumeCollectionQueue(webDetailQueue(), { signal: state.__g2bDetailRuntime?.signal })); }
+    try { resolve(await consumeCollectionQueue(webDetailQueue(), {
+      signal: state.__g2bDetailRuntime?.signal,
+      onDetailFinished: () => state.__g2bPdfDispatcher?.wake(),
+    })); }
     catch (error) { reject(error); console.error("상세 소비 요청 실패:", serializeError(error)); }
     finally { if (state.__g2bDetailWork === work) state.__g2bDetailWork = undefined; }
   });

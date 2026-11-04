@@ -10,6 +10,13 @@ export function actionsDispatchAllowed(env: Record<string,string|undefined> = pr
     && env.GITHUB_WORKFLOW_REF?.toLowerCase()===`${repository}/.github/workflows/collect.yml@refs/heads/main`;
 }
 
+/** 웹 서버의 별도 승인과 서버 전용 인증이 갖춰진 경우에만 실행 요청을 허용합니다. */
+export function webDispatchAllowed(env: Record<string,string|undefined> = process.env): boolean {
+  return env.PDF_WEB_DISPATCH_ENABLED === "true" && env.DETAIL_COLLECTION_QUEUE_ENABLED === "true"
+    && !!env.DATABASE_URL && !!dispatchRepository(env) && env.GITHUB_ACTIONS !== "true"
+    && !!env.PDF_DISPATCH_TOKEN?.trim() && !/[\r\n]/.test(env.PDF_DISPATCH_TOKEN);
+}
+
 /** 수집 중 주기 점검과 공고 완료 신호를 합치고 종료 시 마지막 점검까지 기다립니다. */
 export class PdfDispatchRuntime {
   private pending?: Promise<void>;
@@ -54,6 +61,17 @@ export class PdfDispatchRuntime {
 /** Actions 전용 인증을 서버 실행에서만 읽고 공통 DB 조정기에 연결합니다. */
 export function createActionsPdfDispatcher(pool: pg.Pool,schema: string,signal?:AbortSignal): PdfDispatchRuntime | null {
   if (!actionsDispatchAllowed()) return null;
+  return createPdfDispatcher(pool,schema,signal);
+}
+
+/** 웹의 주기 점검과 공고 완료 신호를 Actions와 같은 저장소별 DB 상태에 연결합니다. */
+export function createWebPdfDispatcher(pool: pg.Pool,schema: string,signal?:AbortSignal): PdfDispatchRuntime | null {
+  if (!webDispatchAllowed()) return null;
+  return createPdfDispatcher(pool,schema,signal);
+}
+
+/** 실행 환경에 관계없이 같은 호출 제한과 전용 연결 풀을 사용합니다. */
+function createPdfDispatcher(pool: pg.Pool,schema: string,signal?:AbortSignal): PdfDispatchRuntime {
   const repository=dispatchRepository()!;
   // 수집의 기존 연결 제한을 바꾸지 않고 조정기의 연결·쿼리 대기만 제한합니다.
   const dispatchPool=new pg.Pool({...pool.options,max:1,connectionTimeoutMillis:10_000,query_timeout:15_000});
