@@ -1,0 +1,40 @@
+/* 큰 섹션 아코디언(FormAccordion)과 분리된 표 내부용 작은 아코디언. */
+.compact-accordion {
+  display: block;
+  min-width: 0;
+  width: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+  font: inherit;
+}
+.compact-accordion > summary {
+  display: list-item;
+  list-style: disclosure-closed inside;
+  cursor: pointer;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  text-align: left;
+}
+.compact-accordion[open] > summary { list-style-type: disclosure-open; }
+.compact-accordion > summary::marker { color: currentColor; font-size: .85em; }
+.compact-accordion > summary:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.compact-accordion > .compact-accordion-content {
+  margin: 6px 0 0 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  font: inherit;
+}
