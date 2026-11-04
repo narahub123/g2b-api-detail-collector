@@ -148,3 +148,130 @@ it("공용 시계로 현재 구간만 늘리고 완료 응답 후에는 단계 �
   expect(within(overall).getByText("4.20초")).toBeInTheDocument();
   expect(fetcher).toHaveBeenCalledTimes(1);
 });
+
+it("수집 처리 관측은 기본 접힘 상태이며 펼치고 다시 접을 수 있습니다", () => {
+  render(
+    <CollectionJobObservation
+      initial={job({ status: "completed", results: [] })}
+    />,
+  );
+  const summary = screen.getByText("수집 처리 관측").closest("summary")!;
+  const details = summary.closest("details")!;
+  expect(details).toHaveClass("form-accordion", "collection-observation");
+  expect(details).not.toHaveAttribute("open");
+  fireEvent.click(summary);
+  expect(details).toHaveAttribute("open");
+  expect(within(details).getByText("상태: 수집 완료")).toBeInTheDocument();
+  fireEvent.click(summary);
+  expect(details).not.toHaveAttribute("open");
+});
+
+it("수집 처리 관측을 접어도 내부 공고별 결과와 진행 시간 상태를 유지합니다", () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date(start));
+  render(<CollectionJobObservation initial={job()} />);
+  const summary = screen.getByText("수집 처리 관측").closest("summary")!;
+  const details = summary.closest("details")!;
+  fireEvent.click(summary);
+  fireEvent.click(screen.getByText("공고별 결과 2건"));
+  act(() => vi.advanceTimersByTime(2000));
+  expect(
+    within(screen.getAllByRole("row")[1]).getByText("2.0초"),
+  ).toBeInTheDocument();
+  fireEvent.click(summary);
+  expect(details).not.toHaveAttribute("open");
+  act(() => vi.advanceTimersByTime(1000));
+  expect(
+    within(screen.getAllByRole("row")[1]).getByText("3.0초"),
+  ).toBeInTheDocument();
+  fireEvent.click(summary);
+  expect(details).toHaveAttribute("open");
+  expect(
+    screen.getByText("공고별 결과 2건").closest("details"),
+  ).toHaveAttribute("open");
+});
+
+it("단계별 처리 시간과 공고별 결과를 중첩 FormAccordion으로 표시하고 독립적으로 접고 펼칩니다", () => {
+  render(<CollectionJobObservation initial={job({ status: "completed" })} />);
+
+  const outerSummary = screen.getByText("수집 처리 관측").closest("summary")!;
+  const outer = outerSummary.closest("details")!;
+
+  const stageSummary = screen.getByText("단계별 처리 시간").closest("summary")!;
+  const stage = stageSummary.closest("details")!;
+
+  const resultsSummary = screen
+    .getByText("공고별 결과 2건")
+    .closest("summary")!;
+  const results = resultsSummary.closest("details")!;
+
+  // 1. 세 아코디언의 클래스 및 중첩 구조 확인
+  expect(outer).toHaveClass("form-accordion", "collection-observation");
+
+  expect(stage).toHaveClass("form-accordion", "collection-stage-section");
+
+  expect(results).toHaveClass(
+    "form-accordion",
+    "form-accordion-compact",
+    "collection-progress-results",
+  );
+
+  expect(outer).toContainElement(stage);
+  expect(stage).toContainElement(results);
+
+  // 2. 세 아코디언 모두 기본 접힘 상태
+  expect(outer).not.toHaveAttribute("open");
+  expect(stage).not.toHaveAttribute("open");
+  expect(results).not.toHaveAttribute("open");
+
+  // 3. 공고별 결과 Summary와 본문이 분리되어 있는지 확인
+  const resultsBody = results.querySelector(":scope > .form-accordion-body");
+
+  expect(resultsBody).not.toBeNull();
+  expect(resultsSummary.parentElement).toBe(results);
+
+  const resultsRegion = screen.getByRole("region", {
+    name: "공고별 처리 시간",
+  });
+
+  const resultsTable = screen.getByRole("table", {
+    name: "상세 처리 대상 공고별 시간·마지막 진행",
+  });
+
+  expect(resultsBody).toContainElement(resultsRegion);
+  expect(resultsRegion).toContainElement(resultsTable);
+
+  // 4. 바깥쪽 아코디언을 열어도 내부는 접힌 상태 유지
+  fireEvent.click(outerSummary);
+
+  expect(outer).toHaveAttribute("open");
+  expect(stage).not.toHaveAttribute("open");
+  expect(results).not.toHaveAttribute("open");
+
+  // 5. 단계별 처리 시간 펼치기
+  fireEvent.click(stageSummary);
+
+  expect(stage).toHaveAttribute("open");
+  expect(results).not.toHaveAttribute("open");
+
+  // 6. 공고별 결과 펼치기
+  fireEvent.click(resultsSummary);
+
+  expect(results).toHaveAttribute("open");
+  expect(resultsTable).toBeInTheDocument();
+
+  // 7. 상위 아코디언을 접었다 펼쳐도 하위 상태 유지
+  fireEvent.click(stageSummary);
+  expect(stage).not.toHaveAttribute("open");
+
+  fireEvent.click(stageSummary);
+  expect(stage).toHaveAttribute("open");
+  expect(results).toHaveAttribute("open");
+
+  // 8. 공고별 결과만 독립적으로 접기
+  fireEvent.click(resultsSummary);
+
+  expect(results).not.toHaveAttribute("open");
+  expect(stage).toHaveAttribute("open");
+  expect(outer).toHaveAttribute("open");
+});

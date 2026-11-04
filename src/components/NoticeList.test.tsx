@@ -71,6 +71,15 @@ describe("NoticeList", () => {
     })));
     await waitFor(() => expect(screen.getByText("접근 실패")).toBeInTheDocument(), { timeout: 3000 });
     expect(screen.getByRole("row", { name: /R26BK1--000 재수집 성공/, hidden: true })).toBeInTheDocument();
+    const summary = screen.getByText("재수집 결과").closest("summary");
+    expect(summary).not.toBeNull();
+
+    const accordion = summary!.closest("details");
+    expect(accordion).toHaveClass("form-accordion", "refresh-results");
+    expect(accordion).not.toHaveAttribute("open");
+
+    fireEvent.click(summary!);
+    expect(accordion).toHaveAttribute("open");
   });
 });
 

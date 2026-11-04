@@ -9,6 +9,7 @@ import type { CollectionJob } from "@/lib/g2b/collection-job";
 import { CollectionJobObservation } from "./CollectionJobObservation";
 import type { NoticeFilters } from "@/lib/g2b/notice-filters";
 import { NoticeRegions } from "./NoticeRegions";
+import { FormAccordion } from "./FormAccordion";
 
 function amount(value: string | null) {
   if (!value) return "금액 정보 없음";
@@ -117,12 +118,12 @@ export function NoticeList({
         </p>
       )}
       {job?.mode === "refresh" && (
-        <div className="refresh-results">
-          <strong>
-            {job.status === "queued" ? "재수집 대기 중" : job.status === "running" ? "재수집 진행 중" : "재수집 결과"}
-          </strong>
+        <FormAccordion
+          title={job.status === "queued" ? "재수집 대기 중" : job.status === "running" ? "재수집 진행 중" : "재수집 결과"}
+          className="refresh-results"
+        >
           <CollectionJobObservation initial={job} />
-        </div>
+        </FormAccordion>
       )}
       <div className="notice-list">
         {notices.map((notice) => (
@@ -153,7 +154,12 @@ export function NoticeList({
               </a>
             </h3>
             <p className="agency">
-              <span>수요기관: {notice.demandAgency || "정보 없음"} <NoticeSourceLink href={serviceDetailUrl(notice.number, notice.order)} /></span>
+              <span>
+                수요기관: {notice.demandAgency || "정보 없음"}{" "}
+                <NoticeSourceLink
+                  href={serviceDetailUrl(notice.number, notice.order)}
+                />
+              </span>
               <br />
               <span>공고기관: {notice.noticeAgency || "정보 없음"}</span>
             </p>
@@ -180,7 +186,11 @@ export function NoticeList({
               </span>
               <span>
                 <small>지역</small>
-                <NoticeRegions region={notice.region} basePath="/admin" filters={filters} />
+                <NoticeRegions
+                  region={notice.region}
+                  basePath="/admin"
+                  filters={filters}
+                />
               </span>
             </div>
           </article>

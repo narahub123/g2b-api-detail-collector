@@ -6,6 +6,7 @@ import type { CollectionJob } from "@/lib/g2b/collection-job";
 import { collectionDuration, collectionStageLabel, collectionStatuses, collectionTime } from "@/lib/g2b/collection-display";
 import type { CollectionNoticeResult } from "@/lib/g2b/collection-progress";
 import { CollectionStageTimings, CollectionTimingClock as ObservationTime } from "./CollectionStageTimings";
+import { FormAccordion } from "./FormAccordion";
 import "../app/collection-progress.css";
 
 /** 외부 폴링 화면에서는 전달받은 상태만 표시하고 상세 화면에서만 직접 조회합니다. */
@@ -116,8 +117,7 @@ function ObservationView({ job }: { job: CollectionJob }) {
   // 첫 서버 렌더와 브라우저 초기 렌더가 동일하도록 마지막 관측 시각을 기준으로 시작합니다.
   const observedNow = Date.parse(job.progress?.lastProgressAt ?? job.startedAt);
   const interrupted = job.status === "interrupted";
-  return <ObservationClock key={job.id} active={active}><section className="collection-observation" aria-label="수집 처리 관측">
-    <h2>처리 관측</h2>
+  return <ObservationClock key={job.id} active={active}><FormAccordion title="수집 처리 관측" className="collection-observation">
     <p className="collection-observation-status" role="status">상태: {collectionStatuses[job.status]}</p>
     {job.detailQueued !== undefined && <p>상세 수집 대기 {job.detailQueued}건</p>}
     {job.maintenance && <div role="status"><p>{job.maintenance.message}</p><p>점검 확인: {collectionTime(job.maintenance.detectedAt)}</p></div>}
@@ -131,13 +131,11 @@ function ObservationView({ job }: { job: CollectionJob }) {
       <div><dt>마지막 진행</dt><dd>{collectionTime(job.progress?.lastProgressAt)}</dd></div>
     </dl>
     <p className="collection-observation-note">마지막 진행은 실제 처리 이벤트 기준이며 생존 여부나 오류 원인을 확정하는 정보는 아닙니다.</p>
-    <section className="collection-stage-section" aria-label="작업 전체 단계별 시간">
-      <h3>단계별 처리 시간</h3>
+    <FormAccordion title="단계별 처리 시간" className="collection-stage-section">
       <p className="collection-observation-note">처리 구간별 누적 시간입니다. 작업 전체와 공고별 시간을 서로 합산하지 마세요. 진행 중인 시간은 마지막 저장값에 화면 경과 시간을 더한 표시값입니다.</p>
       <CollectionStageTimings timings={job.timings} running={active} label="작업 전체 단계별 처리 시간" />
-    </section>
-    {!!job.results?.length && <details className="job-results collection-progress-results">
-      <summary><span>공고별 결과 {job.results.length}건</span><ChevronRight className="collection-progress-results-chevron" size={20} aria-hidden="true" /></summary>
+    {!!job.results?.length && 
+      <FormAccordion title={`공고별 결과 ${job.results.length}건`} className="collection-progress-results" size="compact">
       <div className="collection-observation-table" role="region" aria-label="공고별 처리 시간" tabIndex={0}>
         <table>
           <caption>상세 처리 대상 공고별 시간·마지막 진행</caption>
@@ -147,6 +145,8 @@ function ObservationView({ job }: { job: CollectionJob }) {
         </table>
       </div>
       <p className="collection-observation-note">소요 시간은 최초 시작부터 마지막 종료까지의 경과 시간입니다. 재시도 사이 대기·다른 공고 처리도 포함될 수 있습니다. 단계별 누적 시간은 실제 처리 구간 기준이므로 공고 소요 시간과 다를 수 있습니다.</p>
-    </details>}
-  </section></ObservationClock>;
+    </FormAccordion>
+    }
+    </FormAccordion>
+  </FormAccordion></ObservationClock>;
 }

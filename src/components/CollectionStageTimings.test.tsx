@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, it } from "vitest";
 import { CollectionStageTimings, CollectionTimingClock } from "./CollectionStageTimings";
 import type { CollectionTimings } from "@/lib/g2b/collection-timings";
@@ -105,4 +105,26 @@ it.each(["completed", "failed", "deferred", "interrupted"] as const)("%s 기록�
   rerender(view(100000));
   expect(within(row("결과 저장")).getByText("25ms")).toBeInTheDocument();
   expect(screen.queryByText("진행 중")).not.toBeInTheDocument();
+});
+
+it("opening과 modals 세부 작업 시간에 공통 소형 아코디언을 적용하고 각각 접고 펼칩니다", () => {
+  render(<CollectionStageTimings label="상세 시간" running={false} timings={{
+    outcome:"completed",totals:{opening:100,modals:200},details:{
+      opening:{steps:{},active:[]},
+      modals:{steps:{"modal.wait-settled":{elapsedMs:200,count:1,maxMs:200,outcomes:{settled:1}}},active:[]},
+    },
+  }}/>);
+  const summaries=screen.getAllByText("세부 작업 시간");
+  expect(summaries).toHaveLength(2);
+  for(const summary of summaries){
+    const details=summary.closest("details")!;
+    expect(details).toHaveClass("compact-accordion");
+    expect(details).not.toHaveAttribute("open");
+    fireEvent.click(summary);
+    expect(details).toHaveAttribute("open");
+    fireEvent.click(summary);
+    expect(details).not.toHaveAttribute("open");
+  }
+  expect(within(row("모달 수집")).getByRole("table",{name:"세부 작업 시간 집계"})).toBeInTheDocument();
+  expect(within(row("상세 화면 열기")).queryByRole("table",{name:"세부 작업 시간 집계"})).not.toBeInTheDocument();
 });
