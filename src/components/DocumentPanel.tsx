@@ -127,6 +127,7 @@ function DocumentFile({document:doc,index,noticeKey,refresh}:{document:DocumentS
     {doc.active?.next_attempt_at&&` 재시도 예정: ${new Date(doc.active.next_attempt_at).toLocaleString('ko-KR')}`}</p>}
    {overdue&&doc.active?.error_code!=='g2b_maintenance'&&<p role="alert">실행 가능한 요청이 30분 이상 대기 중입니다. 작업기·임대·보완 실행 및 Actions 상태를 확인하세요.</p>}
    {latestIssue&&<p role="alert">최근 시도: {runStatuses[latestIssue.status]}{latestIssue.error?` · ${latestIssue.error}`:''}{doc.success?' · 마지막 성공 본문을 조회할 수 있습니다.':''}</p>}
+   {doc.success_is_current===false&&<p role="alert">첨부가 변경·삭제되었습니다. 보관된 성공 본문은 이전 첨부의 결과입니다.</p>}
    {!!history.length&&<p><label>실행 이력{' '}<select aria-label={`실행 이력 첨부 ${doc.seq}`} value={selectedId} onChange={event=>setSelection(event.target.value)}>
     {selectedId&&!history.some(item=>item.id===selectedId)&&<option value={selectedId}>선택한 저장 기록</option>}
     {history.map(item=><option key={item.id} value={item.id}>{documentWorkLabel(item)} · {runStatuses[item.status]} · {new Date(item.requested_at).toLocaleString('ko-KR')} · 시도 {item.attempt_number}</option>)}
@@ -136,7 +137,7 @@ function DocumentFile({document:doc,index,noticeKey,refresh}:{document:DocumentS
     {run.status==='no_text'&&<p>텍스트가 없는 PDF입니다. OCR은 실행하지 않습니다.</p>}
     <details><summary>처리 정보</summary><p>추출기: {run.extractor_version??'-'} · 처리 시간: {run.elapsed_ms==null?'-':`${(run.elapsed_ms/1000).toFixed(1)}초`} · 최대 메모리: {run.peak_memory_bytes?`${(Number(run.peak_memory_bytes)/1024/1024).toFixed(0)}MiB`:'-'}</p><StageTimings timings={run.stage_timings}/></details>
    </div>}
-   <p>같은 첨부파일은 현재 성공 본문만 보관하며 이전 실행은 처리 이력만 제공합니다.</p>
+   <p>같은 첨부파일은 마지막으로 보관한 성공 본문을 제공하며 이전 실행은 처리 이력으로 확인할 수 있습니다.</p>
     {!!bodyPages&&<><label>페이지{' '}<select aria-label={`페이지 첨부 ${doc.seq}`} value={page} onChange={event=>setPage(Number(event.target.value))}>
      {Array.from({length:bodyPages!},(_,i)=><option key={i+1} value={i+1}>{i+1}쪽</option>)}</select></label>{' '}
      <button disabled={page<=1} onClick={()=>setPage(value=>value-1)}>이전</button>{' '}<button disabled={page>=bodyPages!} onClick={()=>setPage(value=>value+1)}>다음</button>

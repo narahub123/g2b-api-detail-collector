@@ -91,7 +91,8 @@ function FileDetailView({initial,initialHistory,initialHistoryError=''}:Props){
   <DocumentBodyViewer noticeKey={file.notice_key} documentId={file.id} runId={file.content?.run_id??'none'} pageCount={file.content?.page_count??0}
    currentBodyHref={`/admin/document-extractions/files/${file.id}`} onReplaced={()=>void refresh()}
    source={<>
-    {file.content&&<p className="extraction-meta">현재 보관된 성공 본문 · 완료 {documentTime(file.content.finished_at)} · <a href={`/admin/document-extractions/${file.content.run_id}`}>본문 출처 실행 확인</a></p>}
+    {file.content&&<p className="extraction-meta">{file.content.is_current===false?'이전 첨부의 보관된 성공 본문':'현재 보관된 성공 본문'} · 완료 {documentTime(file.content.finished_at)} · <a href={`/admin/document-extractions/${file.content.run_id}`}>본문 출처 실행 확인</a></p>}
+    {file.content?.is_current===false&&<p role="alert">첨부가 변경·삭제되었습니다. 아래 본문은 최신 첨부의 추출 결과가 아닙니다.</p>}
     {!file.requestState.canRequest&&<p className="extraction-meta">{file.requestState.reason}{file.requestState.active&&<>{' '}<a href={`/admin/document-extractions/${file.requestState.active.id}`}>진행 중인 실행 확인</a></>}</p>}
     {receipt&&<p role="status">{manualExtractionMessage(receipt)}{' '}<a href={`/admin/document-extractions/${receipt.id}`}>접수한 실행 확인</a></p>}
     {requestError&&<p role="alert" className="extraction-error">{requestError}</p>}

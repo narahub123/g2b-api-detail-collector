@@ -14,7 +14,7 @@ export class DocumentError extends Error {
 export function pickPdfAttachment(key: unknown, fileNo: unknown, seq: unknown, files: { name: string; url: string | null;fileNo?:string;seq?:number }[]) {
   if (typeof key !== "string" || typeof fileNo !== "string" || typeof seq !== "number") throw new DocumentError("첨부 식별자가 올바르지 않습니다.");
   const matches = (Array.isArray(files) ? files : []).filter(file => file && typeof file.name === "string" &&
-    file.fileNo===fileNo&&file.seq===seq&&/\.pdf$/i.test(file.name.trim()));
+    typeof file.fileNo === "string" && file.fileNo.toLowerCase()===fileNo.toLowerCase()&&file.seq===seq&&/\.pdf$/i.test(file.name.trim()));
   if (matches.length !== 1 || !directAttachmentIdentity(key,matches[0]))
     throw new DocumentError("해당 공고의 직접 첨부 PDF를 찾을 수 없습니다.", 404);
   return { ...matches[0], url:matches[0].url!, key, fileNo, seq };

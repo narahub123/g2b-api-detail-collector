@@ -5,6 +5,8 @@ import {runStatuses} from './model';
 import type {RunMetadata} from './model';
 import type {DiagnosticError,ExtractionStage} from './diagnostics';
 import {documentRequestState,type DocumentRequestState} from './request-state';
+import { documentRegistrationEnabled } from './registration';
+import { isCurrentAttachmentRun } from './attachment-lifecycle';
 
 export type HistoryFilters={status:string;type:string;filename:string;key:string;from:string;to:string;page:number;view:'history'|'documents'};
 export type HistoryRun=RunMetadata & {document_id:string;notice_key:string;document_type:string|null;chain_id:string;retry_of:string|null;retry_eligible:boolean;
@@ -14,7 +16,7 @@ export type HistoryList={items:HistoryRun[];hasNext:boolean;page:number;totalCou
 export type DocumentFile={document_id:string;notice_key:string;filename:string;document_type:string|null;created_at:string;latest:HistoryRun|null;requestState?:DocumentRequestState};
 export type DocumentFileList=Omit<HistoryList,'items'>&{items:DocumentFile[]};
 export type DocumentFileDetail={id:string;notice_key:string;filename:string;document_type:string|null;attachment_url:string|null;
- latest:RunMetadata|null;content:{run_id:string;page_count:number;finished_at:string|null}|null;requestState:DocumentRequestState};
+ latest:RunMetadata|null;content:{run_id:string;page_count:number;finished_at:string|null;is_current?:boolean}|null;requestState:DocumentRequestState};
 const columns=['id','filename','status','source','purpose','requested_at','started_at','finished_at','next_attempt_at','error','error_code','attempt_number','page_count','character_count','elapsed_ms','extractor_version','file_hash','peak_memory_bytes',
  'document_id','document_type','chain_id','retry_of','retry_eligible','stage','stage_started_at','last_progress_at','current_page','completed_pages','total_pages','stage_timings'].map(c=>`r.${c}`).join(',');
 export const runIdPattern=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -93,16 +95,22 @@ export class DocumentHistoryStore{
  /** 최신 실행과 현재 성공 본문을 분리해 미요청 파일도 변경 없이 조회합니다. */
  async file(id:string):Promise<DocumentFileDetail|null>{
   if(!runIdPattern.test(id))return null;
-  const row=(await this.pool.query(`SELECT d.id,d.notice_key,d.filename,d.document_type,d.attachment_url,d.file_no,d.seq,
+  const row=(await this.pool.query(`SELECT d.id,d.notice_key,d.filename,d.document_type,d.attachment_url,d.file_no,d.seq,d.is_current,
+   ${documentRegistrationEnabled()?'d.attachment_revision,':''}
    n.detail->'attachments' AS attachments,
    (SELECT row_to_json(m) FROM (SELECT ${columns} FROM ${this.schema}.attachment_extraction_runs r WHERE r.id=d.latest_run_id AND r.document_id=d.id) m) AS latest,
-   (SELECT json_build_object('run_id',c.run_id,'page_count',jsonb_array_length(c.pages),'finished_at',s.finished_at)
+   (SELECT json_build_object('run_id',c.run_id,'page_count',jsonb_array_length(c.pages),'finished_at',s.finished_at${documentRegistrationEnabled() ? ",'attachment_url',s.attachment_url,'attachment_revision',s.attachment_revision" : ''})
     FROM ${this.schema}.attachment_document_contents c JOIN ${this.schema}.attachment_extraction_runs s ON s.id=c.run_id AND s.document_id=d.id
     WHERE c.document_id=d.id) AS content,
    (SELECT json_build_object('id',a.id,'status',a.status) FROM ${this.schema}.attachment_extraction_runs a
     WHERE a.document_id=d.id AND a.status IN ('queued','processing') LIMIT 1) AS active
    FROM ${this.schema}.attachment_documents d LEFT JOIN ${this.schema}.notices n ON n.key=d.notice_key WHERE d.id=$1`,[id])).rows[0];
   if(!row)return null;
+  if(documentRegistrationEnabled()&&row.content){
+   const {attachment_url,attachment_revision,...content}=row.content;
+   row.content={...content,is_current:isCurrentAttachmentRun(row,
+    {attachment_url,attachment_revision},{attachments:row.attachments})};
+  }
   // 접수 검증에 필요한 내부 필드와 공고 원문은 클라이언트 응답에서 제외합니다.
   return {id:row.id,notice_key:row.notice_key,filename:row.filename,document_type:row.document_type,attachment_url:row.attachment_url,
    latest:row.latest,content:row.content,requestState:documentRequestState(row.notice_key,row.file_no,row.seq,row.attachments,row.active)};
@@ -110,7 +118,7 @@ export class DocumentHistoryStore{
  /** 단일 시도의 원본 다운로드 주소와 같은 재시도 묶음을 조회합니다. */
  async detail(id:string):Promise<HistoryDetail|null>{
   if(!runIdPattern.test(id))return null;
-  const run=(await this.pool.query(`SELECT ${columns},d.notice_key,d.attachment_url,r.diagnostic_error,
+  const run=(await this.pool.query(`SELECT ${columns},d.notice_key,r.attachment_url,r.diagnostic_error,
    EXISTS(SELECT 1 FROM ${this.schema}.attachment_document_contents c WHERE c.document_id=d.id AND c.run_id=r.id) AS has_content
    FROM ${this.schema}.attachment_extraction_runs r JOIN ${this.schema}.attachment_documents d ON d.id=r.document_id WHERE r.id=$1`,[id])).rows[0] as HistoryDetail['run']|undefined;
   if(!run)return null;

@@ -46,7 +46,7 @@ export function directAttachmentIdentity(key:string,file:{url?:unknown;fileNo?:u
  if(typeof file.fileNo!=='string'||!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(file.fileNo)||!Number.isSafeInteger(file.seq)||Number(file.seq)<=0||typeof file.url!=='string'||!validateDirectAttachmentUrl(file.url))return null;
  const url=new URL(file.url);
  if(isFixedAttachmentExclusion(file.fileNo,Number(file.seq)))return null;
- if(url.pathname===proposalPath){const identity=parseProposalUrl(file.url);return identity?.fileNo===file.fileNo&&identity.seq===file.seq?{key,fileNo:file.fileNo,seq:Number(file.seq)}:null;}
+ if(url.pathname===proposalPath){const identity=parseProposalUrl(file.url);return identity?.fileNo.toLowerCase()===file.fileNo.toLowerCase()&&identity.seq===file.seq?{key,fileNo:file.fileNo,seq:Number(file.seq)}:null;}
  if(url.pathname!==paths.notice||`${url.searchParams.get('bidPbancNo')}--${url.searchParams.get('bidPbancOrd')}`!==key||Number(url.searchParams.get('fileSeq'))!==file.seq)return null;
  return {key,fileNo:file.fileNo,seq:Number(file.seq)};
 }

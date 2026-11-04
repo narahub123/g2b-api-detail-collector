@@ -26,3 +26,12 @@ it('파일 API는 미요청 파일을 반환하고 접근 제한과 잘못된 ID
  expect((await api(new Request('http://external.test/files/'+id),id)).status).toBe(403);expect(file).not.toHaveBeenCalled();
  file.mockResolvedValue(null);expect((await api(new Request('http://localhost/files/'+id),id)).status).toBe(404);
 });
+it('현재 문서와 다른 주소·버전의 성공 본문은 이전 결과로 표시합니다',async()=>{
+ vi.stubEnv('DETAIL_PDF_REGISTRATION_ENABLED','true');
+ const file=testAttachment(key,id,1);
+ const query=vi.fn().mockResolvedValue({rows:[{id,notice_key:key,file_no:id,seq:1,is_current:true,attachment_revision:'2',
+  attachments:[file],latest:null,content:{run_id:'old',page_count:1,finished_at:null,attachment_url:file.url,attachment_revision:'1'}}]});
+ const result=await new DocumentHistoryStore({query} as never).file(id);
+ expect(result?.content).toMatchObject({run_id:'old',is_current:false});
+ expect(JSON.stringify(result)).not.toContain('attachment_revision');
+});

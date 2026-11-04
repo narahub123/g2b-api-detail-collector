@@ -66,3 +66,14 @@ it("상세 소비기는 시작 시 등록 복구를 조회하고 대기가 없�
   expect(query.mock.calls.some(([sql]) => String(sql).includes("document_registration_handoffs"))).toBe(true);
   expect(release).toHaveBeenCalledOnce();
 });
+
+it("구버전 결과가 저장 거부되면 배치는 성공으로 집계하지 않습니다", async () => {
+  vi.stubEnv("DETAIL_PDF_REGISTRATION_ENABLED", "false");
+  const store = { acquire: vi.fn().mockResolvedValue(true), release: vi.fn(),
+    recover: vi.fn().mockResolvedValue({ checked: 0, recovered: 0, exhausted: 0 }),
+    claim: vi.fn().mockResolvedValueOnce({ id: "old", source: "manual", attempt_number: 1 }).mockResolvedValue(null),
+    complete: vi.fn().mockResolvedValue(false), readyCounts: vi.fn().mockResolvedValue({ manual: 0, initial: 0, reextract: 0 }) };
+  const summary = await runBatch(store as unknown as DocumentQueue, { mode: "local", extract: async () => ({
+    result: { pages: [], pageCount: 1, characterCount: 1, extractorVersion: "test", fileHash: "hash" }, peakMemory: null }) });
+  expect(summary.completed).toBe(0); expect(summary.failed).toBe(1); expect(summary.byKind.manual.failed).toBe(1);
+});

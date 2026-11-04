@@ -2,10 +2,12 @@ import type pg from 'pg';
 import {DocumentError,pickPdfAttachment} from './contract';
 import {directAttachmentIdentity} from '../g2b/attachment-direct';
 import type {DocumentList,DocumentSummary,RunMetadata} from './model';
+import { documentRegistrationEnabled } from './registration';
+import { isCurrentAttachmentRun, synchronizeNoticeAttachments } from './attachment-lifecycle';
 
 const metadata=['id','filename','status','source','purpose','requested_at','started_at','finished_at','next_attempt_at','error','error_code','attempt_number','page_count','character_count','elapsed_ms','extractor_version','file_hash','peak_memory_bytes','stage_timings'];
 /** 페이지 배열이나 실행 소유 토큰을 메타데이터 응답에 포함하지 않습니다. */
-function fields(alias:string){return metadata.map(name=>name==='requested_at'
+function fields(alias:string){return [...metadata,...(documentRegistrationEnabled()?['attachment_url','attachment_revision']:[])].map(name=>name==='requested_at'
  ?`to_char(${alias}.requested_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS requested_at`
  :`${alias}.${name}`).join(',');}
 /** DB의 행 존재 여부를 검사하고 소속이 다른 자료는 같은 404로 응답합니다. */
@@ -24,6 +26,10 @@ export class DocumentStore {
    await db.query('BEGIN');await db.query("SET LOCAL lock_timeout='5s'");
    const row=required((await db.query(`SELECT detail FROM ${this.schema}.notices WHERE key=$1 FOR SHARE`,[key])).rows[0]);
    const files=Array.isArray(row.detail?.attachments)?row.detail.attachments:[];
+   if (documentRegistrationEnabled()) {
+    await synchronizeNoticeAttachments(db,this.schema,key,row.detail);
+    files.sort((a:{fileNo?:string;seq?:number}|null,b:{fileNo?:string;seq?:number}|null)=>String(a?.fileNo??'').toLowerCase().localeCompare(String(b?.fileNo??'').toLowerCase())||Number(a?.seq??0)-Number(b?.seq??0));
+   }
    const current:string[]=[];
    for(const file of files){
     if(typeof file?.name!=='string'||!/\.pdf$/i.test(file.name.trim()))continue;
@@ -40,11 +46,19 @@ export class DocumentStore {
    await db.query('COMMIT');
   }catch(error){await db.query('ROLLBACK').catch(()=>undefined);throw error;}finally{db.release();}
   const rows=(await this.pool.query(`SELECT d.id,d.notice_key,d.file_no,d.seq,d.filename,d.attachment_url,d.is_current,
+    ${documentRegistrationEnabled()?`n.detail->'attachments' AS attachments,d.attachment_revision,`:''}
     (SELECT row_to_json(m) FROM(SELECT ${fields('r')} FROM ${this.schema}.attachment_extraction_runs r WHERE r.id=d.latest_run_id) m) latest,
     (SELECT row_to_json(m) FROM(SELECT ${fields('r')} FROM ${this.schema}.attachment_extraction_runs r WHERE r.id=d.last_success_run_id) m) success,
     (SELECT row_to_json(m) FROM(SELECT ${fields('r')} FROM ${this.schema}.attachment_extraction_runs r WHERE r.id=d.current_run_id AND r.status IN('queued','processing')) m) active
-    FROM ${this.schema}.attachment_documents d WHERE d.notice_key=$1 ORDER BY d.is_current DESC,d.seq,d.id`,[key])).rows as DocumentSummary[];
-  return {documents:rows,unsupported};
+    FROM ${this.schema}.attachment_documents d ${documentRegistrationEnabled()?`JOIN ${this.schema}.notices n ON n.key=d.notice_key`:''}
+    WHERE d.notice_key=$1 ORDER BY d.is_current DESC,d.seq,d.id`,[key])).rows;
+  const documents:DocumentSummary[]=rows.map(row=>{
+    const {attachments,...summary}=row;
+    if(documentRegistrationEnabled()&&row.success)summary.success_is_current=isCurrentAttachmentRun(
+      row,{attachment_url:row.success.attachment_url,attachment_revision:row.success.attachment_revision},{attachments});
+    return summary;
+  });
+  return {documents,unsupported};
  }
  /** 문서의 공고 소속을 먼저 확인하고 요청 등록에 필요한 식별자만 반환합니다. */
  async document(key:string,id:string){return required((await this.pool.query(`SELECT id,file_no,seq FROM ${this.schema}.attachment_documents WHERE id=$1 AND notice_key=$2`,[id,key])).rows[0]);}

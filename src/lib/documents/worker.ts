@@ -156,7 +156,9 @@ export async function runBatch(store:DocumentQueue,options:BatchOptions):Promise
       // 저장 실패는 추출 오류로 바꾸지 않습니다. 롤백된 processing은 다음 임대 복구가 처리합니다.
       try{
         await store.progress?.(token,run.id,{stage:'saving',at:new Date().toISOString()});
-        await store.complete(token,run.id,extracted.result,extracted.peakMemory);
+        if (await store.complete(token,run.id,extracted.result,extracted.peakMemory) === false) {
+          summary.failed++;kindSummary.failed++;continue;
+        }
       }
       catch(error){
         await recordStorageError(error);

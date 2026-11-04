@@ -24,6 +24,7 @@ try {
   await client.query(`CREATE SCHEMA IF NOT EXISTS ${schema}`);
   if (args.includes("--document-registration")) {
     await migration("../db/migrations/0018-document-registration.sql");
+    await migration("../db/migrations/0019-attachment-lifecycle.sql");
     await client.query("COMMIT");
     console.log(`PDF 등록 복구 스키마 적용 완료 (${schema})`);
   } else {

@@ -1,4 +1,5 @@
 import {fixedAttachmentExclusionSql} from '../g2b/attachment-exclusions';
+import { documentRegistrationEnabled } from './registration';
 
 /** 발견과 사전 조회가 같은 직접 첨부 검증 기준을 사용하도록 공통 후보 SQL을 구성합니다. */
 export function discoveryCandidatesSql(schema:string):string{
@@ -15,13 +16,14 @@ export function discoveryCandidatesSql(schema:string):string{
    AND (((a->>'url') LIKE 'https://www.g2b.go.kr/pn/pnp/pnpe/UntyAtchFile/downloadFile.do?%'
     AND substring(a->>'url' from '[?&]bidPbancNo=([^&]+)')||'--'||substring(a->>'url' from '[?&]bidPbancOrd=([^&]+)')=n.key)
     OR ((a->>'url') LIKE 'https://www.g2b.go.kr/fs/fsc/fsca/fileUpload.do?k00=%&fileNo=%&fileSeq=%'
-    AND substring(a->>'url' from '[?&]fileNo=([^&]+)')=a->>'fileNo'))
+    AND lower(substring(a->>'url' from '[?&]fileNo=([^&]+)'))=lower(a->>'fileNo')))
    AND substring(a->>'url' from '[?&]fileSeq=([^&]+)')=a->>'seq'
    AND n.key~'^[A-Za-z0-9_.%~-]+--[A-Za-z0-9_.%~-]+$' AND strpos(n.key,'..')=0
  ), attachments AS (SELECT * FROM matched WHERE copies=1), candidates AS (
   SELECT a.*,EXISTS(SELECT 1 FROM ${schema}.attachment_extraction_runs r WHERE r.document_id=d.id) AS has_history
   FROM attachments a LEFT JOIN ${schema}.attachment_documents d ON d.notice_key=a.key AND d.file_no=a.file_no::uuid AND d.seq=a.seq
   WHERE NOT EXISTS(SELECT 1 FROM ${schema}.attachment_extraction_runs r WHERE r.document_id=d.id
-   AND (r.status IN('queued','processing') OR r.extractor_version=$2))
+   AND (${documentRegistrationEnabled() ? `r.invalidated_at IS NULL AND r.attachment_url=a.attachment_url AND r.attachment_revision=d.attachment_revision AND ` : ''}
+    (r.status IN('queued','processing') OR r.extractor_version=$2)))
  )`;
 }

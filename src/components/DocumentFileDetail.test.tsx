@@ -14,6 +14,12 @@ it('서버 렌더링에서도 현재 본문의 출처를 표시합니다',()=>{
  const html=renderToStaticMarkup(<DocumentFileDetail initial={initial} initialHistory={{runs:[run],nextCursor:null}}/>);
  expect(html).toContain('현재 보관된 성공 본문');expect(html).toContain('/admin/document-extractions/success');
 });
+it('이전 첨부의 본문은 최신 결과와 구분하면서 출처와 조회 기능을 보존합니다',()=>{
+ const html=renderToStaticMarkup(<DocumentFileDetail initial={{...initial,content:{...initial.content!,is_current:false}}} initialHistory={{runs:[run],nextCursor:null}}/>);
+ expect(html).toContain('이전 첨부의 보관된 성공 본문');
+ expect(html).toContain('최신 첨부의 추출 결과가 아닙니다');
+ expect(html).toContain('/admin/document-extractions/success');
+});
 it('대기 중에도 헤더의 재추출 버튼은 비활성 상태로 유지하고 안내와 출처는 아래에 표시합니다',()=>{
  render(<DocumentFileDetail initial={{...initial,requestState:{canRequest:false,reason:'이미 대기 또는 처리 중인 요청이 있습니다.',active:{id:'queued-run',status:'queued'}}}} initialHistory={{runs:[run],nextCursor:null}}/>);
  const header=screen.getByRole('heading',{name:'추출 본문'}).closest('header')!;

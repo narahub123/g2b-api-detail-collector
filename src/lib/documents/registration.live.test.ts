@@ -35,7 +35,7 @@ describe.skipIf(!enabled)("공고별 PDF 등록과 복구", { timeout: 120_000 }
     created = true;
     for (const name of ["../schema.sql", "0006-document-extraction.sql", "0008-extraction-diagnostics.sql",
       "0010-single-document-content.sql", "0011-stage-timings.sql", "0012-extraction-priority.sql",
-      "0014-detail-queue.sql", "0018-document-registration.sql", "0018-document-registration.sql"]) {
+      "0014-detail-queue.sql", "0018-document-registration.sql", "0018-document-registration.sql", "0019-attachment-lifecycle.sql"]) {
       await pool.query((await readFile(`db/migrations/${name}`, "utf8")).replaceAll("public.", `${schema}.`));
     }
   });
@@ -217,7 +217,7 @@ describe.skipIf(!enabled)("공고별 PDF 등록과 복구", { timeout: 120_000 }
       let waiting = false;
       for (let i = 0; i < 20 && !waiting; i++) {
         waiting = (await pool.query(`SELECT EXISTS(SELECT 1 FROM pg_stat_activity
-          WHERE wait_event_type='Lock' AND query LIKE $1 AND query LIKE '%FOR UPDATE OF d%') waiting`, [`%${schema}.attachment_documents%`])).rows[0].waiting;
+          WHERE wait_event_type='Lock' AND query LIKE $1 AND query LIKE '%FOR UPDATE%') waiting`, [`%${schema}.attachment_documents%`])).rows[0].waiting;
         if (!waiting) await new Promise(resolve => setTimeout(resolve, 100));
       }
       expect(waiting).toBe(true);

@@ -40,6 +40,15 @@ async function attemptRegistration(store: DocumentQueue, db: pg.PoolClient, key:
     const notice = (await db.query(`SELECT detail FROM ${store.schema}.notices WHERE key=$1`, [key])).rows[0];
     const runs = await store.enqueueManyInTransaction(db, key, registrationAttachments(key, notice?.detail?.attachments), "automatic");
     const registered = runs.filter(run => !run.reused).length;
+    const blocked = (await db.query(`SELECT EXISTS(SELECT 1 FROM ${store.schema}.attachment_documents d
+      JOIN ${store.schema}.attachment_extraction_runs r ON r.document_id=d.id
+      WHERE d.notice_key=$1 AND r.status='processing' AND r.invalidated_at IS NOT NULL) pending`, [key])).rows[0].pending;
+    if (blocked) {
+      await db.query(`UPDATE ${store.schema}.document_registration_handoffs SET next_attempt_at=clock_timestamp()+interval '60 seconds'
+        WHERE notice_key=$1 AND generation=$2`, [key, generation]);
+      await db.query("RELEASE SAVEPOINT document_registration");
+      return { registered, deferred: true };
+    }
     await db.query(`DELETE FROM ${store.schema}.document_registration_handoffs WHERE notice_key=$1 AND generation=$2`, [key, generation]);
     await db.query("RELEASE SAVEPOINT document_registration");
     return { registered, deferred: false };
