@@ -5,6 +5,7 @@ import {extractionStages} from '@/lib/documents/extraction-stages';
 import type {StageTiming} from '@/lib/documents/stage-timings';
 import {documentTime} from '@/lib/documents/display';
 import {downloadSteps} from '@/lib/documents/download-timings';
+import {CompactAccordion} from './common/CompactAccordion';
 
 const outcomes={running:'진행 중',transition:'단계 전환',completed:'완료',failed:'실패 · 미완료',interrupted:'중단 · 미완료',deferred:'보류 · 미완료'};
 
@@ -22,8 +23,8 @@ export function StageTimings({timings}:{timings?:StageTiming[]}){
   const elapsed=timing.outcome==='running'&&now!==null?Math.max(0,now-Date.parse(timing.startedAt)):timing.elapsedMs;
   return <li key={`${timing.stage}-${index}`}><strong>{extractionStages[timing.stage]}</strong> · {outcomes[timing.outcome]}{timing.estimated?' · 추정':''} · {elapsed===null?'시간 기록 없음':`${(elapsed/1000).toFixed(1)}초`}
    <span> · 시작 {documentTime(timing.startedAt)} · 종료 {documentTime(timing.endedAt)}</span>
-   {timing.details?.length?<details><summary>다운로드 세부 시간</summary><ol>{timing.details.map((item,i)=><li key={`${item.step}-${i}`}>
+   {timing.details?.length?<CompactAccordion title="다운로드 세부 시간"><ol>{timing.details.map((item,i)=><li key={`${item.step}-${i}`}>
     {downloadSteps[item.step]} · {item.outcome==='completed'?'완료':item.outcome==='failed'?'실패':item.outcome==='skipped'?'대기 실패 후 진행':timing.outcome==='running'?'진행 중':'미완료'} · {item.elapsedMs===null?'시간 기록 없음':`${(item.elapsedMs/1000).toFixed(1)}초`}
-   </li>)}</ol></details>:null}</li>;
+   </li>)}</ol></CompactAccordion>:null}</li>;
  })}</ol>;
 }
