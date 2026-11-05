@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { extractAttachmentPdf } from "./attachment-extraction";
 import { extractPdf } from "./extract";
-import { MAX_BYTES } from "./contract";
+import { PDF_MAX_BYTES } from "@/lib/documents/constants";
 import type {ExtractionProgress} from './diagnostics';
 
 vi.mock("./extract", () => ({ extractPdf: vi.fn() }));
@@ -39,7 +39,7 @@ it('저장된 실제 주소를 공통 다운로드에 전달하고 브라우저�
 it("크기 초과와 추출 실패에서도 원본 다운로드 자원을 정리합니다", async () => {
   const cleanup = vi.fn(async () => undefined);
   await expect(extractAttachmentPdf(file, await directory(), new AbortController().signal,
-    async () => ({ filename: "공고.pdf", stream: Readable.from([Buffer.alloc(MAX_BYTES + 1)]), cleanup }))).rejects.toThrow("50MiB");
+    async () => ({ filename: "공고.pdf", stream: Readable.from([Buffer.alloc(PDF_MAX_BYTES + 1)]), cleanup }))).rejects.toThrow("50MiB");
   expect(cleanup).toHaveBeenCalledOnce(); expect(extractPdf).not.toHaveBeenCalled();
   vi.mocked(extractPdf).mockRejectedValueOnce(new Error("손상된 PDF"));
   await expect(extractAttachmentPdf(file, await directory(), new AbortController().signal,
