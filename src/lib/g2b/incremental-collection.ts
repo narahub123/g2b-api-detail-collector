@@ -18,7 +18,7 @@ import { getIncrementalCheckpoint, getNoticeAttempt, listFailedNoticeAttempts, s
 import { DetailQueue } from "./detail-queue";
 import { getPool } from "./postgres-store";
 import { createQueuedCollection, produceQueuedCollection } from "./queued-collection";
-import { DETAIL_COLLECTION_MAX_ATTEMPTS } from "@/lib/g2b/constants";
+import { DETAIL_COLLECTION_MAX_ATTEMPTS, RELATED_NOTICE_MAX_LIMIT } from "@/lib/g2b/constants";
 
 export type NoticeAttempt = { key: string; attempts: number; status: "failed" | "succeeded"; error: string | null; diagnostic?: SerializedError | null };
 export type IncrementalStore = {
@@ -128,7 +128,7 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
   /** 저장된 관계도 다시 따라가 점검 전에 부모만 완료된 경우의 미완료 자식을 복구합니다. */
   const handleRelated = async (key: string, relatedKeys: string[]): Promise<void> => {
     const targets: string[] = [];
-    for (const related of relatedKeys.slice(0, 200)) {
+    for (const related of relatedKeys.slice(0, RELATED_NOTICE_MAX_LIMIT)) {
       if (related === key) continue;
       try {
         const [relatedNumber, relatedOrder] = related.split("--");

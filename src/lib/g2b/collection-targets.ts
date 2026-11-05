@@ -2,7 +2,7 @@ import type pg from "pg";
 import type { DetailQueue, DetailRun } from "./detail-queue";
 import { noticeKeyFromParts } from "./identity";
 import { saveNoticeRelationsInTransaction } from "./postgres-store";
-import { DETAIL_COLLECTION_MAX_ATTEMPTS } from "@/lib/g2b/constants";
+import { DETAIL_COLLECTION_MAX_ATTEMPTS, RELATED_NOTICE_MAX_LIMIT } from "@/lib/g2b/constants";
 
 type Job = { id: string; source: "manual" | "automatic"; mode: string };
 
@@ -15,7 +15,7 @@ export async function admitCollectionTarget(db: pg.PoolClient, queue: DetailQueu
   if (seen.rowCount) return;
   if (related) {
     const count = await db.query(`SELECT count(*)::int n FROM ${queue.schema}.detail_collection_targets WHERE job_id=$1 AND is_related`, [job.id]);
-    if (count.rows[0].n >= 200) { warn(`${key}: 관련 공고 탐색 한도(200건)로 상세 수집 보류`); return; }
+    if (count.rows[0].n >= RELATED_NOTICE_MAX_LIMIT) { warn(`${key}: 관련 공고 탐색 한도(${RELATED_NOTICE_MAX_LIMIT}건)로 상세 수집 보류`); return; }
   }
   await db.query(`INSERT INTO ${queue.schema}.notices(key,notice_number,notice_order) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`, [key, number, order]);
   await db.query(`INSERT INTO ${queue.schema}.detail_collection_targets(job_id,notice_key,is_related) VALUES($1,$2,$3)`, [job.id, key, related]);

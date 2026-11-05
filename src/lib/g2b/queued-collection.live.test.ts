@@ -7,6 +7,7 @@ import { createQueuedCollection, produceQueuedCollection, queuedCheckpoint } fro
 import { consumeDetails } from "./detail-worker";
 import { G2bMaintenanceError } from "./maintenance";
 import { consumeCollectionQueue } from "./collection-queue-worker";
+import { RELATED_NOTICE_MAX_LIMIT } from "@/lib/g2b/constants";
 
 /** 실제 API 응답 형식을 유지하면서 검사 대상 공고를 반환합니다. */
 const api = (numbers: string[]) => async () => Response.json({ response: { body: {
@@ -214,7 +215,7 @@ describe.skipIf(process.env.LIVE_DB_TEST !== "1" || !process.env.DATABASE_URL)("
       abort.abort();
       return { detail: { sourceUrl: url, attachments: [], links: [] }, relatedNoticeKeys: children };
     } });
-    expect((await pool.query(`SELECT * FROM ${schema}.detail_collection_targets WHERE is_related`)).rowCount).toBe(200);
+    expect((await pool.query(`SELECT * FROM ${schema}.detail_collection_targets WHERE is_related`)).rowCount).toBe(RELATED_NOTICE_MAX_LIMIT);
     expect((await pool.query(`SELECT * FROM ${schema}.detail_collection_runs`)).rowCount).toBe(201);
     expect((await queue.getRefreshJob(job.id))?.errors.join(" ")).toContain("한도(200건)");
   });
