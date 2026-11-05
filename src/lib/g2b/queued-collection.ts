@@ -10,6 +10,7 @@ import { addDiagnostic, redactDiagnostic } from "./collection-diagnostics";
 import { maintenanceFromError } from "./maintenance";
 import { admitCollectionTarget } from "./collection-targets";
 import { queueSnapshotUpdate } from "./queue-observation-store";
+import { DETAIL_COLLECTION_MAX_ATTEMPTS } from "@/lib/g2b/constants";
 
 type Input = { mode: "collection" | "incremental"; start: string; end: string; activationId?: string; range?: PostedDateRange };
 type ProducerState = Partial<CollectionJob> & { input: Input };
@@ -174,8 +175,8 @@ export async function produceQueuedCollection(queue: DetailQueue, id: string, op
             await mutate(db => saveProducerState(db, queue, id, state!));
           }
           if (state.input.mode === "incremental") {
-            const failed = (await queue.pool.query(`SELECT a.key FROM ${queue.schema}.collection_notice_attempts a
-              JOIN ${queue.schema}.notices n ON n.key=a.key WHERE a.status='failed' AND a.attempts<3 AND n.detail IS NULL ORDER BY a.updated_at,a.key`)).rows;
+           const failed = (await queue.pool.query(`SELECT a.key FROM ${queue.schema}.collection_notice_attempts a
+  JOIN ${queue.schema}.notices n ON n.key=a.key WHERE a.status='failed' AND a.attempts<${DETAIL_COLLECTION_MAX_ATTEMPTS} AND n.detail IS NULL ORDER BY a.updated_at,a.key`)).rows;
             for (const row of failed) {
               assertActive();
               await mutate(db => admitCollectionTarget(db, queue, { id, mode: "incremental", source: "automatic" }, row.key));

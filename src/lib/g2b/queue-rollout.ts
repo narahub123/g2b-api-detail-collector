@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type pg from "pg";
 import { noticeKeyFromParts } from "./identity";
-import { DETAIL_QUEUE_IMPORT_MAX_LIMIT } from "@/lib/g2b/constants";
+import { DETAIL_QUEUE_IMPORT_MAX_LIMIT, DETAIL_COLLECTION_MAX_ATTEMPTS } from "@/lib/g2b/constants";
 
 type Db = Pick<pg.PoolClient, "query">;
 type Candidate = { key: string; purpose: "initial" | "reextract"; attempts: number };
@@ -60,7 +60,7 @@ export async function readLegacyImport(db: Db, schema: string, limit: number): P
   for (const row of rows) {
     if (row.preserved) { counts.preserved++; continue; }
     if (!validKey(row.key)) { counts.invalid++; continue; }
-    if (row.attempts >= 3) { counts.exhausted++; continue; }
+    if (row.attempts >= DETAIL_COLLECTION_MAX_ATTEMPTS) { counts.exhausted++; continue; }
     if (imported.has(row.key)) { counts.imported++; continue; }
     if (active.has(row.key)) { counts.active++; continue; }
     candidates.push({ key: row.key, purpose: row.purpose, attempts: row.attempts });

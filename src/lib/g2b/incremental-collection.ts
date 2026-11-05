@@ -18,6 +18,7 @@ import { getIncrementalCheckpoint, getNoticeAttempt, listFailedNoticeAttempts, s
 import { DetailQueue } from "./detail-queue";
 import { getPool } from "./postgres-store";
 import { createQueuedCollection, produceQueuedCollection } from "./queued-collection";
+import { DETAIL_COLLECTION_MAX_ATTEMPTS } from "@/lib/g2b/constants";
 
 export type NoticeAttempt = { key: string; attempts: number; status: "failed" | "succeeded"; error: string | null; diagnostic?: SerializedError | null };
 export type IncrementalStore = {
@@ -148,7 +149,7 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
       let relatedApi: ApiNotice | null = null;
       const relatedRecord = await store.getNotice(related);
       const relatedAttempt = await store.getAttempt(related);
-      const relatedResult = !relatedRecord?.detail && (relatedAttempt?.attempts || 0) < 3
+      const relatedResult = !relatedRecord?.detail && (relatedAttempt?.attempts || 0) < DETAIL_COLLECTION_MAX_ATTEMPTS
         ? await prepareResult(related) : undefined;
       if (!relatedRecord?.api) {
         // 저장된 API가 없는 관련 공고만 번호별로 조회하고 전체 목표에 더합니다.
@@ -190,7 +191,7 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
         record.detailError=null;record.detailDiagnostic=null;
         await observation.during("saving", async () => {
           await store.saveNotice(key,record);
-          await store.saveAttempt({ key, attempts: Math.min(3, (previous?.attempts || 0) +
+          await store.saveAttempt({ key, attempts: Math.min(DETAIL_COLLECTION_MAX_ATTEMPTS, (previous?.attempts || 0) +
             (pendingInThisRun ? 1 : 0)) || 1, status: "succeeded", error: null, diagnostic:null });
         }, pendingInThisRun ? metadata.get(key) : undefined);
         // 기존 상세와 성공 시도 기록이 모두 확인된 뒤에만 복구를 확정합니다.
@@ -206,7 +207,7 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
       await handleRelated(key, record.relatedNoticeKeys ?? []);
       return;
     }
-    const noticeResult = (previous?.attempts || 0) < 3 ? await prepareResult(key) : undefined;
+    const noticeResult = (previous?.attempts || 0) < DETAIL_COLLECTION_MAX_ATTEMPTS ? await prepareResult(key) : undefined;
     // 상세 실패 전에도 API 원본을 남겨 다음 실행에서 찾을 수 있게 합니다.
     await ensureLease();
     await observation.during("saving", () => store.saveNotice(key, record), noticeResult);
@@ -230,7 +231,7 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
       const diagnostic=serializeError(error);
       const message=redactDiagnostic(typeof diagnostic.message==='string'?diagnostic.message:'오류 객체의 세부 속성을 확인하세요.');
       addDiagnostic(job, { severity: "failure", stage: "detail", operation: "scrape-detail", target: { key },
-        attempt: (previous?.attempts || 0) + 1, outcome: (previous?.attempts || 0) < 2 ? "retrying" : "failed", error });
+        attempt: (previous?.attempts || 0) + 1, outcome: (previous?.attempts || 0) < DETAIL_COLLECTION_MAX_ATTEMPTS - 1 ? "retrying" : "failed", error });
       record.detailError = message;
       record.detailDiagnostic=diagnostic;
       await ensureLease();
@@ -296,7 +297,7 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
         await persist();
         const priorFailures = await store.getFailedAttempts();
         for (const item of priorFailures) {
-          if (item.attempts < 3) await handle(item.key, null);
+          if (item.attempts < DETAIL_COLLECTION_MAX_ATTEMPTS) await handle(item.key, null);
         }
         for await (const page of observeCollectionPages(prepared.pages, observation)) {
           for (const item of page.items) {

@@ -2,6 +2,7 @@ import type pg from "pg";
 import type { DetailQueue, DetailRun } from "./detail-queue";
 import { noticeKeyFromParts } from "./identity";
 import { saveNoticeRelationsInTransaction } from "./postgres-store";
+import { DETAIL_COLLECTION_MAX_ATTEMPTS } from "@/lib/g2b/constants";
 
 type Job = { id: string; source: "manual" | "automatic"; mode: string };
 
@@ -21,7 +22,7 @@ export async function admitCollectionTarget(db: pg.PoolClient, queue: DetailQueu
   const record = (await db.query(`SELECT detail FROM ${queue.schema}.notices WHERE key=$1 FOR UPDATE`, [key])).rows[0];
   const attempt = (await db.query(`SELECT attempts,status FROM ${queue.schema}.collection_notice_attempts WHERE key=$1`, [key])).rows[0];
   const needsDetail = !record.detail || (job.source === "manual" && !!record.detail.text);
-  if (needsDetail && (job.source === "manual" || (attempt?.attempts ?? 0) < 3)) {
+  if (needsDetail && (job.source === "manual" || (attempt?.attempts ?? 0) < DETAIL_COLLECTION_MAX_ATTEMPTS)) {
     await queue.enqueueInTransaction(db, { key, jobId: job.id, source: job.source,
       purpose: attempt?.status === "failed" || record.detail ? "reextract" : "initial" });
     return;
@@ -55,12 +56,12 @@ export async function finishCollectionAttempt(db: pg.PoolClient, queue: DetailQu
     JOIN ${queue.schema}.detail_collection_requests q ON q.job_id=j.id WHERE q.run_id=$1 AND j.source='automatic' ORDER BY j.id`, [run.id])).rows;
   const old = (await db.query(`SELECT attempts FROM ${queue.schema}.collection_notice_attempts WHERE key=$1 FOR UPDATE`, [run.notice_key])).rows[0];
   if (!jobs.length && (status !== "succeeded" || !old)) return;
-  const attempts = Math.min(3, jobs.length ? (old?.attempts ?? 0) + 1 : old.attempts);
+  const attempts = Math.min(DETAIL_COLLECTION_MAX_ATTEMPTS, jobs.length ? (old?.attempts ?? 0) + 1 : old.attempts);
   await db.query(`INSERT INTO ${queue.schema}.collection_notice_attempts(key,attempts,status,error,diagnostic_error)
     VALUES($1,$2,$3,$4,$5::jsonb) ON CONFLICT(key) DO UPDATE SET attempts=EXCLUDED.attempts,status=EXCLUDED.status,
     error=EXCLUDED.error,diagnostic_error=EXCLUDED.diagnostic_error,updated_at=clock_timestamp()`,
   [run.notice_key, attempts, status, error, diagnostic]);
-  if (status !== "failed" || attempts >= 3) return;
+  if (status !== "failed" || attempts >= DETAIL_COLLECTION_MAX_ATTEMPTS) return;
   for (const job of jobs) {
     const retry = await queue.enqueueInTransaction(db, { key: run.notice_key, jobId: job.id, source: "automatic", purpose: "reextract" });
     await db.query(`UPDATE ${queue.schema}.detail_collection_runs SET parent_run_id=$2,next_attempt_at=clock_timestamp()+interval '60 seconds'
