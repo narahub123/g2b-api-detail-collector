@@ -2,6 +2,7 @@ import { postedDays } from "./date-range";
 import { assertNotMaintenance } from "./maintenance";
 import { noticeKey } from "./identity";
 import type { ApiNotice, ApiPage, PostedDateRange } from "./types";
+import { KST_OFFSET_MS } from "@/lib/constants";
 
 export type PostedTimeRange = { start: string; end: string };
 
@@ -170,7 +171,7 @@ export async function prepareServiceNoticesByMinute(
   if (!Number.isFinite(start) || !Number.isFinite(end) || start > end) {
     throw new Error("유효한 분 단위 조회 구간을 입력하세요.");
   }
-  const offset = 9 * 60 * 60_000;
+  const offset = KST_OFFSET_MS;
   const localStart = start + offset;
   const localEnd = end + offset;
   const windows: QueryWindow[] = [];

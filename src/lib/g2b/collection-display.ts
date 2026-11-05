@@ -1,3 +1,4 @@
+import { KST_OFFSET_MS } from "@/lib/constants";
 import type { CollectionJob } from "./collection-job";
 import { collectionElapsedMs, type CollectionStage } from "./collection-progress";
 
@@ -16,7 +17,7 @@ export const collectionStatuses: Record<CollectionJob["status"], string> = {
 /** 브라우저와 서버의 로캘 설정에 영향받지 않도록 한국 시각을 고정 형식으로 표시합니다. */
 export function collectionTime(value?: string): string {
   if (!value || !Number.isFinite(Date.parse(value))) return "기록 없음";
-  return `${new Date(Date.parse(value) + 9 * 60 * 60_000).toISOString().slice(0, 19).replace("T", " ")} (KST)`;
+  return `${new Date(Date.parse(value) + KST_OFFSET_MS).toISOString().slice(0, 19).replace("T", " ")} (KST)`;
 }
 
 /** 종료가 관측되지 않은 작업은 현재 시각까지 연장하지 않습니다. */

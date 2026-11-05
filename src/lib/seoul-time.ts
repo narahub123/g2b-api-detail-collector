@@ -1,3 +1,5 @@
+import { KST_OFFSET_MS } from "@/lib/constants";
+
 /** 서울 현지 시분을 엄격히 검증해 실행 환경과 무관한 UTC 시각으로 바꿉니다. */
 export function seoulInputToUtc(value: string): string {
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) throw new Error("날짜와 시각을 확인하세요.");
@@ -5,7 +7,7 @@ export function seoulInputToUtc(value: string): string {
   if (Number.isNaN(local.getTime()) || local.toISOString().slice(0, 16) !== value) {
     throw new Error("날짜와 시각을 확인하세요.");
   }
-  return new Date(local.getTime() - 9 * 60 * 60_000).toISOString();
+  return new Date(local.getTime() - KST_OFFSET_MS).toISOString();
 }
 
 /** 기존 날짜 입력은 시작·종료에 맞춰 하루 전체를 포함하는 서울 시분으로 확장합니다. */
