@@ -1,5 +1,6 @@
 import type { PostedDateRange } from "./types";
 import { normalizeSeoulMinute } from "../seoul-time";
+import { DAY_MS } from "@/lib/constants";
 
 /** 날짜 호환 입력을 포함해 수동 수집의 서울 시분 범위를 검증하고 정규화합니다. */
 export function parsePostedTimeRange(start: string, end: string): PostedDateRange {
@@ -22,7 +23,7 @@ export function parsePostedDateRange(start: string, end: string): PostedDateRang
 
 export function* postedDays(range: PostedDateRange): Generator<string> {
   const end = Date.parse(`${range.end}T00:00:00.000Z`);
-  for (let time = Date.parse(`${range.start}T00:00:00.000Z`); time <= end; time += 86_400_000) {
+  for (let time = Date.parse(`${range.start}T00:00:00.000Z`); time <= end; time += DAY_MS) {
     yield new Date(time).toISOString().slice(0, 10);
   }
 }

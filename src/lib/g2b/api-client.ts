@@ -2,7 +2,7 @@ import { postedDays } from "./date-range";
 import { assertNotMaintenance } from "./maintenance";
 import { noticeKey } from "./identity";
 import type { ApiNotice, ApiPage, PostedDateRange } from "./types";
-import { KST_OFFSET_MS, MINUTE_MS } from "@/lib/constants";
+import { DAY_MS, KST_OFFSET_MS, MINUTE_MS } from "@/lib/constants";
 
 export type PostedTimeRange = { start: string; end: string };
 
@@ -175,9 +175,9 @@ export async function prepareServiceNoticesByMinute(
   const localStart = start + offset;
   const localEnd = end + offset;
   const windows: QueryWindow[] = [];
-  for (let day = Math.floor(localStart / 86_400_000) * 86_400_000; day <= localEnd; day += 86_400_000) {
+  for (let day = Math.floor(localStart / DAY_MS) * DAY_MS; day <= localEnd; day += DAY_MS) {
     const from = new Date(Math.max(localStart, day));
-    const to = new Date(Math.min(localEnd, day + 86_400_000 - MINUTE_MS));
+    const to = new Date(Math.min(localEnd, day + DAY_MS - MINUTE_MS));
     const date = new Date(day).toISOString().slice(0, 10);
     windows.push({ date, start: from.toISOString().slice(0, 16).replace(/[-T:]/g, ""),
       end: to.toISOString().slice(0, 16).replace(/[-T:]/g, "") });

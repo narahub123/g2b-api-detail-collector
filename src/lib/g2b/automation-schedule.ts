@@ -1,4 +1,4 @@
-import { KST_OFFSET_MS, MINUTE_MS } from "@/lib/constants";
+import { DAY_MS, KST_OFFSET_MS, MINUTE_MS } from "@/lib/constants";
 import { seoulInputToUtc } from "../seoul-time";
 export { seoulInputToUtc } from "../seoul-time";
 import { randomUUID } from "node:crypto";
@@ -65,8 +65,8 @@ export function latestDueTime(settings: AutomationSettings, now: Date): string |
     }
   } else {
     const offset = KST_OFFSET_MS;
-    const today = Math.floor((nowMs + offset) / 86_400_000) * 86_400_000;
-    for (const day of [today - 86_400_000, today]) {
+    const today = Math.floor((nowMs + offset) / DAY_MS) * DAY_MS;
+    for (const day of [today - DAY_MS, today]) {
       for (const time of settings.times) {
         const [hour, minute] = time.split(":").map(Number);
         const candidate = day + (hour * 60 + minute) * MINUTE_MS - offset;
