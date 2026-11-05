@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { countStoredNotices, getStoredIndependentDetail, listPublicNoticeKeys, listStoredNoticeKeys, listStoredNoticeRows, noticeSummary, saveNoticeRelation, saveStoredNotice } from "./postgres-store";
+import { countStoredNotices, getStoredIndependentDetail, listPublicNoticeKeys, listStoredNoticeKeys, listStoredNoticeRows, noticeSummary, saveNoticeRelation, saveNoticeRelationsInTransaction, saveStoredNotice } from "./postgres-store";
 
 const runtime = globalThis as typeof globalThis & { __g2bPgPool?: unknown };
 const originalUrl = process.env.DATABASE_URL;
@@ -78,8 +78,7 @@ describe("noticeSummary", () => {
     expect(statements.map((item) => item.sql)).toEqual([
       "BEGIN",
       expect.stringContaining("INSERT INTO public.notices(key,notice_number,notice_order)"),
-      expect.stringContaining("INSERT INTO public.notices(key,notice_number,notice_order)"),
-      expect.stringContaining("VALUES($1,$2),($2,$1)"),
+      expect.stringContaining("INSERT INTO public.notice_relations"),
       "COMMIT"
     ]);
   });
@@ -256,4 +255,14 @@ describe("noticeSummary", () => {
     expect(statements.at(-1)?.sql).toBe("ROLLBACK");
     expect(statements.some((item) => item.sql === "COMMIT")).toBe(false);
   });
+});
+
+it("여러 관계의 중복과 자기 참조를 제거하고 두 SQL로 저장합니다", async () => {
+  const query = (await import("vitest")).vi.fn().mockResolvedValue({ rows: [] });
+  await saveNoticeRelationsInTransaction({ query } as never, "A--000", ["B--000", "B--000", "A--000", "C--000"]);
+  expect(query).toHaveBeenCalledTimes(2);
+  expect(JSON.parse(query.mock.calls[0][1][0])).toHaveLength(3);
+  expect(JSON.parse(query.mock.calls[1][1][0])).toEqual([
+    { source_key: "A--000", related_key: "B--000" }, { source_key: "B--000", related_key: "A--000" },
+    { source_key: "A--000", related_key: "C--000" }, { source_key: "C--000", related_key: "A--000" }]);
 });

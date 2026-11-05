@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { afterEach, expect, it, vi } from "vitest";
-import { documentRegistrationEnabled, recoverDocumentRegistrations, registrationAttachments } from "./registration";
+import { documentRegistrationEnabled, recoverDocumentRegistrations, registrationAttachments, requestNoticeDocumentRegistrationInTransaction } from "./registration";
 import { testAttachment } from "./test-attachments";
 import type { DocumentQueue } from "./queue";
 import { runBatch } from "./worker";
@@ -76,4 +76,14 @@ it("구버전 결과가 저장 거부되면 배치는 성공으로 집계하지 
   const summary = await runBatch(store as unknown as DocumentQueue, { mode: "local", extract: async () => ({
     result: { pages: [], pageCount: 1, characterCount: 1, extractorVersion: "test", fileHash: "hash" }, peakMemory: null }) });
   expect(summary.completed).toBe(0); expect(summary.failed).toBe(1); expect(summary.byKind.manual.failed).toBe(1);
+});
+
+it("상세 트랜잭션의 등록 요청은 handoff만 남기고 문서 등록 SQL을 실행하지 않습니다", async () => {
+  vi.stubEnv("DETAIL_PDF_REGISTRATION_ENABLED", "true");
+  const query = vi.fn().mockResolvedValue({rows: [{generation: "generation"}]});
+  const store = {schema: "public"} as DocumentQueue;
+  expect(await requestNoticeDocumentRegistrationInTransaction(store, {query} as never, "A--000")).toBe("generation");
+  expect(query).toHaveBeenCalledOnce();
+  expect(query.mock.calls[0][0]).toContain("INSERT INTO public.document_registration_handoffs");
+  expect(query.mock.calls[0][0]).not.toContain("attachment_documents");
 });

@@ -1,7 +1,7 @@
 import type pg from "pg";
 import type { DetailQueue, DetailRun } from "./detail-queue";
 import { noticeKeyFromParts } from "./identity";
-import { saveNoticeRelationInTransaction } from "./postgres-store";
+import { saveNoticeRelationsInTransaction } from "./postgres-store";
 
 type Job = { id: string; source: "manual" | "automatic"; mode: string };
 
@@ -42,7 +42,7 @@ export async function expandCollectionRelations(db: pg.PoolClient, queue: Detail
     const [number, order, extra] = key.split("--");
     try { if (extra !== undefined || noticeKeyFromParts(number, order) !== key) throw Error("잘못된 공고 키"); }
     catch { warn(`${run.notice_key}: 잘못된 관련 공고 키 ${key}`); continue; }
-    await saveNoticeRelationInTransaction(db, run.notice_key, key, queue.schema);
+    await saveNoticeRelationsInTransaction(db, run.notice_key, [key], queue.schema);
     for (const job of jobs) await admitCollectionTarget(db, queue, job, key, true, warn);
   }
 }

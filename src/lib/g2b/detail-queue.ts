@@ -4,14 +4,14 @@ import { serializeError } from "../error-diagnostics";
 import { redactDiagnostic } from "./collection-diagnostics";
 import { noticeKeyFromParts } from "./identity";
 import type { StoredNotice } from "./notices";
-import { saveNoticeApiInTransaction, saveNoticeRelationInTransaction, saveStoredNoticeInTransaction } from "./postgres-store";
+import { saveNoticeApiInTransaction, saveNoticeRelationsInTransaction, saveStoredNoticeInTransaction } from "./postgres-store";
 import type { StructuredNoticeDetail } from "./structured-data";
 import type { ApiNotice } from "./types";
 import { getDetailRefresh, submitDetailRefresh, type DetailSnapshot } from "./detail-refresh-store";
 import { shouldReplacePaginatedDetail } from "./pagination-coverage";
 import { expandCollectionRelations, finishCollectionAttempt } from "./collection-targets";
 import { DocumentQueue } from "../documents/queue";
-import { registerNoticeDocumentsInTransaction } from "../documents/registration";
+import { requestNoticeDocumentRegistrationInTransaction, recoverDocumentRegistrations } from "../documents/registration";
 import { QueueMeasurement, type QueueObservationContext, type QueueObservationOptions, type QueueLock } from "./queue-observation";
 import type { CollectionDetailStep } from "./collection-detail-steps";
 import { saveQueueObservation, logQueueObservationFailure, queueSnapshotUpdate } from "./queue-observation-store";
@@ -48,6 +48,7 @@ function parts(key: string) {
 /** 요청 접수와 공고 실행을 분리하고 짧은 저장 트랜잭션에서만 임대 행을 잠급니다. */
 export class DetailQueue {
   private readonly measurements = new WeakMap<pg.PoolClient, QueueMeasurement>();
+  private readonly rolledBackErrors = new WeakSet<object>();
   private readonly observedErrors = new WeakMap<object, "transaction" | "diagnostic">();
   /** 연결 풀과 검사된 스키마를 사용하며 기존 수집 경로는 변경하지 않습니다. */
   constructor(readonly pool: pg.Pool, readonly schema = process.env.G2B_DB_SCHEMA || "public",
@@ -57,6 +58,21 @@ export class DetailQueue {
 
   /** API 생산자도 공고를 쓰기 전에 같은 큐 잠금 순서를 따르게 합니다. */
   async lockMutation(db: pg.PoolClient): Promise<void> { await this.lockLease(db); }
+
+  /** 커밋 시도 전 잠금 오류가 명시적으로 롤백되었는지 확인합니다. */
+  isRolledBackLockTimeout(error: unknown): boolean {
+    return this.isRolledBackTransactionError(error) && (error as { code?: string }).code === "55P03";
+  }
+
+  /** 원래 트랜잭션 오류인지 판별하여 API 재조회로 중복 저장하지 않도록 합니다. */
+  isTransactionError(error: unknown): boolean {
+    return error !== null && typeof error === "object" && this.observedErrors.get(error) === "transaction";
+  }
+
+  /** 커밋 시도 이전 오류의 롤백 완료 여부를 반환합니다. */
+  isRolledBackTransactionError(error: unknown): boolean {
+    return error !== null && typeof error === "object" && this.rolledBackErrors.has(error);
+  }
 
   /** 동일 연결에서 종료 응답까지 측정하며 확정된 결과와 원래 업무 오류를 보존합니다.
    * @param context 원본 자료와 임대 토큰을 제외한 작업 식별 정보
@@ -70,6 +86,7 @@ export class DetailQueue {
     const measurement = new QueueMeasurement(context, this.options.monotonic);
     this.measurements.set(db, measurement);
     let success = false;
+    let committing = false;
     let discardConnection = false;
     const errors: { error: unknown; operation: string }[] = [];
     try {
@@ -77,13 +94,16 @@ export class DetailQueue {
       await db.query("SET LOCAL lock_timeout='5s'");
       await db.query("SET LOCAL statement_timeout='15s'");
       const result = await work(db);
+      committing = true;
       const committed = await db.query("COMMIT");
       // 내부에서 처리한 SQL 오류로 COMMIT이 ROLLBACK을 반환해도 계측은 성공으로 표시하지 않습니다.
       success = committed.command !== "ROLLBACK";
       return result;
     } catch (error) {
       errors.push({ error, operation: context.operation });
-      await db.query("ROLLBACK").catch(error => {
+      await db.query("ROLLBACK").then(rolledBack => {
+        if (!committing && rolledBack.command === "ROLLBACK" && error !== null && typeof error === "object") this.rolledBackErrors.add(error);
+      }).catch(error => {
         discardConnection = true;
         errors.push({ error, operation: "queue.rollback" });
       });
@@ -358,7 +378,7 @@ export class DetailQueue {
   async saveRelations(token: string, id: string, keys: string[]): Promise<void> {
     await this.withRun(token, id, async (db, run) => {
       await this.measure(db, "queue.relations.save", async () => {
-        for (const key of [...new Set(keys)].sort()) await saveNoticeRelationInTransaction(db, run.notice_key, key, this.schema);
+        await saveNoticeRelationsInTransaction(db, run.notice_key, keys, this.schema);
       });
     }, { operation: 'detail.saveRelations', stage: 'saving', runId: id });
   }
@@ -376,14 +396,13 @@ export class DetailQueue {
 
   /** 상세·참조·후속 요청과 실행 종료를 저장하고 PDF 등록 실패는 복구 기록으로 분리합니다. */
   async finish(token: string, id: string, result: Finish): Promise<void> {
-    await this.withRun(token, id, async (db, run, current) => {
+    const noticeKey = await this.withRun(token, id, async (db, run, current) => {
       const preserved = result.status === "succeeded" && !!current.detail && !shouldReplacePaginatedDetail(current.detail, result.detail);
       if (result.status === "succeeded" && !preserved) {
         await this.measure(db, "queue.detail.save", () => saveStoredNoticeInTransaction(db, run.notice_key,
           { ...current, detail: result.detail, detailError: null, detailDiagnostic: null }, result.structured, this.schema));
         await this.measure(db, "queue.relations.save", async () => {
-          for (const key of [...new Set(result.relatedKeys ?? [])].sort())
-            await saveNoticeRelationInTransaction(db, run.notice_key, key, this.schema);
+          await saveNoticeRelationsInTransaction(db, run.notice_key, result.relatedKeys ?? [], this.schema);
           for (const request of result.followups ?? []) await this.enqueueInTransaction(db, request);
           if (this.options.collectionMode) await expandCollectionRelations(db, this, run, result.discoveredKeys ?? [], result.onWarning ?? (() => undefined));
         });
@@ -392,7 +411,7 @@ export class DetailQueue {
           detailError: redactDiagnostic(result.error), detailDiagnostic: result.diagnostic ? serializeError(result.diagnostic) : null }, undefined, this.schema));
       }
       if (result.status === "succeeded") {
-        await this.measure(db, "queue.documents.register", () => registerNoticeDocumentsInTransaction(new DocumentQueue(this.pool, this.schema), db, run.notice_key));
+        await requestNoticeDocumentRegistrationInTransaction(new DocumentQueue(this.pool, this.schema), db, run.notice_key);
       }
       // 실제 자료 저장까지의 시간을 관측에 포함하고 같은 커밋으로 종료 상태와 확정합니다.
       const snapshot = typeof result.snapshot === "function" ? result.snapshot(preserved) : result.snapshot;
@@ -404,7 +423,10 @@ export class DetailQueue {
       if (this.options.collectionMode) await finishCollectionAttempt(db, this, run, result.status,
         result.status === "failed" ? redactDiagnostic(result.error) : null,
         result.status === "failed" && result.diagnostic ? JSON.stringify(serializeError(result.diagnostic)) : null, preserved);
+      return run.notice_key;
     }, { operation: 'detail.finish', stage: 'saving', runId: id });
+    // 커밋 직후 등록을 기다려 다음 공고와 완료 알림보다 먼저 접수합니다.
+    if (result.status === "succeeded") await recoverDocumentRegistrations(new DocumentQueue(this.pool, this.schema), { noticeKey, limit: 1 });
   }
 
   /** 점검으로 중단된 공고를 실패 처리하지 않고 잠시 뒤 재개할 수 있도록 반환합니다. */

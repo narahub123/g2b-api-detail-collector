@@ -62,15 +62,20 @@ async function attemptRegistration(store: DocumentQueue, db: pg.PoolClient, key:
   }
 }
 
-/** 상세와 같은 커밋에 새 복구 세대를 남기고 해당 공고의 모든 직접 PDF를 등록합니다.
- * @remarks 공고 행 잠금을 가진 상세 성공 저장에서만 호출합니다. 외부 통신은 수행하지 않습니다.
- */
-export async function registerNoticeDocumentsInTransaction(store: DocumentQueue, db: pg.PoolClient, key: string) {
-  if (!documentRegistrationEnabled()) return { registered: 0, deferred: false };
+/** 상세와 같은 커밋에 등록 요청만 남겨 공용 임대 잠금 밖에서 복구하도록 합니다. */
+export async function requestNoticeDocumentRegistrationInTransaction(store: DocumentQueue, db: pg.PoolClient, key: string): Promise<string | undefined> {
+  if (!documentRegistrationEnabled()) return;
   const row = (await db.query(`INSERT INTO ${store.schema}.document_registration_handoffs(notice_key) VALUES($1)
     ON CONFLICT(notice_key) DO UPDATE SET generation=gen_random_uuid(),requested_at=clock_timestamp(),
       next_attempt_at=clock_timestamp(),attempts=0 RETURNING generation`, [key])).rows[0];
-  return attemptRegistration(store, db, key, row.generation);
+  return row.generation;
+}
+
+/** 문서 단독 접수에서는 복구 기록과 즉시 등록을 같은 트랜잭션에서 처리합니다. */
+export async function registerNoticeDocumentsInTransaction(store: DocumentQueue, db: pg.PoolClient, key: string) {
+  const generation = await requestNoticeDocumentRegistrationInTransaction(store, db, key);
+  if (!generation) return { registered: 0, deferred: false };
+  return attemptRegistration(store, db, key, generation);
 }
 
 /** 재시작 후 최신 공고를 잠가 제한된 수의 등록 누락을 복구하며 개별 실패는 지연합니다. */

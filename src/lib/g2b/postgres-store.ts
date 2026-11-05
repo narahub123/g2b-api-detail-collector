@@ -168,14 +168,25 @@ export async function saveNoticeRelation(source: string, related: string): Promi
 /** 관계와 공고 자리표시자를 호출자의 트랜잭션에서 함께 저장합니다. */
 export async function saveNoticeRelationInTransaction(db: Queryable, source: string, related: string,
   schema?: string): Promise<void> {
-  if (source === related) return;
-  for (const key of [source, related]) {
-    const [number, order] = key.split("--");
-    if (noticeKeyFromParts(number, order) !== key) throw new Error(`잘못된 공고 키: ${key}`);
-    await db.query(`INSERT INTO ${table("notices", schema)}(key,notice_number,notice_order) VALUES($1,$2,$3) ON CONFLICT(key) DO NOTHING`, [key, number, order]);
-  }
-  await db.query(`INSERT INTO ${table("notice_relations", schema)}(source_key,related_key) VALUES($1,$2),($2,$1) ON CONFLICT DO NOTHING`,
-    [source, related]);
+  await saveNoticeRelationsInTransaction(db, source, [related], schema);
+}
+
+/** 중복과 자기 참조를 제거하고 자리표시자와 양방향 관계를 묶음으로 저장합니다. */
+export async function saveNoticeRelationsInTransaction(db: Queryable, source: string, related: string[], schema?: string): Promise<void> {
+  const targets = [...new Set(related)].filter(key => key !== source).sort();
+  if (!targets.length) return;
+  const notices = [...new Set([source, ...targets])].sort().map(key => {
+    const [number, order, extra] = key.split("--");
+    if (extra !== undefined || noticeKeyFromParts(number, order) !== key) throw new Error(`잘못된 공고 키: ${key}`);
+    return { key, notice_number: number, notice_order: order };
+  });
+  await db.query(`INSERT INTO ${table("notices", schema)}(key,notice_number,notice_order)
+    SELECT key,notice_number,notice_order FROM jsonb_to_recordset($1::jsonb)
+      AS n(key text,notice_number text,notice_order text) ORDER BY key ON CONFLICT(key) DO NOTHING`, [JSON.stringify(notices)]);
+  const edges = targets.flatMap(key => [{ source_key: source, related_key: key }, { source_key: key, related_key: source }]);
+  await db.query(`INSERT INTO ${table("notice_relations", schema)}(source_key,related_key)
+    SELECT source_key,related_key FROM jsonb_to_recordset($1::jsonb) AS r(source_key text,related_key text)
+    ORDER BY source_key,related_key ON CONFLICT DO NOTHING`, [JSON.stringify(edges)]);
 }
 
 /** DB에서 공고 원본과 직접 관계·독립 상세 참조를 읽습니다. */
