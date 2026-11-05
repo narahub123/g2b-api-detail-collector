@@ -1,6 +1,6 @@
 import {createDownloadMeasure} from './download-timings';
 import { openHttpDownload } from "../g2b/attachment-download";
-import { PDF_MAX_BYTES } from "@/lib/documents/constants";
+import { PDF_MAX_BYTES, PDF_MAX_PAGES } from "@/lib/documents/constants";
 import { extractPdf } from "./extract";
 import type {ExtractionProgress} from './diagnostics';
 
@@ -21,5 +21,5 @@ export async function extractAttachmentPdf(file: {url:string;key?:string;fileNo?
     bytes = await measure('read', async () => Buffer.concat(chunks));
   } finally { opened.stream.destroy(); await opened.cleanup(); }
   if(bytes.subarray(0,5).toString('ascii')!=='%PDF-')throw new Error('PDF 형식이 아닌 파일 응답입니다.');
-  return extractPdf(bytes,500,progress);
+  return extractPdf(bytes, PDF_MAX_PAGES, progress);
 }

@@ -3,6 +3,7 @@ import {guardDocuments} from './access';
 import {DocumentStore} from './store';
 import {DocumentQueue} from './queue';
 import {getDocumentPool} from './pool';
+import { PDF_MAX_PAGES } from "@/lib/documents/constants";
 
 type RouteIds={documentId?:string;runId?:string;page?:string};
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -39,7 +40,7 @@ export function createDocumentApi(store:DocumentStore,queue:DocumentQueue,wake=w
    }
    if(!ids.documentId)return reply(await store.list(key));
    if(ids.page!==undefined){
-    if(!ids.runId||!/^\d+$/.test(ids.page)||Number(ids.page)<1||Number(ids.page)>500)throw new DocumentError('페이지 번호를 확인하세요.');
+    if(!ids.runId||!/^\d+$/.test(ids.page)||Number(ids.page)<1||Number(ids.page)>PDF_MAX_PAGES)throw new DocumentError('페이지 번호를 확인하세요.');
     const page=await store.page(key,ids.documentId,ids.runId,Number(ids.page));if(!page)throw new DocumentError('저장된 페이지를 찾을 수 없습니다.',404);return reply(page);
    }
    if(ids.runId){const run=await store.run(key,ids.documentId,ids.runId);if(!run)throw new DocumentError('해당 공고의 실행 기록을 찾을 수 없습니다.',404);return reply(run);}
