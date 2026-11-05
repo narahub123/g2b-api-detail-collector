@@ -6,3 +6,5 @@ export const DETAIL_QUEUE_IMPORT_MAX_LIMIT = 500;
 export const DETAIL_COLLECTION_MAX_ATTEMPTS = 3;
 /** 관련 공고 최대 탐색 건수 */
 export const RELATED_NOTICE_MAX_LIMIT = 200;
+/** 증분 수집에서 한 번에 처리할 최대 시간 범위 */
+export const INCREMENTAL_COLLECTION_WINDOW_MS = 4 * 60 * 60_000; // 4시간

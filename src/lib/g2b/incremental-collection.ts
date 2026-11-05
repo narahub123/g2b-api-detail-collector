@@ -18,7 +18,7 @@ import { getIncrementalCheckpoint, getNoticeAttempt, listFailedNoticeAttempts, s
 import { DetailQueue } from "./detail-queue";
 import { getPool } from "./postgres-store";
 import { createQueuedCollection, produceQueuedCollection } from "./queued-collection";
-import { DETAIL_COLLECTION_MAX_ATTEMPTS, RELATED_NOTICE_MAX_LIMIT } from "@/lib/g2b/constants";
+import { DETAIL_COLLECTION_MAX_ATTEMPTS, RELATED_NOTICE_MAX_LIMIT, INCREMENTAL_COLLECTION_WINDOW_MS  } from "@/lib/g2b/constants";
 
 export type NoticeAttempt = { key: string; attempts: number; status: "failed" | "succeeded"; error: string | null; diagnostic?: SerializedError | null };
 export type IncrementalStore = {
@@ -58,7 +58,7 @@ function windowFor(start: string, end: string, checkpoint: string | null) {
   if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || startMs > endMs) {
     throw new Error("유효한 증분 조회 구간을 입력하세요.");
   }
-  const windowEnd = new Date(Math.min(startMs + 4 * 60 * 60_000, endMs)).toISOString();
+  const windowEnd = new Date(Math.min(startMs + INCREMENTAL_COLLECTION_WINDOW_MS, endMs)).toISOString();
   return { windowStart: new Date(startMs).toISOString(), windowEnd, continuation: endMs > Date.parse(windowEnd) };
 }
 

@@ -10,7 +10,7 @@ import { addDiagnostic, redactDiagnostic } from "./collection-diagnostics";
 import { maintenanceFromError } from "./maintenance";
 import { admitCollectionTarget } from "./collection-targets";
 import { queueSnapshotUpdate } from "./queue-observation-store";
-import { DETAIL_COLLECTION_MAX_ATTEMPTS } from "@/lib/g2b/constants";
+import { DETAIL_COLLECTION_MAX_ATTEMPTS, INCREMENTAL_COLLECTION_WINDOW_MS } from "@/lib/g2b/constants";
 
 type Input = { mode: "collection" | "incremental"; start: string; end: string; activationId?: string; range?: PostedDateRange };
 type ProducerState = Partial<CollectionJob> & { input: Input };
@@ -93,7 +93,7 @@ async function acquireProducer(queue: DetailQueue, id: string, token: string): P
       return null;
     }
     state.windowStart = new Date(start).toISOString();
-    state.windowEnd = new Date(state.input.mode === "incremental" ? Math.min(start + 4 * 60 * 60_000, end) : end).toISOString();
+    state.windowEnd = new Date(state.input.mode === "incremental" ? Math.min(start + INCREMENTAL_COLLECTION_WINDOW_MS, end) : end).toISOString();
     state.continuation = Date.parse(state.windowEnd) < end;
     await db.query(`UPDATE ${queue.schema}.detail_collection_producer_lease SET job_id=$1,owner_token=$2,
       expires_at=clock_timestamp()+interval '120 seconds' WHERE id=1`, [id, token]);
