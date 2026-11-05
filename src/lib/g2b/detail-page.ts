@@ -1,3 +1,4 @@
+import { captureRenderedElements } from "./rendered-html";
 import { serviceDetailUrl } from "./detail-url";
 import { assertNotMaintenance } from "./maintenance";
 export { serviceDetailUrl } from "./detail-url";
@@ -181,12 +182,7 @@ async function scrapeDetailPageMeasured(url:string,options?:NonNullable<Paramete
     const metadata = (await measure("attachment.join", () => Promise.all(responses))).flat();
     for(const file of metadata)if(file.untyAtchFileNo)file.context=await attachmentContext(page,file.untyAtchFileNo);
     const clickDownloads = await measure("attachment.click-metadata", () => collectClickDownloads(page));
-    const html = await measure("page.html", () => page.evaluate(() => {
-      document.querySelectorAll("input,textarea,select").forEach((element) => {
-        if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement) element.setAttribute("value", element.value);
-      });
-      return document.documentElement.outerHTML;
-    }));
+    const html = await measure("page.html", async () => (await page.locator("html").evaluateAll(captureRenderedElements))[0].html);
     const detail = measureSync("detail.extract", () => extractDetailPage(html, url, metadata, clickDownloads));
     for(const file of detail.attachments)if(!file.url)warnings.push({stage:'attachment',operation:'resolve-download-url',message:`직접 다운로드 문맥을 확인하지 못했습니다: ${file.name}`});
     await runContentCheck("extraction-check", () => checkExtractedContent(html, "page", detail.sections ?? []),

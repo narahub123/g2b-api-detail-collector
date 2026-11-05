@@ -1,4 +1,5 @@
 import type * as cheerio from "cheerio";
+import { selectedOptionText } from "./select-value";
 
 export type StructuredTableContent = { value: string; visible: boolean };
 export type StructuredTableCell = { value: string | null; column: number; rowspan: number; colspan: number;
@@ -125,6 +126,7 @@ function withoutColumns(rows: StructuredTableCell[][], excluded: Set<number>): S
   }));
 }
 
+/** 셀의 폼 컨트롤은 코드 대신 선택된 표시 문자열로 보존합니다. */
 function cellContents($: cheerio.CheerioAPI, cell: any): StructuredTableContent[] {
   const contents: StructuredTableContent[] = [];
   const append = (value: string | null, node: any) => {
@@ -136,7 +138,10 @@ function cellContents($: cheerio.CheerioAPI, cell: any): StructuredTableContent[
     const element = $(node);
     if (element.is("script,style,option")) return;
     if (element.is("input,textarea,select")) {
-      append(nonempty(String(element.val() ?? element.attr("value") ?? "")), node);
+      const value = element.is("select")
+        ? selectedOptionText($, element)
+        : String(element.val() ?? element.attr("value") ?? "");
+      append(nonempty(value), node);
       return;
     }
     for (const child of node.children || []) visit(child);

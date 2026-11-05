@@ -8,6 +8,30 @@ import { NoticeComparison } from "../../components/NoticeComparison";
 import { extractDetailPage, scrapeDetailPage, serviceDetailUrl } from "./detail-page";
 import {openHttpDownload} from './attachment-download';
 import { tableForUserDisplay } from "./structured-table";
+import * as cheerio from "cheerio";
+
+it.skipIf(!process.env.LIVE_G2B)("실제 첨부 문서구분과 파일별 크기를 보존하고 용량 UI는 제외합니다", async () => {
+  const { detail } = await scrapeDetailPage(serviceDetailUrl("R26BK01809970", "000"));
+  const section = detail.sections?.find(item => item.title === "파일첨부");
+  const table = tableForUserDisplay(section!.tables[0]);
+  const headers = table.headerRows[0];
+  const kindColumn = headers.find(cell => cell.value === "문서구분")!.column;
+  const sizeColumn = headers.find(cell => cell.value === "파일크기")!.column;
+  expect(table.bodyRows.map(row => row.find(cell => cell.column === kindColumn)?.value))
+    .toEqual(["공고서(원본)", "공고서(변환본)", "기타", "과업지시서"]);
+  expect(table.bodyRows.map(row => row.find(cell => cell.column === sizeColumn)?.value))
+    .toEqual(["177.5 KB", "1,002.9 KB", "93.5 KB", "73.0 KB"]);
+  expect(section?.textBlocks?.some(block => /현재\s*용량|첨부파일\s*용량은/.test(block.text)) ?? false).toBe(false);
+  expect(detail.attachments).toHaveLength(4);
+  expect(detail.attachments.every(file => file.url && file.fileNo && file.seq)).toBe(true);
+  const rendered = renderToStaticMarkup(createElement(NoticeComparison, { api: null, detail }));
+  for (const label of ["공고서(원본)", "공고서(변환본)", "기타", "과업지시서", "177.5 KB", "1,002.9 KB"])
+    expect(rendered).toContain(label);
+  // 원본 진단 JSON이 아닌 사용자에게 표시되는 구조화 영역을 확인합니다.
+  const $ = cheerio.load(rendered);
+  $("pre").remove();
+  expect($("#comparison-detail").text().includes("현재 용량")).toBe(false);
+}, 180_000);
 
 it.skipIf(!process.env.LIVE_G2B)("aligns the live attachment grid using colgroup widths", async () => {
   const { detail } = await scrapeDetailPage(serviceDetailUrl("R26BK01765444", "000"));

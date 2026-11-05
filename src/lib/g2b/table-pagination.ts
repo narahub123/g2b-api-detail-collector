@@ -1,3 +1,4 @@
+import { captureRenderedElements } from "./rendered-html";
 import {measure} from './collection-performance';
 import * as cheerio from "cheerio";
 import type { Page, Locator } from "playwright-core";
@@ -45,7 +46,7 @@ async function findMatches(scope: Locator): Promise<Match[]> {
 
 /** 현재 표 HTML을 기존 구조화 규칙으로 읽어 원본 셀 위치와 병합 범위를 보존합니다. */
 async function readTable(page: Page, gridId: string): Promise<{ table: StructuredTable; signature: string }> {
-  const html = await page.locator(`[id=${JSON.stringify(gridId)}]`).evaluate((node) => node.outerHTML);
+  const html = (await page.locator(`[id=${JSON.stringify(gridId)}]`).evaluateAll(captureRenderedElements))[0].html;
   const $ = cheerio.load(html);
   const table = extractDetailTable($, $(GRID_SELECTOR).first(),
     (cell) => fieldText(extractFieldValue($, cell)));

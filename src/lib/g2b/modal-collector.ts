@@ -1,3 +1,4 @@
+import { captureRenderedElements } from "./rendered-html";
 import {measure, measureSync} from './collection-performance';
 import {withCollectionDetailTiming} from './collection-detail-measure';
 import type {CollectionDetailCallback} from './collection-detail-steps';
@@ -95,63 +96,7 @@ type Candidate = {
 async function visibleDialogs(
   page: import("playwright-core").Page,
 ): Promise<DialogSnapshot[]> {
-  return page.locator(MODAL_SELECTOR).evaluateAll((nodes) =>
-    nodes.flatMap((node) => {
-      const element = node as HTMLElement;
-      const style = window.getComputedStyle(element);
-      if (
-        !element.getClientRects().length ||
-        style.visibility === "hidden" ||
-        style.display === "none"
-      )
-        return [];
-      if (
-        !(element.innerText || "").trim() &&
-        !element.querySelector("td[data-title],td[col_id]")
-      )
-        return [];
-      // cloneNode만으로 반영되지 않을 수 있는 현재 폼 값을 복제본 HTML에 옮깁니다.
-      const clone = element.cloneNode(true) as HTMLElement;
-      const liveControls = element.querySelectorAll("input,textarea,select");
-      const clonedControls = clone.querySelectorAll("input,textarea,select");
-      liveControls.forEach((control, index) => {
-        const target = clonedControls[index];
-        if (!target) return;
-        if (
-          control instanceof HTMLInputElement &&
-          target instanceof HTMLInputElement
-        )
-          target.setAttribute("value", control.value);
-        if (
-          control instanceof HTMLTextAreaElement &&
-          target instanceof HTMLTextAreaElement
-        )
-          target.textContent = control.value;
-        if (
-          control instanceof HTMLSelectElement &&
-          target instanceof HTMLSelectElement
-        ) {
-          Array.from(target.options).forEach(
-            (option, i) =>
-              (option.selected = control.options[i]?.selected || false),
-          );
-        }
-      });
-      return [
-        {
-          id: element.id,
-          title:
-            element
-              .querySelector(
-                "[id$='_header_title'],.w2window_header_title,h1,h2,h3",
-              )
-              ?.textContent?.trim() || null,
-          text: (element.innerText || "").trim(),
-          html: clone.outerHTML,
-        },
-      ];
-    }),
-  );
+  return page.locator(MODAL_SELECTOR).evaluateAll(captureRenderedElements, true);
 }
 
 type ModalWaitResult = {

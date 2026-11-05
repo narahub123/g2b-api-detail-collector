@@ -1,3 +1,4 @@
+import { attachmentUiNodes } from "./attachment-ui-content";
 import * as cheerio from "cheerio";
 import { CONTENT_CONTROL_SELECTOR, SECTION_TITLE_SELECTOR } from "./common-content-extractor";
 import { extractFieldValue, fieldText } from "./field-value";
@@ -34,6 +35,8 @@ function sameSequence(left: string[], right: string[]): boolean {
 /** 추출 순회와 별도로 원본 텍스트 노드를 대조해 섹션 내부의 부분 누락도 찾습니다. */
 export function checkExtractedContent(html: string, kind: "page" | "modal", sections: StructuredSection[]): ContentIssue[] {
   const $ = cheerio.load(html);
+  // 의도적으로 제외한 첨부 UI 안내는 필드·본문 누락 검사에서도 요구하지 않습니다.
+  for (const node of attachmentUiNodes($)) $(node).remove();
   const root = kind === "modal" ? ($("[role='dialog']").first().length ? $("[role='dialog']").first() : $("body")) :
     ($(".pop_contents > .sub_contents").filter((_, node) => $(node).find(SECTION_TITLE_SELECTOR).length > 0).first());
   const scope = root.length ? root : ($("main").first().length ? $("main").first() : $("body"));
