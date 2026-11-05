@@ -1,3 +1,4 @@
+import { attachmentUiNodes } from "./attachment-ui-content";
 import * as cheerio from "cheerio";
 import { extractFieldValue, fieldText } from "./field-value";
 import { extractDetailTable, isInlineVisible } from "./structured-table";
@@ -18,6 +19,8 @@ export const CONTENT_CONTROL_SELECTOR = "script,style,button,input,textarea,sele
  */
 export function extractCommonSections(html: string, kind: ContentKind): StructuredSection[] {
   const $ = cheerio.load(html);
+  // 중첩 서식 표의 필드 값에도 조작 안내가 섞이지 않도록 추출 전에 제외합니다.
+  for (const node of attachmentUiNodes($)) $(node).remove();
   $("script,style").remove();
   const sections: StructuredSection[] = [];
   const fieldByCell = new Map<any, StructuredField>();

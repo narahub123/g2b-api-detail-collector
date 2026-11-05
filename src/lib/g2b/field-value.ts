@@ -1,4 +1,5 @@
 import type * as cheerio from "cheerio";
+import { selectedOptionText } from "./select-value";
 import { isInlineVisible } from "./structured-table";
 
 export type FieldValuePart = { text: string; visible: boolean };
@@ -26,7 +27,7 @@ export function extractFieldValue($: cheerio.CheerioAPI, cell: cheerio.Cheerio<a
       if (element.is("[type='hidden'],[type='checkbox'],[type='radio'],[type='button']")) return;
       // 폼 컨트롤의 표시 문자열을 사용하고 이웃한 컨트롤 값 사이에는 구분 공백을 둡니다.
       const value = element.is("select")
-        ? element.find("option:selected").text() || String(element.val() ?? "")
+        ? selectedOptionText($, element)
         : String(element.val() ?? "");
       if (value && parts.length && !/\s$/.test(parts[parts.length - 1].text)) append(" ", node);
       append(value, node);
