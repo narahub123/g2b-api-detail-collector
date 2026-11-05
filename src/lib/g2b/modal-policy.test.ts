@@ -1,5 +1,6 @@
 import {expect,it} from 'vitest';
-import {isResetControl,isAttachmentPreview,isNoticeDialog,isUnneededCompanySearch,MODAL_TIMING} from './modal-policy';
+import {isResetControl,isAttachmentPreview,isNoticeDialog,isUnneededCompanySearch} from './modal-policy';
+import { MODAL_TIMING } from "@/lib/g2b/constants";
 import {isAttachmentDownload,isParticipantLookup,isCollectedReference} from './modal-policy';
 
 it('파일 식별자가 확인된 파일명 클릭과 정확한 현장설명회 입력 버튼만 제외합니다',()=>{

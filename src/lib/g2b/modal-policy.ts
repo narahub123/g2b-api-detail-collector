@@ -1,5 +1,3 @@
-/** 기존 관찰 상한과 안정화 기준을 한곳에서 관리합니다. */
-export const MODAL_TIMING={maxWaitMs:8000,quietMs:1500,pollMs:125} as const;
 /** 첨부파일명 열은 문구만 같은 일반 미리보기를 제외하지 않기 위한 근거입니다. */
 export const ATTACHMENT_NAME_SELECTOR='[col_id="orgnlAtchFileNm"]';
 const FILE_GRID_PATTERN=/_grdFile_body_table$/;
