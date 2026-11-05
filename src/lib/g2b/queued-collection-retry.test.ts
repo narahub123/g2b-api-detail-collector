@@ -6,6 +6,7 @@ import { produceQueuedCollection, produceQueuedCollections } from "./queued-coll
 import { prepareServiceNoticesByMinute } from "./api-client";
 import { admitCollectionTarget } from "./collection-targets";
 import { G2bMaintenanceError } from "./maintenance";
+import { MINUTE_MS } from "@/lib/constants";
 
 vi.mock("./api-client", () => ({ prepareServiceNoticesByMinute: vi.fn() }));
 vi.mock("./collection-targets", () => ({ admitCollectionTarget: vi.fn() }));
@@ -117,7 +118,7 @@ it.each(["web", "cli"] as const)("%s 경로는 보류 시각 이전에 재개하
   const work = produceQueuedCollection(queue, "job");
   await vi.advanceTimersByTimeAsync(2500);
   await work;
-  const readyAt = Date.now() + 60_000;
+  const readyAt = Date.now() + MINUTE_MS;
   const originalQuery = queue.pool.query.bind(queue.pool);
   queue.pool.query = (async (sql: string | pg.QueryConfig, values?: unknown[]) => {
     if (typeof sql === "string" && sql.startsWith("SELECT id FROM public.detail_collection_jobs")) {

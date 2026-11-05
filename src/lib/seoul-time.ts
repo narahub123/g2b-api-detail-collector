@@ -1,4 +1,4 @@
-import { KST_OFFSET_MS } from "@/lib/constants";
+import { KST_OFFSET_MS, MINUTE_MS } from "@/lib/constants";
 
 /** 서울 현지 시분을 엄격히 검증해 실행 환경과 무관한 UTC 시각으로 바꿉니다. */
 export function seoulInputToUtc(value: string): string {
@@ -25,5 +25,5 @@ export function seoulRangeBounds(from: string, to: string): { start: string | nu
   const start = from ? seoulInputToUtc(normalizeSeoulMinute(from, "start")) : null;
   const end = to ? seoulInputToUtc(normalizeSeoulMinute(to, "end")) : null;
   if (start && end && start > end) throw new Error("시작 일시가 종료 일시보다 늦습니다.");
-  return { start, endExclusive: end ? new Date(Date.parse(end) + 60_000).toISOString() : null };
+  return { start, endExclusive: end ? new Date(Date.parse(end) + MINUTE_MS).toISOString() : null };
 }

@@ -2,6 +2,7 @@ import type { DetailQueue } from "./detail-queue";
 import type { CollectionCommand, QueueReport } from "./collection-command";
 import { consumeCollectionQueue } from "./collection-queue-worker";
 import type { PdfDispatchRuntime } from "../documents/dispatch-runtime";
+import { MINUTE_MS } from "@/lib/constants";
 
 /** 준비·미래 대기와 다른 실행자의 임대를 구분하여 후속 실행 필요성을 보고합니다. */
 export async function inspectCollectionQueue(queue: DetailQueue): Promise<Omit<QueueReport, "processed" | "reason"> & { busy: boolean }> {
@@ -22,7 +23,7 @@ export async function inspectCollectionQueue(queue: DetailQueue): Promise<Omit<Q
 export async function drainCollectionCommand(queue: DetailQueue, command: CollectionCommand, signal?: AbortSignal,
   dispatcher?: PdfDispatchRuntime | null): Promise<QueueReport> {
   const deadline = new AbortController();
-  const timer = setTimeout(() => deadline.abort(), command.maxMinutes * 60_000);
+  const timer = setTimeout(() => deadline.abort(), command.maxMinutes * MINUTE_MS);
   timer.unref?.();
   try {
     const processed = await consumeCollectionQueue(queue, { limit: command.limit,

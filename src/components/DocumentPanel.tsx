@@ -7,6 +7,7 @@ import {documentWorkLabel} from '@/lib/documents/display';
 import {isActive,runStatuses} from '@/lib/documents/model';
 import type {DocumentList,DocumentSummary,RunMetadata} from '@/lib/documents/model';
 import {requestManualExtraction,manualExtractionMessage} from '@/lib/documents/manual-request';
+import { MINUTE_MS } from '@/lib/constants';
 
 /** 서버가 저장한 응답만 읽고 통신 실패를 표시 가능한 오류로 통일합니다. */
 async function readJson<T>(url:string,signal?:AbortSignal,init?:RequestInit):Promise<T>{
@@ -116,7 +117,7 @@ function DocumentFile({document:doc,index,noticeKey,refresh}:{document:DocumentS
  }
  const latestIssue=doc.latest&&['failed','interrupted','no_text','unsupported'].includes(doc.latest.status)?doc.latest:null;
  const readySince=doc.active?.next_attempt_at||doc.active?.requested_at;
- const overdue=doc.active?.status==='queued'&&readySince&&Date.now()-Date.parse(readySince)>30*60000;
+ const overdue=doc.active?.status==='queued'&&readySince&&Date.now()-Date.parse(readySince)>30*MINUTE_MS;
  return <FormAccordion title={`${index}. ${doc.filename} · 첨부 ${doc.seq} · ${status?runStatuses[status]:'미처리'}`} onOpenChange={value=>{setOpen(value);if(value)setVisited(true);}}>
   {visited&&<div aria-label={`${doc.filename} 첨부 ${doc.seq}`}>
    {doc.is_current&&<p><a href={doc.attachment_url} download>원본 다운로드</a>{' '}

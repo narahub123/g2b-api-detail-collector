@@ -1,3 +1,5 @@
+import { MINUTE_MS } from "@/lib/constants";
+
 /** 수집 진단 이벤트 최대 저장 개수 */
 export const COLLECTION_DIAGNOSTIC_EVENT_LIMIT = 500;
 /** 상세 수집 큐 이관 시 허용하는 최대 공고 건수 */
@@ -7,4 +9,4 @@ export const DETAIL_COLLECTION_MAX_ATTEMPTS = 3;
 /** 관련 공고 최대 탐색 건수 */
 export const RELATED_NOTICE_MAX_LIMIT = 200;
 /** 증분 수집에서 한 번에 처리할 최대 시간 범위 */
-export const INCREMENTAL_COLLECTION_WINDOW_MS = 4 * 60 * 60_000; // 4시간
+export const INCREMENTAL_COLLECTION_WINDOW_MS = 4 * 60 * MINUTE_MS; // 4시간

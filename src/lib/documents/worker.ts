@@ -9,6 +9,7 @@ import type {ExtractionProgress} from './diagnostics';
 import {workKind,type WorkKind} from './priority';
 import {probeConnection} from './connection-probe';
 import { recoverDocumentRegistrations } from './registration';
+import { MINUTE_MS } from "@/lib/constants";
 
 export type BatchOptions = { mode: "local" | "cloud"; limit?:number; budgetMinutes?:number; noticeKey?:string;
   discover?:boolean;
@@ -32,7 +33,7 @@ async function bounded<T>(promise:Promise<T>,milliseconds:number):Promise<T>{
 export async function runBatch(store:DocumentQueue,options:BatchOptions):Promise<BatchSummary> {
   const now=options.now??Date.now, start=now(), local=options.mode==='local';
   const limit=Math.min(options.limit??(local?3:50),local?3:50);
-  const budget=Math.min(options.budgetMinutes??(local?20:50),local?20:50)*60000;
+  const budget=Math.min(options.budgetMinutes??(local?20:50),local?20:50)*MINUTE_MS;
   if(!Number.isInteger(limit)||limit<1||!Number.isFinite(budget)||budget<360000)throw new Error("PDF 배치 한도가 올바르지 않습니다.");
   const summary:BatchSummary={startedAt:new Date(start).toISOString(),finishedAt:"",attempts:0,remainingReady:0,checked:0,recovered:0,exhausted:0,
     elapsedMs:0,retries:0,completed:0,failed:0,noText:0,peakMemoryBytes:null,reason:"no_ready_request",
