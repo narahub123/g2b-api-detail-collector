@@ -1,6 +1,7 @@
 import {serializeError} from '../error-diagnostics';
 import { getPool } from "./postgres-store";
 import type { NoticeAttempt } from "./incremental-collection";
+import { DETAIL_COLLECTION_MAX_ATTEMPTS } from "@/lib/g2b/constants";
 
 /** 풀러 연결의 search_path와 관계없이 허용된 작업 테이블을 가리킵니다. */
 function table(name: "collection_jobs" | "collection_notice_attempts" | "collection_lock"): string {
@@ -31,7 +32,8 @@ export async function getIncrementalCheckpoint(activationId?: string): Promise<s
 export async function listFailedNoticeAttempts(): Promise<NoticeAttempt[]> {
   const result = await getPool().query<NoticeAttempt>(
     `SELECT key,attempts,status,error,diagnostic_error AS diagnostic FROM ${table("collection_notice_attempts")}
-     WHERE status='failed' AND attempts<3 ORDER BY updated_at,key`);
+     WHERE status='failed' AND attempts<${DETAIL_COLLECTION_MAX_ATTEMPTS} ORDER BY updated_at,key`,
+  );
   return result.rows;
 }
 

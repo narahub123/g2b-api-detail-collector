@@ -1,6 +1,8 @@
+import { QUEUE_POLL_INTERVAL_MS } from "@/lib/constants";
 import pg from "pg";
 import { dispatchRepository, normalizeDispatchRepository, PdfDispatchState } from "./dispatch-state";
 import { runPdfDispatch } from "./dispatch";
+import { PDF_DB_QUERY_TIMEOUT_MS } from "./constants";
 
 /** 웹·일반 CLI와 다른 브랜치를 제외하고 승인된 수집 Actions에서만 호출을 허용합니다. */
 export function actionsDispatchAllowed(env: Record<string,string|undefined> = process.env): boolean {
@@ -30,7 +32,7 @@ export class PdfDispatchRuntime {
   /** 시작 직후와 30초마다 확인하되 같은 프로세스의 호출은 겹치지 않습니다. */
   start(): void {
     if (this.timer || this.stopped) return;
-    this.timer=setInterval(()=>this.wake(),30_000);this.timer.unref?.();this.wake();
+    this.timer=setInterval(()=>this.wake(),QUEUE_POLL_INTERVAL_MS);this.timer.unref?.();this.wake();
   }
   /** 신규 등록은 다음 주기까지 기다리지 않고 현재 점검 또는 후속 점검에 합칩니다. */
   wake(): void {
@@ -74,7 +76,7 @@ export function createWebPdfDispatcher(pool: pg.Pool,schema: string,signal?:Abor
 function createPdfDispatcher(pool: pg.Pool,schema: string,signal?:AbortSignal): PdfDispatchRuntime {
   const repository=dispatchRepository()!;
   // 수집의 기존 연결 제한을 바꾸지 않고 조정기의 연결·쿼리 대기만 제한합니다.
-  const dispatchPool=new pg.Pool({...pool.options,max:1,connectionTimeoutMillis:10_000,query_timeout:15_000});
+  const dispatchPool=new pg.Pool({...pool.options,max:1,connectionTimeoutMillis:10_000,query_timeout:PDF_DB_QUERY_TIMEOUT_MS});
   const store=new PdfDispatchState(dispatchPool,schema);
   return new PdfDispatchRuntime(async()=>{
     const result=await runPdfDispatch(store,{repository,token:process.env.PDF_DISPATCH_TOKEN??"",signal});

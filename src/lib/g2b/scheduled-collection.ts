@@ -1,6 +1,7 @@
 import { claimScheduledRun, type ScheduledClaim } from "./automation-store";
 import { runIncrementalCollection } from "./incremental-collection";
 import type { CollectionJob } from "./collection-job";
+import { MINUTE_MS } from "@/lib/constants";
 
 type Dependencies = {
   claim?: (now: Date) => Promise<ScheduledClaim>;
@@ -17,7 +18,7 @@ export async function runScheduledCollection(now = new Date(), deps: Dependencie
   if (claimed.kind !== "due") return { kind: claimed.kind };
   try {
     const job = await (deps.run || runIncrementalCollection)({ start: claimed.settings.startAt!,
-      end: new Date(Math.floor(now.getTime() / 60_000) * 60_000).toISOString(),
+      end: new Date(Math.floor(now.getTime() / MINUTE_MS) * MINUTE_MS).toISOString(),
       activationId: claimed.settings.activationId! });
     return { kind: job.apiStatus === "failed" ? "failed" : job.apiStatus === "deferred" || job.status === "deferred" ? "deferred" : job.status === "completed" ? "completed" :
       job.queueVersion === 1 && (job.status === "queued" || job.status === "running") ? "queued" : "failed", dueAt: claimed.dueAt, job };

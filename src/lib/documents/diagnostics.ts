@@ -1,5 +1,6 @@
 import { serializeError } from "../error-diagnostics";
 import { isDownloadTimings } from "./download-timings";
+import { PDF_MAX_PAGES } from "@/lib/documents/constants";
 
 import { extractionStages, type ExtractionStage } from "./extraction-stages";
 export { extractionStages, type ExtractionStage } from "./extraction-stages";
@@ -9,7 +10,7 @@ export type ExtractionProgress = {
   currentPage?: number;
   completedPages?: number;
   totalPages?: number;
-  details?: import("./download-timings").DownloadTiming[];
+  details?: import("@/lib/documents/download-steps").DownloadTiming[];
 };
 export type DiagnosticError = {
   [key: string]: unknown;
@@ -124,7 +125,7 @@ export function isExtractionProgress(
     (p.details === undefined ||
       (p.stage === "download" && isDownloadTimings(p.details))) &&
     [p.currentPage, p.completedPages, p.totalPages].every(
-      (n) => n === undefined || (Number.isSafeInteger(n) && n >= 0 && n <= 500),
+      (n) => n === undefined || (Number.isSafeInteger(n) && n >= 0 && n <= PDF_MAX_PAGES),
     )
   );
 }

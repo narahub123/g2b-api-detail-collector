@@ -22,6 +22,15 @@ import type { CollectionStage } from "./collection-progress";
 export { collectModalContents, extractModalStructure } from "./modal-collector";
 export { collectClickDownloads } from "./attachment-identity";
 
+/** 상세 페이지 이동 및 DOM 로드 최대 대기 시간(밀리초) */
+const DETAIL_PAGE_NAVIGATION_TIMEOUT_MS = 45_000;
+/** 상세 페이지 공고명 요소 표시 최대 대기 시간(밀리초) */
+const DETAIL_NOTICE_WAIT_TIMEOUT_MS = 45_000;
+/** 상세 페이지 첨부파일 표 표시 최대 대기 시간(밀리초) */
+const DETAIL_ATTACHMENT_TABLE_WAIT_TIMEOUT_MS = 20_000;
+/** 상세 페이지 네트워크 유휴 상태 최대 대기 시간(밀리초) */
+const DETAIL_NETWORK_IDLE_TIMEOUT_MS = 15_000;
+
 export type { StructuredTable, StructuredTableCell, StructuredTableContent } from "./structured-table";
 
 export type Attachment = { name: string; url: string | null;fileNo?:string;seq?:number };
@@ -159,12 +168,12 @@ async function scrapeDetailPageMeasured(url:string,options?:NonNullable<Paramete
         return [];
       }));
     });
-    await measure("page.goto", () => page.goto(url, { waitUntil: "domcontentloaded", timeout: 45_000 }));
+    await measure("page.goto", () => page.goto(url, { waitUntil: "domcontentloaded", timeout: DETAIL_PAGE_NAVIGATION_TIMEOUT_MS }));
     // 정상 화면의 요소를 기다리기 전에 현재 응답의 점검 안내를 구분합니다.
     await measure('page.maintenance',async()=>assertNotMaintenance(await page.content(), "detail"));
-    await measure("wait.notice", () => page.locator('td[data-title="공고명"]').first().waitFor({ timeout: 45_000 }));
-    await measure("wait.attachment-table", () => page.locator('table[id$="_grdFile_body_table"]').first().waitFor({ timeout: 20_000 }));
-    await measure("wait.network-idle", () => page.waitForLoadState("networkidle", { timeout: 15_000 })).catch((error) => {
+    await measure("wait.notice", () => page.locator('td[data-title="공고명"]').first().waitFor({ timeout: DETAIL_NOTICE_WAIT_TIMEOUT_MS }));
+    await measure("wait.attachment-table", () => page.locator('table[id$="_grdFile_body_table"]').first().waitFor({ timeout: DETAIL_ATTACHMENT_TABLE_WAIT_TIMEOUT_MS }));
+    await measure("wait.network-idle", () => page.waitForLoadState("networkidle", { timeout: DETAIL_NETWORK_IDLE_TIMEOUT_MS })).catch((error) => {
       warnings.push({ stage: "detail", operation: "wait-network-idle", message: error instanceof Error ? error.message : String(error) });
     });
     await options?.onProgress?.("opening");

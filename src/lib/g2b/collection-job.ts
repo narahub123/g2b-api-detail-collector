@@ -1,3 +1,4 @@
+import { LEASE_RENEW_INTERVAL_MS } from "@/lib/constants";
 import {serializeError} from '../error-diagnostics';
 import { deferCollection, maintenanceFromError, type MaintenanceInfo } from "./maintenance";
 import { seoulInputToUtc } from "../seoul-time";
@@ -22,6 +23,7 @@ import type { CollectionTimings } from "./collection-timings";
 import { checkPreservedContent, runContentCheck } from "./content-check";
 import { detailQueueEnabled, wakeDetailWebRuntime, webDetailQueue } from "./detail-web-runtime";
 import { createQueuedCollection } from "./queued-collection";
+import { RELATED_NOTICE_MAX_LIMIT } from "@/lib/g2b/constants";
 
 export type CollectionJob = DiagnosticState & {
   id: string;
@@ -74,7 +76,7 @@ function startLeaseHeartbeat(jobId: string, leaseToken?: string) {
     if (pending) return;
     pending = renewDbLease(jobId, leaseToken).then((renewed) => { if (!renewed) lost = true; })
       .catch(() => { lost = true; }).finally(() => { pending = null; });
-  }, 30_000) : null;
+  }, LEASE_RENEW_INTERVAL_MS) : null;
   timer?.unref();
   return {
     assert: () => { if (lost) throw new Error("수집 작업 잠금을 잃었습니다."); },
@@ -235,9 +237,9 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies, l
         parts(related);
         await addRelation(source, related);
         if (!queued.has(related)) {
-          if (queued.size < 200) { queued.add(related); queue.push(related); }
-          else { job.errors.push(`${related}: 관련 공고 탐색 한도(200건)로 상세 수집 보류`);
-            addDiagnostic(job, { severity: "warning", stage: "detail", operation: "related-notice-limit", target: { key: related }, error: "관련 공고 탐색 한도(200건)" }); }
+          if (queued.size < RELATED_NOTICE_MAX_LIMIT) { queued.add(related); queue.push(related); }
+          else { job.errors.push(`${related}: 관련 공고 탐색 한도(${RELATED_NOTICE_MAX_LIMIT}건)로 상세 수집 보류`);
+            addDiagnostic(job, { severity: "warning", stage: "detail", operation: "related-notice-limit", target: { key: related }, error: `관련 공고 탐색 한도(${RELATED_NOTICE_MAX_LIMIT}건)` }); }
         }
       } catch (error) {
         if (error instanceof Error && !error.message.startsWith("잘못된 공고 키")) throw error;

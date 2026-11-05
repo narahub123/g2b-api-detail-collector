@@ -4,6 +4,7 @@ import { getDocumentPool } from "../src/lib/documents/pool";
 import { DocumentQueue } from "../src/lib/documents/queue";
 import { runBatch } from "../src/lib/documents/worker";
 import { diagnosticError } from "../src/lib/documents/diagnostics";
+import { PDF_CLOUD_BATCH_LIMIT } from "../src/lib/documents/constants";
 
 /** 정해진 인자만 받아 자동 발견 또는 대기열 전용 배치를 실행합니다. */
 async function main(){
@@ -17,7 +18,7 @@ async function main(){
   const store=new DocumentQueue(getDocumentPool()),abort=new AbortController();
   const stop=()=>abort.abort();process.once('SIGTERM',stop);process.once('SIGINT',stop);
   try {
-    const result=await runBatch(store,{mode:"cloud",limit:options.limit?Number(options.limit):50,
+    const result=await runBatch(store,{mode:"cloud",limit:options.limit?Number(options.limit):PDF_CLOUD_BATCH_LIMIT,
       budgetMinutes:options['budget-minutes']?Number(options['budget-minutes']):50,noticeKey:options['notice-key'],
       signal:abort.signal,discover:!queueOnly});
     console.log(JSON.stringify({operation:"pdf-extraction-batch",...result}));

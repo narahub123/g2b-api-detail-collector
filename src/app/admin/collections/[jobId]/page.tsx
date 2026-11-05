@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { getCollectionJob } from "@/lib/g2b/collection-job";
 import { diagnosticCounts, type DiagnosticEntry } from "@/lib/g2b/collection-diagnostics";
 import { CollectionJobObservation } from "@/components/CollectionJobObservation";
+import { COLLECTION_DIAGNOSTIC_EVENT_LIMIT } from "@/lib/g2b/constants";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -55,7 +56,7 @@ export default async function CollectionJobPage({ params, searchParams }: {
         <DiagnosticRow entry={entry} key={`${entry.at}-${index}`} />)}</ul>
       {diagnostics.overflowCount > 0 && <section>
         <h2>개별 목록 초과 {diagnostics.overflowCount}건</h2>
-        <p>오류 유형은 심각도·단계·작업·오류 코드·숫자를 정규화한 메시지로 묶었습니다. 아래 유형별 건수에는 최초 500건도 포함됩니다.</p>
+        <p>오류 유형은 심각도·단계·작업·오류 코드·숫자를 정규화한 메시지로 묶었습니다. 아래 유형별 건수에는 최초 {COLLECTION_DIAGNOSTIC_EVENT_LIMIT}건도 포함됩니다.</p>
         <ul style={{ listStyle: "none", padding: 0 }}>{Object.values(diagnostics.types).map((type, index) =>
           <li key={index}><strong>{type.count}건</strong> · 최초 {new Date(type.firstAt).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })}
             {" · "}최근 {new Date(type.lastAt).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })}

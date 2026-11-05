@@ -2,11 +2,14 @@ import { postedDays } from "./date-range";
 import { assertNotMaintenance } from "./maintenance";
 import { noticeKey } from "./identity";
 import type { ApiNotice, ApiPage, PostedDateRange } from "./types";
+import { DAY_MS, KST_OFFSET_MS, MINUTE_MS } from "@/lib/constants";
 
 export type PostedTimeRange = { start: string; end: string };
 
 const SERVICE_URL = "https://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoServc";
 const PAGE_SIZE = 100;
+/** 나라장터 API 요청 제한 시간(밀리초) */
+const API_REQUEST_TIMEOUT_MS = 30_000;
 
 type ApiBody = { items: ApiNotice[]; total: number; numOfRows: number; pageNo: number; raw: unknown };
 
@@ -35,7 +38,7 @@ async function fetchBody(url: URL, fetcher: typeof fetch): Promise<ApiBody> {
   url.searchParams.set("serviceKey", decodedKey);
   url.searchParams.set("numOfRows", String(PAGE_SIZE));
   url.searchParams.set("type", "json");
-  const response = await fetcher(url, { cache: "no-store", signal: AbortSignal.timeout(30_000) });
+  const response = await fetcher(url, { cache: "no-store", signal: AbortSignal.timeout(API_REQUEST_TIMEOUT_MS) });
   const text = await response.text();
   // 점검 화면은 HTTP 200으로도 반환되므로 JSON 변환 전에 본문을 확인합니다.
   assertNotMaintenance(text, "api");
@@ -170,13 +173,13 @@ export async function prepareServiceNoticesByMinute(
   if (!Number.isFinite(start) || !Number.isFinite(end) || start > end) {
     throw new Error("유효한 분 단위 조회 구간을 입력하세요.");
   }
-  const offset = 9 * 60 * 60_000;
+  const offset = KST_OFFSET_MS;
   const localStart = start + offset;
   const localEnd = end + offset;
   const windows: QueryWindow[] = [];
-  for (let day = Math.floor(localStart / 86_400_000) * 86_400_000; day <= localEnd; day += 86_400_000) {
+  for (let day = Math.floor(localStart / DAY_MS) * DAY_MS; day <= localEnd; day += DAY_MS) {
     const from = new Date(Math.max(localStart, day));
-    const to = new Date(Math.min(localEnd, day + 86_400_000 - 60_000));
+    const to = new Date(Math.min(localEnd, day + DAY_MS - MINUTE_MS));
     const date = new Date(day).toISOString().slice(0, 10);
     windows.push({ date, start: from.toISOString().slice(0, 16).replace(/[-T:]/g, ""),
       end: to.toISOString().slice(0, 16).replace(/[-T:]/g, "") });

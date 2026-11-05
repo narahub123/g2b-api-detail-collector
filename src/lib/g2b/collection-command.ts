@@ -1,3 +1,4 @@
+import { MINUTE_MS } from "@/lib/constants";
 import type { CollectionJob } from "./collection-job";
 import type { ScheduledResult } from "./scheduled-collection";
 
@@ -33,7 +34,7 @@ export function parseCollectionCommand(args: string[], now = new Date()): Collec
   if (mode === "incremental") {
     if (!values.has("--start")) throw Error("--start=ISO시각을 지정하세요.");
     command.start = new Date(values.get("--start")!).toISOString();
-    command.end = values.has("--end") ? new Date(values.get("--end")!).toISOString() : new Date(Math.floor(now.getTime() / 60_000) * 60_000).toISOString();
+    command.end = values.has("--end") ? new Date(values.get("--end")!).toISOString() : new Date(Math.floor(now.getTime() / MINUTE_MS) * MINUTE_MS).toISOString();
     if (command.start > command.end) throw Error("조회 시작은 종료보다 늦을 수 없습니다.");
   }
   return command;

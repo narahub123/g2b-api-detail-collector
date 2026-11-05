@@ -1,7 +1,8 @@
 import {Readable} from 'node:stream';
-import {createDownloadMeasure,type DownloadMeasure} from '../documents/download-timings';
+import {createDownloadMeasure} from '../documents/download-timings';
+import {type DownloadMeasure} from '@/lib/documents/download-steps';
 import {ExtractionError} from '../documents/diagnostics';
-import {MAX_BYTES} from '../documents/contract';
+import { PDF_MAX_BYTES } from "@/lib/documents/constants";
 import {assertNotMaintenance,maintenanceFromError} from './maintenance';
 import {parseAttachmentDownloadUrl} from './attachment-links';
 import {validateDirectAttachmentUrl} from './attachment-direct';
@@ -78,14 +79,14 @@ export async function openHttpDownload(url:string,signal:AbortSignal,
     current=next;
    }
   });
-  if(Number(response.headers.get('content-length'))>MAX_BYTES){await response.body?.cancel();throw new ExtractionError('size_limit','다운로드가 50MiB 크기 제한을 초과했습니다.');}
+  if(Number(response.headers.get('content-length'))>PDF_MAX_BYTES){await response.body?.cancel();throw new ExtractionError('size_limit','다운로드가 50MiB 크기 제한을 초과했습니다.');}
   if(!response.body)throw new ExtractionError('download_response','다운로드 파일 본문이 없습니다.');
   reader=response.body.getReader();
   receiving=measure('receive',()=>new Promise<void>((resolve,reject)=>{receiveResolve=resolve;receiveReject=reject;}));
   void receiving.catch(()=>undefined);
   const first=await Promise.race([reader.read(),cancelled]);
   const prefetched:Uint8Array[]=first.done?[]:[first.value];
-  if(first.value&&first.value.length>MAX_BYTES)throw new ExtractionError('size_limit','다운로드가 50MiB 크기 제한을 초과했습니다.');
+  if(first.value&&first.value.length>PDF_MAX_BYTES)throw new ExtractionError('size_limit','다운로드가 50MiB 크기 제한을 초과했습니다.');
   const contentType=response.headers.get('content-type')||'application/octet-stream';
   let prefix=Buffer.from(first.value?.subarray(0,65536)||[]).toString('utf8');
   if(!response.ok||/text\/html|application\/(?:json|problem\+json)/i.test(contentType)||/^\s*</.test(prefix)){
@@ -107,7 +108,7 @@ export async function openHttpDownload(url:string,signal:AbortSignal,
     while(!chunk.done){
      if(controller.signal.aborted)throw controller.signal.reason;
      total+=chunk.value.length;
-     if(total>MAX_BYTES)throw new ExtractionError('size_limit','다운로드가 50MiB 크기 제한을 초과했습니다.');
+     if(total>PDF_MAX_BYTES)throw new ExtractionError('size_limit','다운로드가 50MiB 크기 제한을 초과했습니다.');
      yield Buffer.from(chunk.value);
      chunk=index<prefetched.length?{done:false,value:prefetched[index++]}:await Promise.race([bodyReader.read(),cancelled]);
     }

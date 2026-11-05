@@ -1,3 +1,4 @@
+import { DAY_MS, KST_OFFSET_MS, MINUTE_MS } from "@/lib/constants";
 import { seoulInputToUtc } from "../seoul-time";
 export { seoulInputToUtc } from "../seoul-time";
 import { randomUUID } from "node:crypto";
@@ -58,17 +59,17 @@ export function latestDueTime(settings: AutomationSettings, now: Date): string |
   const activatedMs = Date.parse(settings.activatedAt);
   let dueMs: number | null = null;
   if (settings.schedule === "interval") {
-    const period = settings.intervalMinutes * 60_000;
+    const period = settings.intervalMinutes * MINUTE_MS;
     if (nowMs >= activatedMs + period) {
       dueMs = activatedMs + Math.floor((nowMs - activatedMs) / period) * period;
     }
   } else {
-    const offset = 9 * 60 * 60_000;
-    const today = Math.floor((nowMs + offset) / 86_400_000) * 86_400_000;
-    for (const day of [today - 86_400_000, today]) {
+    const offset = KST_OFFSET_MS;
+    const today = Math.floor((nowMs + offset) / DAY_MS) * DAY_MS;
+    for (const day of [today - DAY_MS, today]) {
       for (const time of settings.times) {
         const [hour, minute] = time.split(":").map(Number);
-        const candidate = day + (hour * 60 + minute) * 60_000 - offset;
+        const candidate = day + (hour * 60 + minute) * MINUTE_MS - offset;
         if (candidate <= nowMs && candidate > activatedMs && (dueMs === null || candidate > dueMs)) dueMs = candidate;
       }
     }
@@ -79,5 +80,5 @@ export function latestDueTime(settings: AutomationSettings, now: Date): string |
 
 /** 예약 시각에서 15분이 지나도록 실행 기록이 없으면 지연으로 판단합니다. */
 export function schedulerIsLate(settings: AutomationSettings, now: Date): boolean {
-  return latestDueTime(settings, new Date(now.getTime() - 15 * 60_000)) !== null;
+  return latestDueTime(settings, new Date(now.getTime() - 15 * MINUTE_MS)) !== null;
 }

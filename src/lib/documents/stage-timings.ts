@@ -1,6 +1,6 @@
 import type { ExtractionProgress, ExtractionStage } from './diagnostics';
 
-export type StageTiming = { stage:ExtractionStage;startedAt:string;endedAt:string|null;elapsedMs:number|null;details?:import('./download-timings').DownloadTiming[];
+export type StageTiming = { stage:ExtractionStage;startedAt:string;endedAt:string|null;elapsedMs:number|null;details?:import('@/lib/documents/download-steps').DownloadTiming[];
  outcome:'running'|'transition'|'completed'|'failed'|'interrupted'|'deferred';estimated:boolean };
 export type StageOutcome = Exclude<StageTiming['outcome'],'running'>;
 

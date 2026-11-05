@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
 import { addDiagnostic, diagnosticCounts, type DiagnosticState } from "./collection-diagnostics";
+import { COLLECTION_DIAGNOSTIC_EVENT_LIMIT } from "@/lib/g2b/constants";
 
 it("수집 오류의 단계와 대상을 보존합니다", () => {
   const state: DiagnosticState = {};
@@ -29,7 +30,7 @@ it("비밀값과 URL 쿼리의 인증값을 제거합니다", () => {
 
 it('요약 외에도 원인 객체를 보존하며 한도 이후 대표 진단에도 남깁니다',()=>{
  const state:DiagnosticState={};
- for(let i=0;i<500;i++)addDiagnostic(state,{severity:'warning',stage:'api',operation:'repeat',error:'repeat'});
+ for(let i=0;i<COLLECTION_DIAGNOSTIC_EVENT_LIMIT;i++)addDiagnostic(state,{severity:'warning',stage:'api',operation:'repeat',error:'repeat'});
  const entry=addDiagnostic(state,{severity:'failure',stage:'detail',operation:'scrape-detail',error:{message:'failed',cause:{code:'ECONNRESET',status:502},errors:[{code:'ETIMEDOUT'}],token:'hidden-value'}});
  expect(entry).toMatchObject({diagnostic:{cause:{code:'ECONNRESET',status:502},errors:[{code:'ETIMEDOUT'}]}});
  expect(JSON.stringify(state)).not.toContain('hidden-value');

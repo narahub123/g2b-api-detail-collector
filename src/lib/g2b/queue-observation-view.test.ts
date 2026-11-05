@@ -3,6 +3,7 @@ import { addDiagnostic, diagnosticCounts } from "./collection-diagnostics";
 import type { CollectionTimings } from "./collection-timings";
 import type { QueueObservation } from "./queue-observation";
 import { getQueueObservations, mergeQueueTimings, aggregateCollectionTimings, mergeQueueDiagnostics } from "./queue-observation-view";
+import { COLLECTION_DIAGNOSTIC_EVENT_LIMIT } from "@/lib/g2b/constants";
 
 /** 중첩되는 저장 구간을 가진 종료 관측을 준비합니다. */
 function observation(id = "tx"): QueueObservation {
@@ -66,15 +67,15 @@ it("원본 진단과 종료 진단이 겹쳐도 실제 재시도 횟수는 보�
 it("개별 진단 한도 밖의 기존 유형 횟수도 중복 집계하지 않습니다", () => {
   const base = {}, error = Error("same error");
   const observations: QueueObservation[] = [];
-  for (let index = 0; index < 502; index++) {
+  for (let index = 0; index < COLLECTION_DIAGNOSTIC_EVENT_LIMIT + 2; index++) {
     addDiagnostic(base, { severity: "failure", stage: "api", operation: "run-window", error });
     const value = observation(String(index));
     addDiagnostic(value, { severity: "failure", stage: "database", operation: "producer.mutate", error });
     observations.push(value);
   }
   const diagnostics = mergeQueueDiagnostics(base, observations);
-  expect(diagnosticCounts({ diagnostics }).failure).toBe(502);
-  expect(diagnostics?.events).toHaveLength(500); expect(diagnostics?.overflowCount).toBe(2);
+  expect(diagnosticCounts({ diagnostics }).failure).toBe(COLLECTION_DIAGNOSTIC_EVENT_LIMIT + 2);
+  expect(diagnostics?.events).toHaveLength(COLLECTION_DIAGNOSTIC_EVENT_LIMIT); expect(diagnostics?.overflowCount).toBe(2);
 });
 
 it("숫자와 스택이 다른 오류가 같은 유형으로 묶여도 초과 횟수를 중복 집계하지 않습니다", () => {

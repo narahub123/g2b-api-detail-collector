@@ -1,16 +1,16 @@
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
-import { MAX_BYTES } from "./contract";
+import { PDF_MAX_BYTES, PDF_MAX_PAGES } from "@/lib/documents/constants";
 import { pathRectangles, readingOrderText } from "./reading-order";
 import { EXTRACTOR_VERSION } from "./extractor-version";
 import type { PdfResult } from "./contract";
 import type {ExtractionProgress} from './diagnostics';
 
 /** 표시 위치로 본문 순서를 복원하고 저장할 수 없는 UTF-16 문자만 대체합니다. */
-export async function extractPdf(bytes: Uint8Array, maxPages = 500, progress?: (value:ExtractionProgress)=>void): Promise<PdfResult> {
+export async function extractPdf(bytes: Uint8Array, maxPages = PDF_MAX_PAGES, progress?: (value:ExtractionProgress)=>void): Promise<PdfResult> {
   progress?.({stage:'opening',at:new Date().toISOString()});
-  if (bytes.length > MAX_BYTES) throw new Error("PDF가 50MiB 제한을 초과했습니다.");
+  if (bytes.length > PDF_MAX_BYTES) throw new Error("PDF가 50MiB 제한을 초과했습니다.");
   if (!Buffer.from(bytes.subarray(0, 1024)).includes(Buffer.from("%PDF-"))) throw new Error("다운로드 응답이 PDF 형식이 아닙니다.");
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
   const root = dirname(createRequire(import.meta.url).resolve("pdfjs-dist/package.json"));

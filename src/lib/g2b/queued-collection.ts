@@ -1,3 +1,4 @@
+import { LEASE_RENEW_INTERVAL_MS } from "@/lib/constants";
 import { setTimeout as delay } from "node:timers/promises";
 import { randomUUID } from "node:crypto";
 import type pg from "pg";
@@ -10,6 +11,7 @@ import { addDiagnostic, redactDiagnostic } from "./collection-diagnostics";
 import { maintenanceFromError } from "./maintenance";
 import { admitCollectionTarget } from "./collection-targets";
 import { queueSnapshotUpdate } from "./queue-observation-store";
+import { DETAIL_COLLECTION_MAX_ATTEMPTS, INCREMENTAL_COLLECTION_WINDOW_MS } from "@/lib/g2b/constants";
 
 type Input = { mode: "collection" | "incremental"; start: string; end: string; activationId?: string; range?: PostedDateRange };
 type ProducerState = Partial<CollectionJob> & { input: Input };
@@ -92,7 +94,7 @@ async function acquireProducer(queue: DetailQueue, id: string, token: string): P
       return null;
     }
     state.windowStart = new Date(start).toISOString();
-    state.windowEnd = new Date(state.input.mode === "incremental" ? Math.min(start + 4 * 60 * 60_000, end) : end).toISOString();
+    state.windowEnd = new Date(state.input.mode === "incremental" ? Math.min(start + INCREMENTAL_COLLECTION_WINDOW_MS, end) : end).toISOString();
     state.continuation = Date.parse(state.windowEnd) < end;
     await db.query(`UPDATE ${queue.schema}.detail_collection_producer_lease SET job_id=$1,owner_token=$2,
       expires_at=clock_timestamp()+interval '120 seconds' WHERE id=1`, [id, token]);
@@ -123,7 +125,7 @@ export async function produceQueuedCollection(queue: DetailQueue, id: string, op
       SET expires_at=clock_timestamp()+interval '120 seconds' WHERE id=1 AND job_id=$1 AND owner_token=$2
       AND expires_at>clock_timestamp() RETURNING id`, [id, token])).then(row => { if (!row.rowCount) lost = true; })
       .catch(() => { lost = true; }).finally(() => { renewing = undefined; });
-  }, 30_000);
+  }, LEASE_RENEW_INTERVAL_MS);
   timer.unref?.();
   /** 종료·임대 상실 이후에는 API 접수와 체크포인트 저장을 시작하지 않습니다. */
   const assertActive = () => {
@@ -174,8 +176,8 @@ export async function produceQueuedCollection(queue: DetailQueue, id: string, op
             await mutate(db => saveProducerState(db, queue, id, state!));
           }
           if (state.input.mode === "incremental") {
-            const failed = (await queue.pool.query(`SELECT a.key FROM ${queue.schema}.collection_notice_attempts a
-              JOIN ${queue.schema}.notices n ON n.key=a.key WHERE a.status='failed' AND a.attempts<3 AND n.detail IS NULL ORDER BY a.updated_at,a.key`)).rows;
+           const failed = (await queue.pool.query(`SELECT a.key FROM ${queue.schema}.collection_notice_attempts a
+  JOIN ${queue.schema}.notices n ON n.key=a.key WHERE a.status='failed' AND a.attempts<${DETAIL_COLLECTION_MAX_ATTEMPTS} AND n.detail IS NULL ORDER BY a.updated_at,a.key`)).rows;
             for (const row of failed) {
               assertActive();
               await mutate(db => admitCollectionTarget(db, queue, { id, mode: "incremental", source: "automatic" }, row.key));

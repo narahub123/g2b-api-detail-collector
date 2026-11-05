@@ -1,3 +1,4 @@
+import { QUEUE_POLL_INTERVAL_MS } from "@/lib/constants";
 /** 하나의 프로세스에서 시작·깨우기·주기 확인을 합치고 실행 Promise를 추적합니다. */
 export class DetailRuntime {
   pending: Promise<void> | null = null;
@@ -16,7 +17,7 @@ export class DetailRuntime {
   /** 중복 초기화를 피하고 시작 직후와 30초마다 복구·선점을 시도합니다. */
   start(): void {
     if (this.timer || this.stopped) return;
-    this.timer = setInterval(() => this.wake(), 30_000);
+    this.timer = setInterval(() => this.wake(), QUEUE_POLL_INTERVAL_MS);
     this.timer.unref?.();
     this.wake();
   }

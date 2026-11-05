@@ -2,7 +2,8 @@ import {measure, measureSync} from './collection-performance';
 import {withCollectionDetailTiming} from './collection-detail-measure';
 import type {CollectionDetailCallback} from './collection-detail-steps';
 import {redactDiagnostic} from './collection-diagnostics';
-import {ATTACHMENT_NAME_SELECTOR, MODAL_TIMING, isResetControl, isAttachmentPreview, isUnneededCompanySearch} from './modal-policy';
+import {ATTACHMENT_NAME_SELECTOR, isResetControl, isAttachmentPreview, isUnneededCompanySearch} from './modal-policy';
+import { MODAL_TIMING } from '@/lib/g2b/constants'
 import {isAttachmentDownload, isParticipantLookup, isCollectedReference} from './modal-policy';
 import * as cheerio from "cheerio";
 import { extractCommonSections } from "./common-content-extractor";
