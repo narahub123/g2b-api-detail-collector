@@ -1,5 +1,6 @@
 import {Readable} from 'node:stream';
-import {createDownloadMeasure,type DownloadMeasure} from '../documents/download-timings';
+import {createDownloadMeasure} from '../documents/download-timings';
+import {type DownloadMeasure} from '@/lib/documents/download-steps';
 import {ExtractionError} from '../documents/diagnostics';
 import { PDF_MAX_BYTES } from "@/lib/documents/constants";
 import {assertNotMaintenance,maintenanceFromError} from './maintenance';

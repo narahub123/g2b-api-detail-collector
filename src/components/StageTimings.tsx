@@ -4,7 +4,7 @@ import {useEffect,useState} from 'react';
 import {extractionStages} from '@/lib/documents/extraction-stages';
 import type {StageTiming} from '@/lib/documents/stage-timings';
 import {documentTime} from '@/lib/documents/display';
-import {downloadSteps} from '@/lib/documents/download-timings';
+import {downloadSteps} from '@/lib/documents/download-steps';
 import {CompactAccordion} from './common/CompactAccordion';
 
 const outcomes={running:'진행 중',transition:'단계 전환',completed:'완료',failed:'실패 · 미완료',interrupted:'중단 · 미완료',deferred:'보류 · 미완료'};

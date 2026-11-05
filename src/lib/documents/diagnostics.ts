@@ -10,7 +10,7 @@ export type ExtractionProgress = {
   currentPage?: number;
   completedPages?: number;
   totalPages?: number;
-  details?: import("./download-timings").DownloadTiming[];
+  details?: import("@/lib/documents/download-steps").DownloadTiming[];
 };
 export type DiagnosticError = {
   [key: string]: unknown;
