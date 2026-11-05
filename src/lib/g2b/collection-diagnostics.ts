@@ -1,4 +1,5 @@
 import {serializeError,type SerializedError} from '../error-diagnostics';
+import { COLLECTION_DIAGNOSTIC_EVENT_LIMIT } from "@/lib/g2b/constants";
 export type DiagnosticSeverity = "failure" | "warning" | "retry";
 export type DiagnosticStage = "api" | "detail" | "modal" | "attachment" | "transform" | "database" | "lease" | "collection";
 export type DiagnosticEntry = {
@@ -17,7 +18,6 @@ export type DiagnosticState = { diagnostics?: {
   events: DiagnosticEntry[]; overflowCount: number; types: Record<string, DiagnosticType>;
 } };
 type Input = Omit<DiagnosticEntry, "at" | "error" | "diagnostic"> & { error: unknown };
-const EVENT_LIMIT = 500;
 
 /** 수집 진단에 포함될 수 있는 인증 정보와 접속 문자열을 제거합니다. */
 export function redactDiagnostic(value: string): string {
@@ -69,7 +69,7 @@ export function appendDiagnosticEntry(state: DiagnosticState, entry: DiagnosticE
     type.lastAt = type.lastAt > entry.at ? type.lastAt : entry.at;
   }
   else diagnostics.types[fingerprint] = { count: 1, firstAt: entry.at, lastAt: entry.at, representative: entry };
-  if (diagnostics.events.length < EVENT_LIMIT) diagnostics.events.push(entry);
+  if (diagnostics.events.length < COLLECTION_DIAGNOSTIC_EVENT_LIMIT) diagnostics.events.push(entry);
   else diagnostics.overflowCount++;
   return entry;
 }

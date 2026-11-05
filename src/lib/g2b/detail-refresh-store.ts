@@ -7,6 +7,7 @@ import type { MaintenanceInfo } from "./maintenance";
 import type { QueueObservationState } from "./queue-observation-store";
 import { getQueueObservations, mergeQueueTimings, aggregateCollectionTimings, mergeQueueDiagnostics } from "./queue-observation-view";
 import type { CollectionTimings } from "./collection-timings";
+import { COLLECTION_DIAGNOSTIC_EVENT_LIMIT } from "@/lib/g2b/constants";
 
 export type DetailSnapshot = QueueObservationState & {
   result?: CollectionNoticeResult;
@@ -50,8 +51,8 @@ function mergeDiagnostics(snapshots: DetailSnapshot[]): DiagnosticState["diagnos
     }
   }
   merged.events.sort((a, b) => a.at.localeCompare(b.at));
-  merged.overflowCount += Math.max(0, merged.events.length - 500);
-  merged.events = merged.events.slice(0, 500);
+  merged.overflowCount += Math.max(0, merged.events.length - COLLECTION_DIAGNOSTIC_EVENT_LIMIT);
+  merged.events = merged.events.slice(0, COLLECTION_DIAGNOSTIC_EVENT_LIMIT);
   return Object.keys(merged.types).length ? merged : undefined;
 }
 
