@@ -10,7 +10,10 @@ import {workKind,type WorkKind} from './priority';
 import {probeConnection} from './connection-probe';
 import { recoverDocumentRegistrations } from './registration';
 import { MINUTE_MS, LEASE_RENEW_INTERVAL_MS } from "@/lib/constants";
-import { PDF_CLOUD_BATCH_LIMIT } from "@/lib/documents/constants";
+import { PDF_CLOUD_BATCH_LIMIT, PDF_LEASE_EXPIRY_MS } from "@/lib/documents/constants";
+
+/** PDF 작업의 임대 갱신 및 해제 DB 응답 최대 대기 시간 (15초) */
+const PDF_LEASE_DB_TIMEOUT_MS = 15_000;
 
 export type BatchOptions = { mode: "local" | "cloud"; limit?:number; budgetMinutes?:number; noticeKey?:string;
   discover?:boolean;
@@ -40,7 +43,7 @@ export async function runBatch(store:DocumentQueue,options:BatchOptions):Promise
     elapsedMs:0,retries:0,completed:0,failed:0,noText:0,peakMemoryBytes:null,reason:"no_ready_request",
     byKind:{manual:{attempts:0,completed:0,failed:0,noText:0,remainingReady:0},initial:{attempts:0,completed:0,failed:0,noText:0,remainingReady:0},reextract:{attempts:0,completed:0,failed:0,noText:0,remainingReady:0}}};
   const token=randomUUID(), abort=new AbortController(); let heartbeat:Promise<void>|undefined, lost=false,probed=false;
-  const renewalTimeout=Math.min(options.renewalTimeoutMs??15000,15000);
+  const renewalTimeout=Math.min(options.renewalTimeoutMs??PDF_LEASE_DB_TIMEOUT_MS,PDF_LEASE_DB_TIMEOUT_MS);
   /** 갱신 실패 시 자식 작업을 중단하고 이 회차의 새 선점을 금지합니다. */
   const lose=()=>{lost=true;abort.abort();};
   const stop=()=>abort.abort();options.signal?.addEventListener("abort",stop,{once:true});
@@ -49,7 +52,7 @@ export async function runBatch(store:DocumentQueue,options:BatchOptions):Promise
   if(!await store.acquire(token)) { options.signal?.removeEventListener("abort",stop);return {...summary,finishedAt:new Date(now()).toISOString(),elapsedMs:now()-start,reason:"lease_busy"}; }
   let expiryTimer:ReturnType<typeof setTimeout>;
   /** DB 확인 응답이 늦어도 요청 시작 시각을 기준으로 보수적으로 임대 만료를 감시합니다. */
-  const confirm=(requestedAt:number)=>{clearTimeout(expiryTimer);expiryTimer=setTimeout(lose,Math.max(0,requestedAt+120000-Date.now()));};
+  const confirm=(requestedAt:number)=>{clearTimeout(expiryTimer);expiryTimer=setTimeout(lose,Math.max(0,requestedAt+PDF_LEASE_EXPIRY_MS-Date.now()));};
   confirm(acquisitionStarted);
   const timer=setInterval(()=>{
     if(heartbeat)return;
@@ -175,7 +178,7 @@ export async function runBatch(store:DocumentQueue,options:BatchOptions):Promise
     return summary;
   } finally {
     clearInterval(timer);await heartbeat;clearTimeout(expiryTimer!);options.signal?.removeEventListener("abort",stop);
-    await bounded(store.release(token),15000);summary.finishedAt=new Date(now()).toISOString();summary.elapsedMs=now()-start;
+    await bounded(store.release(token), PDF_LEASE_DB_TIMEOUT_MS);summary.finishedAt=new Date(now()).toISOString();summary.elapsedMs=now()-start;
   }
 }
 

@@ -16,7 +16,7 @@ import { attachmentObsoleteMessage, isCurrentAttachmentRun, synchronizeNoticeAtt
 import { dispatchRepository, PdfDispatchState } from './dispatch-state';
 
 import { EXTRACTOR_VERSION } from "./extractor-version";
-import { PDF_DISCOVERY_BATCH_LIMIT } from '@/lib/documents/constants';
+import { PDF_DISCOVERY_BATCH_LIMIT, PDF_LEASE_EXPIRY_MS } from '@/lib/documents/constants';
 export { EXTRACTOR_VERSION } from "./extractor-version";
 export type Failure = { code: string; message: string; retry: boolean; status?: "failed" | "interrupted" | "unsupported"; diagnostic?:DiagnosticError };
 export type QueueRun = { id: string; document_id: string; chain_id: string; source: string; status: string;
@@ -43,14 +43,14 @@ export class DocumentQueue {
   }
   /** 임대 TTL이 지나기 전에도 경쟁 작업기가 토큰을 교체할 수 없게 조건부 선점합니다. */
   async acquire(token: string) {
-    const r=await this.pool.query({text:`UPDATE ${this.schema}.attachment_extraction_worker_lease SET owner_token=$1,expires_at=clock_timestamp()+interval '120 seconds',updated_at=now()
-      WHERE id=1 AND (owner_token IS NULL OR expires_at<=clock_timestamp()) RETURNING id`,values:[token]}); return !!r.rowCount;
-  }
+    const r=await this.pool.query({text:`UPDATE ${this.schema}.attachment_extraction_worker_lease SET owner_token=$1,expires_at=clock_timestamp()+($2 * interval '1 millisecond'),updated_at=now()
+      WHERE id=1 AND (owner_token IS NULL OR expires_at<=clock_timestamp()) RETURNING id`,values:[token,PDF_LEASE_EXPIRY_MS]}); return !!r.rowCount;
+}
   /** 만료된 토큰은 갱신하지 않아 오래 멈춘 작업기의 재진입을 막습니다. */
   async renew(token: string) {
-    const r=await this.pool.query({text:`UPDATE ${this.schema}.attachment_extraction_worker_lease SET expires_at=clock_timestamp()+interval '120 seconds',updated_at=now()
-      WHERE id=1 AND owner_token=$1 AND expires_at>clock_timestamp() RETURNING id`,values:[token]}); return !!r.rowCount;
-  }
+    const r=await this.pool.query({text:`UPDATE ${this.schema}.attachment_extraction_worker_lease SET expires_at=clock_timestamp()+($2 * interval '1 millisecond'),updated_at=now()
+      WHERE id=1 AND owner_token=$1 AND expires_at>clock_timestamp() RETURNING id`,values:[token,PDF_LEASE_EXPIRY_MS]}); return !!r.rowCount;
+}
   /** 다른 소유자가 획득한 임대를 해제하지 않습니다. */
   async release(token: string) {
     await this.pool.query({text:`UPDATE ${this.schema}.attachment_extraction_worker_lease SET owner_token=NULL,expires_at=NULL,updated_at=now() WHERE id=1 AND owner_token=$1`,values:[token]});

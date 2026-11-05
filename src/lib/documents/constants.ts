@@ -10,3 +10,5 @@ export const PDF_MAX_PAGES = 500;
 export const PDF_DISCOVERY_BATCH_LIMIT = 20;
 /** 클라우드 PDF 작업자의 회차당 최대 처리 건수 */
 export const PDF_CLOUD_BATCH_LIMIT = 50;
+/** PDF 작업 소유권의 만료 감시 시간 (2분) */
+export const PDF_LEASE_EXPIRY_MS = 120_000;
