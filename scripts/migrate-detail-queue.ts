@@ -3,6 +3,7 @@ import { DetailQueue } from "../src/lib/g2b/detail-queue";
 import { inspectLegacyImport } from "../src/lib/g2b/queue-rollout";
 import { applyLegacyImport } from "../src/lib/g2b/queue-import";
 import { serializeError } from "../src/lib/error-diagnostics";
+import { DETAIL_QUEUE_IMPORT_MAX_LIMIT } from "../src/lib/g2b/constants";
 
 /** 기본 읽기 전용 보고와 명시적으로 확인한 한 묶음의 이관 적용을 분리합니다. */
 async function main(): Promise<void> {
@@ -13,7 +14,7 @@ async function main(): Promise<void> {
     args.set(match[1] ?? match[2], match[3] ?? "true");
   }
   const limit = Number(args.get("--limit") ?? 100);
-  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) throw Error("이관 한도는 1~500건이어야 합니다.");
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > DETAIL_QUEUE_IMPORT_MAX_LIMIT) throw Error(`이관 한도는 1~${DETAIL_QUEUE_IMPORT_MAX_LIMIT}건이어야 합니다.`);
   const apply = args.has("--apply");
   if (apply && process.env.DETAIL_COLLECTION_QUEUE_ENABLED === "true") throw Error("웹·CLI·Actions 수집을 중지하고 상세 큐 설정을 비활성화한 뒤 적용하세요.");
   if (apply && !args.has("--expected-digest")) throw Error("--expected-digest=사전보고지문을 지정하세요.");

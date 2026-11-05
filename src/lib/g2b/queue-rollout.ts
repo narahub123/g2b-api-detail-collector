@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type pg from "pg";
 import { noticeKeyFromParts } from "./identity";
+import { DETAIL_QUEUE_IMPORT_MAX_LIMIT } from "@/lib/g2b/constants";
 
 type Db = Pick<pg.PoolClient, "query">;
 type Candidate = { key: string; purpose: "initial" | "reextract"; attempts: number };
@@ -21,7 +22,7 @@ function validKey(key: unknown): key is string {
 /** 스키마 이름과 실행 한도를 확인하여 SQL 식별자와 과도한 한도 입력을 제한합니다. */
 function validate(schema: string, limit: number): void {
   if (!/^[a-z][a-z0-9_]*$/.test(schema)) throw Error("잘못된 DB 스키마 이름입니다.");
-  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) throw Error("이관 한도는 1~500건이어야 합니다.");
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > DETAIL_QUEUE_IMPORT_MAX_LIMIT) throw Error(`이관 한도는 1~${DETAIL_QUEUE_IMPORT_MAX_LIMIT}건이어야 합니다.`);
 }
 
 /** 아직 적용되지 않은 큐 스키마에서도 원본과 실행 중 상태를 읽기만 합니다. */

@@ -1,13 +1,14 @@
 import pg from "pg";
 import { inspectLegacyImport } from "../src/lib/g2b/queue-rollout";
 import { serializeError } from "../src/lib/error-diagnostics";
+import { DETAIL_QUEUE_IMPORT_MAX_LIMIT } from "../src/lib/g2b/constants";
 
 /** 적용 기능을 포함하지 않는 별도 명령으로 이관 예상 건수만 조회합니다. */
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   if (args.length > 1 || args.some(arg => !/^--limit=\d+$/.test(arg))) throw Error("조회 전용 명령은 --limit=건수만 지원합니다.");
   const limit = Number(args[0]?.split("=")[1] ?? 100);
-  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) throw Error("조회 한도는 1~500건이어야 합니다.");
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > DETAIL_QUEUE_IMPORT_MAX_LIMIT) throw Error(`조회 한도는 1~${DETAIL_QUEUE_IMPORT_MAX_LIMIT}건이어야 합니다.`);
   if (!process.env.DATABASE_URL) throw Error("DATABASE_URL 환경변수를 설정하세요.");
   const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, connectionTimeoutMillis: 15_000,
     options: "-c default_transaction_read_only=on" });
