@@ -6,7 +6,7 @@ import { produceQueuedCollection, produceQueuedCollections } from "./queued-coll
 import { prepareServiceNoticesByMinute } from "./api-client";
 import { admitCollectionTarget } from "./collection-targets";
 import { G2bMaintenanceError } from "./maintenance";
-import { MINUTE_MS } from "@/lib/constants";
+import { MINUTE_MS, QUEUE_POLL_INTERVAL_MS } from "@/lib/constants";
 
 vi.mock("./api-client", () => ({ prepareServiceNoticesByMinute: vi.fn() }));
 vi.mock("./collection-targets", () => ({ admitCollectionTarget: vi.fn() }));
@@ -132,9 +132,9 @@ it.each(["web", "cli"] as const)("%s 경로는 보류 시각 이전에 재개하
   runtime?.start();
   if (runtime) await runtime.pending;
   else await produceQueuedCollections(queue);
-  await vi.advanceTimersByTimeAsync(30_000);
+  await vi.advanceTimersByTimeAsync(QUEUE_POLL_INTERVAL_MS);
   expect(prepareServiceNoticesByMinute).toHaveBeenCalledOnce();
-  await vi.advanceTimersByTimeAsync(30_000);
+  await vi.advanceTimersByTimeAsync(QUEUE_POLL_INTERVAL_MS);
   if (runtime) { await runtime.pending; await runtime.stop(); }
   else {
     expect(prepareServiceNoticesByMinute).toHaveBeenCalledOnce();

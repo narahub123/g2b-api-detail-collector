@@ -1,3 +1,4 @@
+import { LEASE_RENEW_INTERVAL_MS } from "@/lib/constants";
 import { randomUUID } from "node:crypto";
 import type { DetailQueue, DetailRun } from "./detail-queue";
 import type { DetailSnapshot } from "./detail-refresh-store";
@@ -143,7 +144,7 @@ export async function consumeDetails(queue: DetailQueue, options: Options = {}):
     if (renewing) return;
     renewing = queue.renew(token, activeRunId).then(ok => { if (!ok) lost = true; })
       .catch(() => { lost = true; }).finally(() => { renewing = undefined; });
-  }, 30_000);
+  }, LEASE_RENEW_INTERVAL_MS);
   heartbeat.unref?.();
   /** 갱신 실패 이후에는 성공 결과도 저장하지 않고 다음 소비기의 복구에 맡깁니다. */
   const assertLease = () => { if (lost) throw Error("상세 소비기 임대 소유권을 잃었습니다."); };

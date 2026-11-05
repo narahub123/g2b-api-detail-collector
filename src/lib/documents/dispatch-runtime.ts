@@ -1,3 +1,4 @@
+import { QUEUE_POLL_INTERVAL_MS } from "@/lib/constants";
 import pg from "pg";
 import { dispatchRepository, normalizeDispatchRepository, PdfDispatchState } from "./dispatch-state";
 import { runPdfDispatch } from "./dispatch";
@@ -30,7 +31,7 @@ export class PdfDispatchRuntime {
   /** 시작 직후와 30초마다 확인하되 같은 프로세스의 호출은 겹치지 않습니다. */
   start(): void {
     if (this.timer || this.stopped) return;
-    this.timer=setInterval(()=>this.wake(),30_000);this.timer.unref?.();this.wake();
+    this.timer=setInterval(()=>this.wake(),QUEUE_POLL_INTERVAL_MS);this.timer.unref?.();this.wake();
   }
   /** 신규 등록은 다음 주기까지 기다리지 않고 현재 점검 또는 후속 점검에 합칩니다. */
   wake(): void {

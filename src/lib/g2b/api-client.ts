@@ -8,6 +8,8 @@ export type PostedTimeRange = { start: string; end: string };
 
 const SERVICE_URL = "https://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoServc";
 const PAGE_SIZE = 100;
+/** 나라장터 API 요청 제한 시간(밀리초) */
+const API_REQUEST_TIMEOUT_MS = 30_000;
 
 type ApiBody = { items: ApiNotice[]; total: number; numOfRows: number; pageNo: number; raw: unknown };
 
@@ -36,7 +38,7 @@ async function fetchBody(url: URL, fetcher: typeof fetch): Promise<ApiBody> {
   url.searchParams.set("serviceKey", decodedKey);
   url.searchParams.set("numOfRows", String(PAGE_SIZE));
   url.searchParams.set("type", "json");
-  const response = await fetcher(url, { cache: "no-store", signal: AbortSignal.timeout(30_000) });
+  const response = await fetcher(url, { cache: "no-store", signal: AbortSignal.timeout(API_REQUEST_TIMEOUT_MS) });
   const text = await response.text();
   // 점검 화면은 HTTP 200으로도 반환되므로 JSON 변환 전에 본문을 확인합니다.
   assertNotMaintenance(text, "api");

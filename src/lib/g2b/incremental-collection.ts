@@ -1,3 +1,4 @@
+import { LEASE_RENEW_INTERVAL_MS } from "@/lib/constants";
 import {serializeError,type SerializedError} from '../error-diagnostics';
 import { deferCollection, maintenanceFromError } from "./maintenance";
 import { randomUUID } from "node:crypto";
@@ -84,7 +85,7 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
     if (pending) return;
     pending = store.renew(job.id, token).then((ok) => { if (!ok) lost = true; })
       .catch(() => { lost = true; }).finally(() => { pending = null; });
-  }, 30_000);
+  }, LEASE_RENEW_INTERVAL_MS);
   timer.unref();
   const ensureLease = async () => {
     try { if (lost || !await store.renew(job.id, token)) throw new Error("수집 작업 잠금을 잃었습니다."); }

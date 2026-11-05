@@ -1,3 +1,4 @@
+import { LEASE_RENEW_INTERVAL_MS } from "@/lib/constants";
 import { setTimeout as delay } from "node:timers/promises";
 import { randomUUID } from "node:crypto";
 import type pg from "pg";
@@ -124,7 +125,7 @@ export async function produceQueuedCollection(queue: DetailQueue, id: string, op
       SET expires_at=clock_timestamp()+interval '120 seconds' WHERE id=1 AND job_id=$1 AND owner_token=$2
       AND expires_at>clock_timestamp() RETURNING id`, [id, token])).then(row => { if (!row.rowCount) lost = true; })
       .catch(() => { lost = true; }).finally(() => { renewing = undefined; });
-  }, 30_000);
+  }, LEASE_RENEW_INTERVAL_MS);
   timer.unref?.();
   /** 종료·임대 상실 이후에는 API 접수와 체크포인트 저장을 시작하지 않습니다. */
   const assertActive = () => {

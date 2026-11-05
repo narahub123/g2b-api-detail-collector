@@ -9,7 +9,7 @@ import type {ExtractionProgress} from './diagnostics';
 import {workKind,type WorkKind} from './priority';
 import {probeConnection} from './connection-probe';
 import { recoverDocumentRegistrations } from './registration';
-import { MINUTE_MS } from "@/lib/constants";
+import { MINUTE_MS, LEASE_RENEW_INTERVAL_MS } from "@/lib/constants";
 import { PDF_CLOUD_BATCH_LIMIT } from "@/lib/documents/constants";
 
 export type BatchOptions = { mode: "local" | "cloud"; limit?:number; budgetMinutes?:number; noticeKey?:string;
@@ -55,7 +55,7 @@ export async function runBatch(store:DocumentQueue,options:BatchOptions):Promise
     if(heartbeat)return;
     const requestedAt=Date.now();
     heartbeat=bounded(store.renew(token),renewalTimeout).then(ok=>{if(!ok)lose();else confirm(requestedAt);},lose).finally(()=>{heartbeat=undefined;});
-  },options.heartbeatMs??30000);
+  },options.heartbeatMs??LEASE_RENEW_INTERVAL_MS);
   try {
     if (!local) await recoverDocumentRegistrations(store, { noticeKey: options.noticeKey,
       stop: () => abort.signal.aborted || now()-start+360000>budget });

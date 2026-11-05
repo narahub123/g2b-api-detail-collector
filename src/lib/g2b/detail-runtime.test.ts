@@ -1,3 +1,4 @@
+import { QUEUE_POLL_INTERVAL_MS } from "@/lib/constants";
 import { afterEach, expect, it, vi } from "vitest";
 import { DetailRuntime } from "./detail-runtime";
 
@@ -27,11 +28,11 @@ it("시작 시 복구하고 30초마다 재확인하며 종료 뒤에는 깨우�
   runtime.start();
   await runtime.pending;
   expect(run).toHaveBeenCalledTimes(1);
-  await vi.advanceTimersByTimeAsync(30_000);
+  await vi.advanceTimersByTimeAsync(QUEUE_POLL_INTERVAL_MS);
   expect(run).toHaveBeenCalledTimes(2);
   await runtime.stop();
   runtime.wake();
-  await vi.advanceTimersByTimeAsync(30_000);
+  await vi.advanceTimersByTimeAsync(QUEUE_POLL_INTERVAL_MS);
   expect(run).toHaveBeenCalledTimes(2);
 });
 

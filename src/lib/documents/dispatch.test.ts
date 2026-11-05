@@ -1,3 +1,4 @@
+import { QUEUE_POLL_INTERVAL_MS } from "@/lib/constants";
 import { afterEach, expect, it, vi } from "vitest";
 import { dispatchPdfWorkflow, runPdfDispatch } from "./dispatch";
 import type { PdfDispatchState } from "./dispatch-state";
@@ -66,7 +67,7 @@ it("호출 중인 조정기는 다시 호출하지 않고 종료 시 미처리 �
   const pulse = vi.fn().mockImplementationOnce(()=>first).mockResolvedValue(undefined);
   const runtime = new PdfDispatchRuntime(pulse);
   runtime.start();runtime.wake();runtime.wake();
-  await vi.advanceTimersByTimeAsync(30_000);
+  await vi.advanceTimersByTimeAsync(QUEUE_POLL_INTERVAL_MS);
   expect(pulse).toHaveBeenCalledTimes(1);
   release();await runtime.finish();
   expect(pulse).toHaveBeenCalledTimes(2);

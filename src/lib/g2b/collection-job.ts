@@ -1,3 +1,4 @@
+import { LEASE_RENEW_INTERVAL_MS } from "@/lib/constants";
 import {serializeError} from '../error-diagnostics';
 import { deferCollection, maintenanceFromError, type MaintenanceInfo } from "./maintenance";
 import { seoulInputToUtc } from "../seoul-time";
@@ -75,7 +76,7 @@ function startLeaseHeartbeat(jobId: string, leaseToken?: string) {
     if (pending) return;
     pending = renewDbLease(jobId, leaseToken).then((renewed) => { if (!renewed) lost = true; })
       .catch(() => { lost = true; }).finally(() => { pending = null; });
-  }, 30_000) : null;
+  }, LEASE_RENEW_INTERVAL_MS) : null;
   timer?.unref();
   return {
     assert: () => { if (lost) throw new Error("수집 작업 잠금을 잃었습니다."); },
