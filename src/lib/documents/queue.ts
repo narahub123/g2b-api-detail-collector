@@ -16,6 +16,7 @@ import { attachmentObsoleteMessage, isCurrentAttachmentRun, synchronizeNoticeAtt
 import { dispatchRepository, PdfDispatchState } from './dispatch-state';
 
 import { EXTRACTOR_VERSION } from "./extractor-version";
+import { PDF_DISCOVERY_BATCH_LIMIT } from '@/lib/documents/constants';
 export { EXTRACTOR_VERSION } from "./extractor-version";
 export type Failure = { code: string; message: string; retry: boolean; status?: "failed" | "interrupted" | "unsupported"; diagnostic?:DiagnosticError };
 export type QueueRun = { id: string; document_id: string; chain_id: string; source: string; status: string;
@@ -139,7 +140,7 @@ export class DocumentQueue {
         LEFT JOIN attachments a ON a.key=d.notice_key AND a.file_no::uuid=d.file_no AND a.seq=d.seq
         WHERE ($1::text IS NULL OR d.notice_key=$1) AND ((d.is_current AND a.key IS NULL)
           OR (a.key IS NOT NULL AND (NOT d.is_current OR d.attachment_url<>a.attachment_url OR d.filename<>a.filename)))
-      ) todo ORDER BY key LIMIT 20`, [noticeKey ?? null, EXTRACTOR_VERSION])).rows;
+      ) todo ORDER BY key LIMIT ${PDF_DISCOVERY_BATCH_LIMIT}`, [noticeKey ?? null, EXTRACTOR_VERSION])).rows;
       let found = 0;
       for (const { key } of keys) {
         if (stop()) break;
@@ -172,7 +173,7 @@ export class DocumentQueue {
      FROM checked c JOIN locked l ON l.id=c.id WHERE c.id=d.id AND (d.filename,d.attachment_url,d.is_current)
       IS DISTINCT FROM (COALESCE(c.filename,d.filename),COALESCE(c.attachment_url,d.attachment_url),c.present)`,parameters);
     if(stop())return 0;
-    const rows=(await this.pool.query(`${sql} SELECT key,file_no,seq,attachment_url FROM candidates ORDER BY has_history,key,seq,file_no LIMIT 20`,parameters)).rows;
+    const rows=(await this.pool.query(`${sql} SELECT key,file_no,seq,attachment_url FROM candidates ORDER BY has_history,key,seq,file_no LIMIT ${PDF_DISCOVERY_BATCH_LIMIT}`,parameters)).rows;
     let found=0;
     for(const row of rows){
       if(stop())break;
