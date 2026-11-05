@@ -38,6 +38,9 @@ type Finish = ({ status: "succeeded"; detail: NonNullable<StoredNotice["detail"]
     onWarning?: (message: string) => void };
 const cancelledClaim = Symbol("cancelledClaim");
 
+/** SQL 실행 오류와 구분할 수 있도록 정상적인 임대 소유권 상실만 나타냅니다. */
+class LeaseOwnershipError extends Error {}
+
 /** 공고 키 오류가 DB 잠금을 잡기 전에 드러나도록 검증합니다. */
 function parts(key: string) {
   const [number, order, extra] = key.split("--");
@@ -77,6 +80,7 @@ export class DetailQueue {
   /** 동일 연결에서 종료 응답까지 측정하며 확정된 결과와 원래 업무 오류를 보존합니다.
    * @param context 원본 자료와 임대 토큰을 제외한 작업 식별 정보
    * @remarks 연결 반환 오류는 별도 진단으로 남기고 COMMIT 성공을 실패로 바꾸지 않습니다.
+   * @throws COMMIT이 명시적으로 ROLLBACK을 반환하면 미확정 결과를 반환하지 않고 실패로 처리합니다.
    */
   async transaction<T>(work: (db: pg.PoolClient) => Promise<T>,
     context: QueueObservationContext = { operation: "queue.transaction", stage: "saving" }): Promise<T> {
@@ -96,8 +100,9 @@ export class DetailQueue {
       const result = await work(db);
       committing = true;
       const committed = await db.query("COMMIT");
-      // 내부에서 처리한 SQL 오류로 COMMIT이 ROLLBACK을 반환해도 계측은 성공으로 표시하지 않습니다.
-      success = committed.command !== "ROLLBACK";
+      // 실패 상태의 트랜잭션이 롤백되면 업무 결과도 확정되지 않았으므로 전파합니다.
+      if (committed.command === "ROLLBACK") throw new Error("트랜잭션이 커밋되지 않고 롤백되었습니다.");
+      success = true;
       return result;
     } catch (error) {
       errors.push({ error, operation: context.operation });
@@ -203,11 +208,11 @@ export class DetailQueue {
   private async owned(db: pg.PoolClient, token: string) {
     const row = await db.query(`SELECT 1 FROM ${this.schema}.detail_collection_worker_lease
       WHERE id=1 AND owner_token=$1 AND expires_at>clock_timestamp()`, [token]);
-    if (!row.rowCount) throw new Error("상세 소비기 임대 소유권을 잃었습니다.");
+    if (!row.rowCount) throw new LeaseOwnershipError("상세 소비기 임대 소유권을 잃었습니다.");
     if (this.options.legacyCollectionLock) {
       const legacy = await db.query(`SELECT 1 FROM ${this.schema}.collection_lock
         WHERE id=1 AND job_id=$1 AND token=$1 AND expires_at>clock_timestamp()`, [token]);
-      if (!legacy.rowCount) throw new Error("기존 수집과의 호환 잠금 소유권을 잃었습니다.");
+      if (!legacy.rowCount) throw new LeaseOwnershipError("기존 수집과의 호환 잠금 소유권을 잃었습니다.");
     }
   }
 
@@ -241,12 +246,18 @@ export class DetailQueue {
 
   /** 만료된 소비기가 새 소유권을 갱신할 수 없도록 제한합니다.
    * @param runId 진단 귀속에만 사용하며 임대 소유권 검사에는 사용하지 않습니다.
+   * @returns 소유권 불일치이면 false를 반환합니다.
+   * @throws 소유권 확인과 갱신 중 발생한 SQL 실행 오류는 그대로 전파합니다.
    */
   async renew(token: string, runId?: string): Promise<boolean> {
     if (this.options.legacyCollectionLock) return this.transaction(async db => {
       await this.lockLease(db);
       try { await this.owned(db, token); }
-      catch (error) { this.measurements.get(db)?.error(error, "detail.renew-ownership"); return false; }
+      catch (error) {
+        if (!(error instanceof LeaseOwnershipError)) throw error;
+        this.measurements.get(db)?.error(error, "detail.renew-ownership");
+        return false;
+      }
       await db.query(`UPDATE ${this.schema}.detail_collection_worker_lease
         SET expires_at=clock_timestamp()+interval '120 seconds' WHERE id=1`, []);
       await db.query(`UPDATE ${this.schema}.collection_lock SET expires_at=clock_timestamp()+interval '120 seconds' WHERE id=1`);

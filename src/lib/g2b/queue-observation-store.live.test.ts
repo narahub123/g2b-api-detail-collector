@@ -72,12 +72,12 @@ describe.skipIf(!enabled)("종료 관측 JSONB 보존", { timeout: 30_000 }, () 
     expect(state.apiProcessed).toBe(7);
   });
 
-  it("내부에서 처리한 SQL 오류로 COMMIT이 ROLLBACK을 반환하면 계측만 실패로 마감합니다", async () => {
+  it("내부에서 처리한 SQL 오류로 COMMIT이 ROLLBACK을 반환하면 호출자에게도 실패를 전파합니다", async () => {
     const id = await job();
-    expect(await queue.transaction(async db => {
-      try { await db.query("SELECT 1/0"); } catch { /* 업무가 처리한 오류의 반환 정책은 유지합니다. */ }
+    await expect(queue.transaction(async db => {
+      try { await db.query("SELECT 1/0"); } catch { /* SQL 오류를 삼켜도 커밋 경계에서 실패해야 합니다. */ }
       return false;
-    }, { operation: "producer.handled-error", stage: "api", jobId: id })).toBe(false);
+    }, { operation: "producer.handled-error", stage: "api", jobId: id })).rejects.toThrow("트랜잭션이 커밋되지 않고 롤백되었습니다.");
     const state = (await pool.query(`SELECT producer_state FROM ${schema}.detail_collection_jobs WHERE id=$1`, [id])).rows[0].producer_state;
     const saved = Object.values(state.queueObservations)[0] as QueueObservation;
     expect(saved.timings.outcome).toBe("failed");
