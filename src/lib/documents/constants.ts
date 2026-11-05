@@ -8,3 +8,5 @@ export const PDF_EXTRACTION_TIMEOUT_MS = 5 * MINUTE_MS;
 export const PDF_MAX_PAGES = 500;
 /** PDF 자동 발견 시 한 번에 조회할 최대 첨부파일 수 */
 export const PDF_DISCOVERY_BATCH_LIMIT = 20;
+/** 클라우드 PDF 작업자의 회차당 최대 처리 건수 */
+export const PDF_CLOUD_BATCH_LIMIT = 50;

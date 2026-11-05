@@ -10,6 +10,7 @@ import {workKind,type WorkKind} from './priority';
 import {probeConnection} from './connection-probe';
 import { recoverDocumentRegistrations } from './registration';
 import { MINUTE_MS } from "@/lib/constants";
+import { PDF_CLOUD_BATCH_LIMIT } from "@/lib/documents/constants";
 
 export type BatchOptions = { mode: "local" | "cloud"; limit?:number; budgetMinutes?:number; noticeKey?:string;
   discover?:boolean;
@@ -32,7 +33,7 @@ async function bounded<T>(promise:Promise<T>,milliseconds:number):Promise<T>{
 /** 한 회차의 한도·임대·소유권을 유지하며 다운로드는 DB 트랜잭션 밖에서 실행합니다. */
 export async function runBatch(store:DocumentQueue,options:BatchOptions):Promise<BatchSummary> {
   const now=options.now??Date.now, start=now(), local=options.mode==='local';
-  const limit=Math.min(options.limit??(local?3:50),local?3:50);
+  const limit=Math.min(options.limit??(local?3:PDF_CLOUD_BATCH_LIMIT),local?3:PDF_CLOUD_BATCH_LIMIT);
   const budget=Math.min(options.budgetMinutes??(local?20:50),local?20:50)*MINUTE_MS;
   if(!Number.isInteger(limit)||limit<1||!Number.isFinite(budget)||budget<360000)throw new Error("PDF 배치 한도가 올바르지 않습니다.");
   const summary:BatchSummary={startedAt:new Date(start).toISOString(),finishedAt:"",attempts:0,remainingReady:0,checked:0,recovered:0,exhausted:0,
