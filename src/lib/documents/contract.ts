@@ -2,7 +2,6 @@ import {directAttachmentIdentity} from '../g2b/attachment-direct';
 
 export type PdfPage = { pageNumber: number; text: string };
 export type PdfResult = { pages: PdfPage[]; pageCount: number; characterCount: number; extractorVersion: string; fileHash: string };
-export const RUN_TIMEOUT_MS = 5 * 60 * 1000;
 
 /** 문서 식별·처리 오류를 HTTP 어댑터에서도 구분할 수 있게 전달합니다. */
 export class DocumentError extends Error {

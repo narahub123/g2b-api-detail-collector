@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { RUN_TIMEOUT_MS } from "./contract";
+import { PDF_EXTRACTION_TIMEOUT_MS } from "@/lib/documents/constants";
 import { PDF_MAX_BYTES } from "@/lib/documents/constants";
 import type { PdfResult } from "./contract";
 import {ExtractionError,isExtractionProgress} from './diagnostics';
@@ -62,7 +62,7 @@ export async function superviseExtraction(id: string, key: string, signal: Abort
   const stop = (message: string) => { failure ??= message; kill(); };
   const abort = () => stop("작업 서비스 종료로 추출이 중단되었습니다.");
   signal.addEventListener("abort", abort, { once: true });
-  const timer = setTimeout(() => stop("PDF 처리 시간이 5분 제한을 초과했습니다."), options.timeoutMs ?? RUN_TIMEOUT_MS);
+  const timer = setTimeout(() => stop("PDF 처리 시간이 5분 제한을 초과했습니다."), options.timeoutMs ?? PDF_EXTRACTION_TIMEOUT_MS);
   const monitor = setInterval(async () => {
     if (inspecting) return;
     inspecting = true;
