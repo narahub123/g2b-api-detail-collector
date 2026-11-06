@@ -21,7 +21,8 @@ export function extractCommonSections(html: string, kind: ContentKind): Structur
   const $ = cheerio.load(html);
   // 중첩 서식 표의 필드 값에도 조작 안내가 섞이지 않도록 추출 전에 제외합니다.
   for (const node of attachmentUiNodes($)) $(node).remove();
-  $("script,style").remove();
+  // 상위 요소에서 텍스트를 읽어도 접힘 표시가 원문에 섞이지 않도록 제거합니다.
+  $("script,style,.help_ellipsis").remove();
   const sections: StructuredSection[] = [];
   const fieldByCell = new Map<any, StructuredField>();
   const representedTables = new Set<any>();
