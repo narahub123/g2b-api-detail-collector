@@ -12,11 +12,17 @@ afterEach(() => {
   else process.env.G2B_DB_SCHEMA = originalSchema;
 });
 
-function fakePool(failOn?: string) {
+function fakePool(failOn?: string, previous?: unknown, concurrent?: unknown) {
   const statements: { sql: string; values?: unknown[] }[] = [];
   const client = { query: async (sql: string, values?: unknown[]) => {
     statements.push({ sql, values });
     if (failOn && sql.includes(failOn)) throw new Error("DB 쓰기 실패");
+    if (concurrent && sql.startsWith("UPDATE public.independent_details")) {
+      previous = concurrent;
+      concurrent = undefined;
+      return { rows: [], rowCount: 0 };
+    }
+    if (previous && sql.includes("SELECT payload FROM public.independent_details")) return { rows: [{ payload: previous }] };
     return { rows: [] };
   }, release: () => undefined };
   process.env.DATABASE_URL = "postgres://test";
@@ -25,6 +31,37 @@ function fakePool(failOn?: string) {
 }
 
 describe("noticeSummary", () => {
+  it.each([
+    { changed: false, preserveNotice: false, failedDiscovery: false },
+    { changed: true, preserveNotice: false, failedDiscovery: false },
+    { changed: true, preserveNotice: true, failedDiscovery: false },
+    { changed: true, preserveNotice: false, failedDiscovery: true },
+    { changed: true, preserveNotice: false, failedDiscovery: false, concurrent: true },
+  ])("공유 독립 상세와 공고 참조를 각각 처리합니다 (%j)", async ({ changed, preserveNotice, failedDiscovery, concurrent }) => {
+    const key = "R26BK01774553--000";
+    const fields = [{ label: "계획명", value: [{ text: "계획", visible: true }] }];
+    const previous = { schemaVersion: 5 as const, number: "R26DD12345678", title: "발주계획",
+      fields, capturedAt: "2026-10-25T00:00:00Z", sourceNoticeKey: "R26BK01774554--000" };
+    const next = { ...previous, sourceNoticeKey: key, capturedAt: "2026-10-24T00:00:00Z",
+      fields: [{ label: "계획명", value: [{ text: "계획", visible: !changed }] }] };
+    const statements = fakePool(undefined, previous, concurrent ? next : undefined);
+    await saveStoredNotice(key, { api: null, detail: null }, {
+      detail: { sourceUrl: "", attachments: [], links: [], modalDiscovery: {
+        candidates: 1, attempted: 1, captured: 1, skipped: 0, failures: failedDiscovery ? ["모달 열기 실패"] : []
+      } },
+      orderPlanNumbers: [next.number], preSpecificationNumbers: [], otherDetailNumbers: [], openingDetailKeys: [],
+      orderPlans: [next], preSpecifications: [], otherDetails: [], openingDetails: [], independentTriggers: [], warnings: []
+    }, preserveNotice);
+    expect(statements.some(({ sql }) => /(?:INSERT INTO|UPDATE) public\.independent_details/.test(sql))).toBe(changed);
+    expect(statements.some(({ sql }) => sql.includes("INSERT INTO public.notices"))).toBe(!preserveNotice);
+    expect(statements.some(({ sql }) => sql.includes("INSERT INTO public.notice_independent_refs"))).toBe(!preserveNotice);
+    expect(statements.some(({ sql }) => sql.includes("DELETE FROM public.notice_independent_refs"))).toBe(!preserveNotice && !failedDiscovery);
+    if (concurrent) {
+      expect(statements.filter(({ sql }) => sql.includes("SELECT payload FROM public.independent_details"))).toHaveLength(2);
+      expect(statements.filter(({ sql }) => sql.startsWith("UPDATE public.independent_details"))).toHaveLength(1);
+    }
+  });
+
   it("개찰 독립 상세를 opening 분류와 참조로 저장합니다", async () => {
     const statements = fakePool();
     const key = "R26BK01774553--000";
@@ -238,7 +275,7 @@ describe("noticeSummary", () => {
       orderPlans: [detail], preSpecifications: [], otherDetails: [], openingDetails: [], independentTriggers: [], warnings: []
     });
     const insert = statements.find((item) => item.sql.includes("INSERT INTO public.independent_details"));
-    expect(insert?.sql).toContain("DO UPDATE SET payload=EXCLUDED.payload");
+    expect(insert?.sql).toContain("ON CONFLICT(detail_key) DO NOTHING");
     expect(statements.some((item) => item.sql.includes("SELECT payload FROM public.independent_details"))).toBe(true);
   });
 

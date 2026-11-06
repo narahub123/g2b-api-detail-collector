@@ -317,7 +317,7 @@ it("다음 API 페이지를 요청하기 전에 이전 공고의 현재 단계�
   expect((await getCollectionJob(job.id))?.status).toBe("completed");
 });
 
-it.each(["manual", "refresh"])("%s의 부분 상세 보존 분기에서도 공고 종료를 기록합니다", async mode => {
+it.each(["manual", "refresh"])("%s에서 부분 공고 본문을 보존하고 독립 상세를 저장 경로에 전달합니다", async mode => {
   process.env.G2B_SERVICE_KEY = "test-key";
   const key = "R26BK1--000";
   const old = { sourceUrl: "old", sections: [], attachments: [], links: [], text: "이전 자료" };
@@ -326,6 +326,8 @@ it.each(["manual", "refresh"])("%s의 부분 상세 보존 분기에서도 공�
     fetcher: async () => Response.json({ response: { body: { totalCount: 1, numOfRows: 100, pageNo: 1,
       items: [{ bidNtceNo: "R26BK1", bidNtceOrd: "000" }] } } }),
     scrape: async (url: string) => ({ detail: { sourceUrl: url, attachments: [], links: [], paginationAudit: true,
+      modalCaptures: [{ trigger: { index: 0, tag: "a", label: "발주계획", value: "R26DD12345678", html: "" },
+        modal: { title: "발주계획", fields: [{ label: "계획명", value: [{ text: "계획", visible: false }] }] } }],
       sections: [{ title: "목록", fields: [], tables: [{ headerRows: [[{ value: "목록", column: 0, rowspan: 1, colspan: 1 }]], bodyRows: [], pagination: {
         status: "partial" as const, expectedTotal: 3, collectedRows: 0, pageRanges: [], errors: [] } }] }] }, relatedNoticeKeys: [] }),
   };
@@ -336,6 +338,8 @@ it.each(["manual", "refresh"])("%s의 부분 상세 보존 분기에서도 공�
     status: mode === "refresh" ? "succeeded" : "failed", startedAt: expect.any(String), finishedAt: expect.any(String), progress: { stage: "structuring" },
   });
   expect(db.notices.get(key)).toMatchObject({ detail: old });
+  expect(db.saveStoredNotice).toHaveBeenCalledWith(key, expect.objectContaining({ detail: old }),
+    expect.objectContaining({ orderPlanNumbers: ["R26DD12345678"] }), true);
 });
 
 it("업무 저장 오류로 작업이 실패하면 실제 시작한 공고만 종료합니다", async () => {

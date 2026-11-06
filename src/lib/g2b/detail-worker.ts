@@ -113,7 +113,7 @@ async function processDetail(queue: DetailQueue, token: string, run: DetailRun, 
       },
       snapshot: preserved => {
         if (preserved) {
-          const warning = "불완전한 재수집 결과를 저장하지 않아 기존 상세를 유지했습니다.";
+          const warning = "재수집한 공고 본문이 불완전해 기존 공고 본문과 연결을 유지했습니다.";
           job.errors.push(`${run.notice_key}: ${warning}`);
           addDiagnostic(job, { severity: "warning", stage: "transform", operation: "preserve-existing-detail",
             target: { key: run.notice_key }, error: warning });

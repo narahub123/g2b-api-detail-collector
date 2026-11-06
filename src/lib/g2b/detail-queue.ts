@@ -417,6 +417,10 @@ export class DetailQueue {
           for (const request of result.followups ?? []) await this.enqueueInTransaction(db, request);
           if (this.options.collectionMode) await expandCollectionRelations(db, this, run, result.discoveredKeys ?? [], result.onWarning ?? (() => undefined));
         });
+      } else if (result.status === "succeeded" && result.structured) {
+        // 공고 본문과 참조를 보존하더라도 확보한 독립 상세는 비교합니다.
+        await this.measure(db, "queue.detail.save", () => saveStoredNoticeInTransaction(db, run.notice_key,
+          current, result.structured, this.schema, true));
       } else if (result.status === "failed") {
         await this.measure(db, "queue.detail.save", () => saveStoredNoticeInTransaction(db, run.notice_key, { ...current,
           detailError: redactDiagnostic(result.error), detailDiagnostic: result.diagnostic ? serializeError(result.diagnostic) : null }, undefined, this.schema));

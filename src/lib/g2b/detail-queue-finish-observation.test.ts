@@ -5,6 +5,8 @@ import type { QueueObservation } from "./queue-observation";
 import { saveStoredNoticeInTransaction, saveNoticeRelationsInTransaction } from "./postgres-store";
 import { requestNoticeDocumentRegistrationInTransaction, recoverDocumentRegistrations } from "../documents/registration";
 import { expandCollectionRelations, finishCollectionAttempt } from "./collection-targets";
+import { structureNoticeDetail } from "./structured-data";
+import type { ScrapedDetail } from "./detail-page";
 
 vi.mock("./postgres-store", () => ({ saveStoredNoticeInTransaction: vi.fn(), saveNoticeRelationsInTransaction: vi.fn() }));
 vi.mock("../documents/registration", () => ({ requestNoticeDocumentRegistrationInTransaction: vi.fn(), recoverDocumentRegistrations: vi.fn() }));
@@ -64,4 +66,31 @@ it("최종 상세·관계·PDF 저장과 COMMIT을 구분하고 종료 후 진�
   expect(saveObservation).toHaveBeenCalledOnce();
   expect(query).toHaveBeenCalledTimes(10);
   expect(observations[0].context).toMatchObject({ runId: "run", operation: "detail.finish" });
+});
+
+it("공고 본문을 보존해도 독립 상세 저장 경로를 호출합니다", async () => {
+  vi.clearAllMocks();
+  const key = "R26BK01774553--000";
+  const previous: ScrapedDetail = { sourceUrl: "", attachments: [], links: [], paginationAudit: true };
+  const incoming: ScrapedDetail = { ...previous, sections: [{ title: "목록", fields: [], tables: [{
+    headerRows: [], bodyRows: [[{ value: "부분 수집", column: 0, rowspan: 1, colspan: 1 }]],
+    pagination: { status: "partial", collectedRows: 1, pageRanges: [], errors: [] }
+  }] }], modalCaptures: [{
+    trigger: { tag: "a", index: 0, label: "발주계획", value: "R26DD12345678", html: "" },
+    modal: { title: "발주계획", fields: [{ label: "계획명", value: [{ text: "계획", visible: false }] }] }
+  }] };
+  const structured = structureNoticeDetail(key, incoming);
+  const db = { query: vi.fn(async (sql: string) => ({ rowCount: 1, rows: [
+    sql.startsWith("SELECT * FROM public.detail_collection_runs")
+      ? { id: "run", status: "processing", owner_token: "token", notice_key: key }
+      : { api: null, detail: previous }
+  ] })), release: vi.fn() };
+  const queue = new DetailQueue({ connect: async () => db,
+    query: vi.fn(async () => ({ rowCount: 1, rows: [{ found: true }] })) } as unknown as pg.Pool, "public");
+  const snapshot = vi.fn(() => ({}));
+  await queue.finish("token", "run", { status: "succeeded", detail: structured.detail, structured, snapshot });
+  expect(saveStoredNoticeInTransaction).toHaveBeenCalledExactlyOnceWith(db, key,
+    expect.objectContaining({ detail: previous }), structured, "public", true);
+  expect(saveNoticeRelationsInTransaction).not.toHaveBeenCalled();
+  expect(snapshot).toHaveBeenCalledWith(true);
 });
