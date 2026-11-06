@@ -9,6 +9,7 @@ import type { NoticeFilters } from "./notice-filters";
 import type { ApiNotice } from "./types";
 import regions from "@/data/regions.json";
 import { shouldReplacePaginatedDetail } from "./pagination-coverage";
+import { independentDetailSaveDecision } from "./independent-detail-content";
 
 type Category = "order-plan" | "pre-specification" | "other" | "opening";
 export type Queryable = Pick<pg.PoolClient, "query">;
@@ -96,8 +97,8 @@ async function transaction<T>(work: (db: pg.PoolClient) => Promise<T>): Promise<
 
 /** 공고와 새 독립 상세 및 참조를 원자적으로 저장합니다. */
 export async function saveStoredNotice(key: string, record: StoredNotice,
-  structured?: StructuredNoticeDetail): Promise<void> {
-  await transaction(db => saveStoredNoticeInTransaction(db, key, record, structured));
+  structured?: StructuredNoticeDetail, preserveNotice = false): Promise<string[] | void> {
+  return transaction(db => saveStoredNoticeInTransaction(db, key, record, structured, undefined, preserveNotice));
 }
 
 /** 공고 행을 잠그고 최신 상세에서 요약을 계산하되 API와 요약 컬럼만 수정합니다. */
@@ -120,42 +121,72 @@ export async function saveNoticeApiInTransaction(db: Queryable, key: string, api
 
 /** 호출자의 트랜잭션에서 공고·독립 상세·참조를 함께 저장하며 커밋은 호출자에게 맡깁니다. */
 export async function saveStoredNoticeInTransaction(db: Queryable, key: string, record: StoredNotice,
-  structured?: StructuredNoticeDetail, schema?: string): Promise<void> {
-  if (record.detail?.paginationAudit) {
+  structured?: StructuredNoticeDetail, schema?: string, preserveNotice = false): Promise<string[] | void> {
+  if (!preserveNotice && record.detail?.paginationAudit) {
     const old = await db.query<{ detail: StoredNotice["detail"] }>(
-      `SELECT detail FROM ${table("notices", schema)} WHERE key=$1`, [key]);
+      `SELECT detail FROM ${table("notices", schema)} WHERE key=$1 FOR UPDATE`, [key]);
     if (!shouldReplacePaginatedDetail(old.rows[0]?.detail, record.detail)) {
       record = { ...record, detail: old.rows[0].detail };
-      structured = undefined;
+      if (structured) preserveNotice = true;
     }
   }
-  await upsertNotice(db, key, record, schema);
+  if (!preserveNotice) await upsertNotice(db, key, record, schema);
   if (!structured) return;
   const groups: [Category, IndependentDetail[]][] = [
     ["order-plan", structured.orderPlans], ["pre-specification", structured.preSpecifications],
     ["other", structured.otherDetails], ["opening", structured.openingDetails]
   ];
-  // 상세와 참조를 함께 교체해야 재수집 중 실패가 기존 연결을 훼손하지 않습니다.
-  await db.query(`DELETE FROM ${table("notice_independent_refs", schema)} WHERE notice_key=$1`, [key]);
-  for (const [category, details] of groups) {
-    for (const [position, detail] of details.entries()) {
-      const match = category === "other" ? /^(R\d{2}BK\d{8})-(\d{3})$/.exec(detail.number) : null;
-      const existingNotice = match ? await db.query(`SELECT detail FROM ${table("notices", schema)} WHERE key=$1`, [`${match[1]}--${match[2]}`]) : null;
-      if (!existingNotice?.rows[0]?.detail) {
-        const previous = await db.query<{ payload: IndependentDetail }>(
-          `SELECT payload FROM ${table("independent_details", schema)} WHERE detail_key=$1`, [detail.number]);
-        if (!previous.rows[0]?.payload || previous.rows[0].payload.schemaVersion !== 5 || (detail.paginationAudit &&
-          previous.rows[0].payload.sourceNoticeKey === detail.sourceNoticeKey &&
-          shouldReplacePaginatedDetail(previous.rows[0].payload, detail))) {
-          await db.query(`INSERT INTO ${table("independent_details", schema)}(detail_key,category,payload) VALUES($1,$2,$3::jsonb)
-            ON CONFLICT(detail_key) DO UPDATE SET payload=EXCLUDED.payload`,
-            [detail.number, category, JSON.stringify(detail)]);
-        }
-      }
-      const triggers = structured.independentTriggers.filter((item) => item.number === detail.number).map((item) => item.trigger);
-      await db.query(`INSERT INTO ${table("notice_independent_refs", schema)}(notice_key,detail_key,category,position,triggers)
-        VALUES($1,$2,$3,$4,$5::jsonb)`, [key, detail.number, category, position, JSON.stringify(triggers)]);
+  const entries = groups.flatMap(([category, details]) => details.map((detail, position) => ({ category, detail, position })));
+  const discovery = structured.detail.modalDiscovery;
+  const incompleteDiscovery = Boolean(discovery && (discovery.failures.length || discovery.skipped ||
+    discovery.attempted > discovery.captured || discovery.attempted >= 60));
+  const warnings: string[] = [];
+  // 공유 상세의 갱신 잠금 순서를 공고별 발견 순서와 분리합니다.
+  for (const { category, detail } of [...entries].sort((a, b) => a.detail.number.localeCompare(b.detail.number))) {
+    const match = category === "other" ? /^(R\d{2}BK\d{8})-(\d{3})$/.exec(detail.number) : null;
+    const existingNotice = match ? await db.query(`SELECT detail FROM ${table("notices", schema)} WHERE key=$1`, [`${match[1]}--${match[2]}`]) : null;
+    if (detail.settling?.status === "timeout") warnings.push(`독립 상세 ${detail.number} 모달 로딩 시간 초과`);
+    if (!existingNotice?.rows[0]?.detail) {
+      const reason = await saveIndependentDetail(db, category, detail, schema);
+      if (reason) warnings.push(`독립 상세 ${detail.number} 저장 보류: ${reason}`);
     }
+  }
+  if (preserveNotice) return warnings;
+  const refs = table("notice_independent_refs", schema);
+  // 탐색 실패 시 기존 연결 순서를 유지하고 새로 확인한 연결만 뒤에 추가합니다.
+  if (!incompleteDiscovery) await db.query(`DELETE FROM ${refs} WHERE notice_key=$1`, [key]);
+  for (const { category, detail, position } of entries) {
+    const triggers = structured.independentTriggers.filter(item => item.number === detail.number).map(item => item.trigger);
+    await db.query(`INSERT INTO ${refs}(notice_key,detail_key,category,position,triggers)
+      VALUES($1,$2,$3,${incompleteDiscovery
+        ? `GREATEST($4, (SELECT COALESCE(MAX(position) + 1, 0) FROM ${refs} WHERE notice_key=$1 AND category=$3))`
+        : "$4"},$5::jsonb)
+      ON CONFLICT(notice_key,category,detail_key) DO UPDATE SET triggers=EXCLUDED.triggers`,
+      [key, detail.number, category, position, JSON.stringify(triggers)]);
+  }
+  return warnings;
+}
+
+/** 저장본을 비교하고 다른 트랜잭션에서 먼저 저장했으면 다시 판정합니다. */
+async function saveIndependentDetail(db: Queryable, category: Category, detail: IndependentDetail,
+  schema?: string): Promise<string | undefined> {
+  const target = table("independent_details", schema);
+  const payload = JSON.stringify(detail);
+  while (true) {
+    const result = await db.query<{ payload: IndependentDetail }>(
+      `SELECT payload FROM ${target} WHERE detail_key=$1`, [detail.number]);
+    const previous = result.rows[0]?.payload;
+    if (previous) {
+      const decision = independentDetailSaveDecision(previous, detail);
+      if (decision.action === "preserve") return decision.reason;
+      if (decision.action === "unchanged") return;
+    }
+    const written = previous
+      ? await db.query(`UPDATE ${target} SET payload=$2::jsonb WHERE detail_key=$1 AND payload=$3::jsonb`,
+        [detail.number, payload, JSON.stringify(previous)])
+      : await db.query(`INSERT INTO ${target}(detail_key,category,payload) VALUES($1,$2,$3::jsonb)
+        ON CONFLICT(detail_key) DO NOTHING`, [detail.number, category, payload]);
+    if (written.rowCount !== 0) return;
   }
 }
 

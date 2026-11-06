@@ -4,7 +4,7 @@ import { deferCollection, maintenanceFromError, type MaintenanceInfo } from "./m
 import { seoulInputToUtc } from "../seoul-time";
 import { randomUUID } from "node:crypto";
 import { ApiPageError, fetchNoticeByKey, prepareServiceNoticesByMinute } from "./api-client";
-import { addDiagnostic, redactDiagnostic, type DiagnosticState } from "./collection-diagnostics";
+import { addDiagnostic, recordIndependentSaveWarnings, redactDiagnostic, type DiagnosticState } from "./collection-diagnostics";
 import { parsePostedTimeRange } from "./date-range";
 import { scrapeDetailPage, serviceDetailUrl, type ScrapeResult } from "./detail-page";
 import { noticeKey, noticeKeyFromParts } from "./identity";
@@ -122,14 +122,18 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies, l
     return { number, order };
   };
   /** 공고 정규화 후 실제 DB 저장 구간만 별도로 측정해 현재 처리로 복귀합니다. */
-  const saveRecord = async (key: string, record: StoredNotice, structured?: StructuredNoticeDetail) => {
+  const saveRecord = async (key: string, record: StoredNotice, structured?: StructuredNoticeDetail, preserveNotice = false) => {
     const identity = parts(key);
     record.key = key;
     record.relatedNoticeKeys = [...new Set(record.relatedNoticeKeys || [])];
     record.normalized = normalizeNotice(record.api, record.detail, identity);
     await ensureLease();
     const target = job.results?.find(result => result.key === key && !result.finishedAt);
-    try { await observation.during("saving", () => saveStoredNotice(key, record, structured), target); }
+    try {
+      const warnings = await observation.during("saving", () => preserveNotice ? saveStoredNotice(key, record, structured, true)
+        : saveStoredNotice(key, record, structured), target);
+      recordIndependentSaveWarnings(job, key, warnings);
+    }
     catch (error) { addDiagnostic(job, { severity: "failure", stage: "database", operation: "save-notice", target: { key }, error }); throw error; }
   };
   /** 기존 공고의 API와 관계를 보존하면서 필요한 저장 레코드를 확보합니다. */
@@ -203,8 +207,9 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies, l
     for (const warning of result.detail.modalDiscovery?.failures || [])
       addDiagnostic(job, { severity: "warning", stage: "modal", operation: "collect-modal", target: { key }, error: warning });
     if (record.detail && !shouldReplacePaginatedDetail(record.detail, structured.detail)) {
+      await saveRecord(key, record, structured, true);
       noticeResult.status = "failed";
-      noticeResult.error = "불완전한 재수집 결과를 저장하지 않아 기존 상세를 유지했습니다.";
+      noticeResult.error = "재수집한 공고 본문이 불완전해 기존 공고 본문과 연결을 유지했습니다.";
       job.errors.push(`${key}: ${noticeResult.error}`);
       addDiagnostic(job, { severity: "warning", stage: "transform", operation: "preserve-existing-detail", target: { key }, error: noticeResult.error });
       job.detailFailed++;
@@ -393,9 +398,12 @@ async function runRefresh(job: CollectionJob, deps: CollectionDependencies, leas
       for (const warning of scraped.detail.modalDiscovery?.failures || [])
         addDiagnostic(job, { severity: "warning", stage: "modal", operation: "collect-modal", target: { key: result.key }, error: warning });
       if (record.detail && !shouldReplacePaginatedDetail(record.detail, structured.detail)) {
+        await ensureLease();
+        const warnings = await observation.during("saving", () => saveStoredNotice(result.key, record, structured, true), result);
+        recordIndependentSaveWarnings(job, result.key, warnings);
         result.status = "succeeded";
         job.detailSucceeded++;
-        job.errors.push(`${result.key}: 불완전한 재수집 결과를 저장하지 않아 기존 상세를 유지했습니다.`);
+        job.errors.push(`${result.key}: 재수집한 공고 본문이 불완전해 기존 공고 본문과 연결을 유지했습니다.`);
         addDiagnostic(job, { severity: "warning", stage: "transform", operation: "preserve-existing-detail", target: { key: result.key }, error: "불완전한 재수집 결과" });
         await observation.finish(result);
         continue;
@@ -408,7 +416,8 @@ async function runRefresh(job: CollectionJob, deps: CollectionDependencies, leas
         detailError: null, detailDiagnostic:null };
       updated.normalized = normalizeNotice(updated.api, updated.detail, { number, order });
       await ensureLease();
-      await observation.during("saving", () => saveStoredNotice(result.key, updated, structured), result);
+      const warnings = await observation.during("saving", () => saveStoredNotice(result.key, updated, structured), result);
+      recordIndependentSaveWarnings(job, result.key, warnings);
       result.status = "succeeded";
       job.detailSucceeded++;
       job.errors.push(...structured.warnings);

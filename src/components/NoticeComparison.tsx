@@ -219,7 +219,7 @@ export function NoticeComparison({ api, detail, orderPlans = [], preSpecificatio
           {independent.map((item) => <details className="comparison-card" key={`${item.kind}-${item.number}`} open>
             <summary>{item.kind} · {item.number}</summary>
             <ClickSources triggers={item.triggers?.length ? item.triggers : item.detail?.trigger ? [item.detail.trigger] : []} />
-            {item.detail?.sourceNoticeKey && <p className="muted">최초 저장 공고: {item.detail.sourceNoticeKey}</p>}
+            {item.detail?.sourceNoticeKey && <p className="muted">수집 출처 공고: {item.detail.sourceNoticeKey}</p>}
             {item.detail ? contentSections(item.detail, item.detail.title || item.number).map((part, partIndex) =>
               <div key={partIndex}>
                 {item.detail?.sections && <h4>{part.title}</h4>}

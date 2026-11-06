@@ -35,7 +35,8 @@ export type DetailRun = {
 type Finish = ({ status: "succeeded"; detail: NonNullable<StoredNotice["detail"]>;
   structured?: StructuredNoticeDetail; relatedKeys?: string[]; discoveredKeys?: string[]; followups?: DetailRequest[] }
   | { status: "failed"; error: string; diagnostic?: unknown }) & { snapshot?: DetailSnapshot | ((preserved: boolean) => DetailSnapshot);
-    onWarning?: (message: string) => void };
+    onWarning?: (message: string) => void;
+    onIndependentWarning?: (message: string) => void };
 const cancelledClaim = Symbol("cancelledClaim");
 
 /** SQL 실행 오류와 구분할 수 있도록 정상적인 임대 소유권 상실만 나타냅니다. */
@@ -410,13 +411,19 @@ export class DetailQueue {
     const noticeKey = await this.withRun(token, id, async (db, run, current) => {
       const preserved = result.status === "succeeded" && !!current.detail && !shouldReplacePaginatedDetail(current.detail, result.detail);
       if (result.status === "succeeded" && !preserved) {
-        await this.measure(db, "queue.detail.save", () => saveStoredNoticeInTransaction(db, run.notice_key,
+        const warnings = await this.measure(db, "queue.detail.save", () => saveStoredNoticeInTransaction(db, run.notice_key,
           { ...current, detail: result.detail, detailError: null, detailDiagnostic: null }, result.structured, this.schema));
+        warnings?.forEach(warning => result.onIndependentWarning?.(warning));
         await this.measure(db, "queue.relations.save", async () => {
           await saveNoticeRelationsInTransaction(db, run.notice_key, result.relatedKeys ?? [], this.schema);
           for (const request of result.followups ?? []) await this.enqueueInTransaction(db, request);
           if (this.options.collectionMode) await expandCollectionRelations(db, this, run, result.discoveredKeys ?? [], result.onWarning ?? (() => undefined));
         });
+      } else if (result.status === "succeeded" && result.structured) {
+        // 공고 본문과 참조를 보존하더라도 확보한 독립 상세는 비교합니다.
+        const warnings = await this.measure(db, "queue.detail.save", () => saveStoredNoticeInTransaction(db, run.notice_key,
+          current, result.structured, this.schema, true));
+        warnings?.forEach(warning => result.onIndependentWarning?.(warning));
       } else if (result.status === "failed") {
         await this.measure(db, "queue.detail.save", () => saveStoredNoticeInTransaction(db, run.notice_key, { ...current,
           detailError: redactDiagnostic(result.error), detailDiagnostic: result.diagnostic ? serializeError(result.diagnostic) : null }, undefined, this.schema));

@@ -4,7 +4,7 @@ import type { DetailQueue, DetailRun } from "./detail-queue";
 import type { DetailSnapshot } from "./detail-refresh-store";
 import type { CollectionJob } from "./collection-job";
 import { createCollectionObserver } from "./collection-observer";
-import { addDiagnostic, redactDiagnostic } from "./collection-diagnostics";
+import { addDiagnostic, recordIndependentSaveWarnings, redactDiagnostic } from "./collection-diagnostics";
 import { fetchNoticeByKey } from "./api-client";
 import { scrapeDetailPage, serviceDetailUrl } from "./detail-page";
 import { structureNoticeDetail } from "./structured-data";
@@ -106,6 +106,7 @@ async function processDetail(queue: DetailQueue, token: string, run: DetailRun, 
     // 큐가 요청 작업의 종류를 확인하여 날짜·자동 수집에만 관련 공고를 연결합니다.
     await queue.finish(token, run.id, { status: "succeeded", detail: structured.detail, structured,
       discoveredKeys: scraped.relatedNoticeKeys,
+      onIndependentWarning: warning => recordIndependentSaveWarnings(job, run.notice_key, [warning]),
       onWarning: warning => {
         job.errors.push(warning);
         addDiagnostic(job, { severity: "warning", stage: "detail", operation: "related-notice-limit",
@@ -113,7 +114,7 @@ async function processDetail(queue: DetailQueue, token: string, run: DetailRun, 
       },
       snapshot: preserved => {
         if (preserved) {
-          const warning = "불완전한 재수집 결과를 저장하지 않아 기존 상세를 유지했습니다.";
+          const warning = "재수집한 공고 본문이 불완전해 기존 공고 본문과 연결을 유지했습니다.";
           job.errors.push(`${run.notice_key}: ${warning}`);
           addDiagnostic(job, { severity: "warning", stage: "transform", operation: "preserve-existing-detail",
             target: { key: run.notice_key }, error: warning });
