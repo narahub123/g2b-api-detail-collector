@@ -19,6 +19,16 @@ export type DiagnosticState = { diagnostics?: {
 } };
 type Input = Omit<DiagnosticEntry, "at" | "error" | "diagnostic"> & { error: unknown };
 
+/** 독립 상세 저장 과정에서 확인한 보호 사유를 작업 진단에 남깁니다. */
+export function recordIndependentSaveWarnings(job: DiagnosticState & { errors: string[] }, key: string,
+  warnings: string[] | void): void {
+  for (const warning of warnings ?? []) {
+    job.errors.push(redactDiagnostic(warning));
+    addDiagnostic(job, { severity: "warning", stage: "database", operation: "save-independent-detail",
+      target: { key }, error: warning });
+  }
+}
+
 /** 수집 진단에 포함될 수 있는 인증 정보와 접속 문자열을 제거합니다. */
 export function redactDiagnostic(value: string): string {
   let safe = value;

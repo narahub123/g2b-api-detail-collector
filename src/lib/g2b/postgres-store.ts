@@ -9,7 +9,7 @@ import type { NoticeFilters } from "./notice-filters";
 import type { ApiNotice } from "./types";
 import regions from "@/data/regions.json";
 import { shouldReplacePaginatedDetail } from "./pagination-coverage";
-import { shouldUpdateIndependentDetail } from "./independent-detail-content";
+import { independentDetailSaveDecision } from "./independent-detail-content";
 
 type Category = "order-plan" | "pre-specification" | "other" | "opening";
 export type Queryable = Pick<pg.PoolClient, "query">;
@@ -97,8 +97,8 @@ async function transaction<T>(work: (db: pg.PoolClient) => Promise<T>): Promise<
 
 /** 공고와 새 독립 상세 및 참조를 원자적으로 저장합니다. */
 export async function saveStoredNotice(key: string, record: StoredNotice,
-  structured?: StructuredNoticeDetail, preserveNotice = false): Promise<void> {
-  await transaction(db => saveStoredNoticeInTransaction(db, key, record, structured, undefined, preserveNotice));
+  structured?: StructuredNoticeDetail, preserveNotice = false): Promise<string[] | void> {
+  return transaction(db => saveStoredNoticeInTransaction(db, key, record, structured, undefined, preserveNotice));
 }
 
 /** 공고 행을 잠그고 최신 상세에서 요약을 계산하되 API와 요약 컬럼만 수정합니다. */
@@ -121,7 +121,7 @@ export async function saveNoticeApiInTransaction(db: Queryable, key: string, api
 
 /** 호출자의 트랜잭션에서 공고·독립 상세·참조를 함께 저장하며 커밋은 호출자에게 맡깁니다. */
 export async function saveStoredNoticeInTransaction(db: Queryable, key: string, record: StoredNotice,
-  structured?: StructuredNoticeDetail, schema?: string, preserveNotice = false): Promise<void> {
+  structured?: StructuredNoticeDetail, schema?: string, preserveNotice = false): Promise<string[] | void> {
   if (!preserveNotice && record.detail?.paginationAudit) {
     const old = await db.query<{ detail: StoredNotice["detail"] }>(
       `SELECT detail FROM ${table("notices", schema)} WHERE key=$1 FOR UPDATE`, [key]);
@@ -140,13 +140,18 @@ export async function saveStoredNoticeInTransaction(db: Queryable, key: string, 
   const discovery = structured.detail.modalDiscovery;
   const incompleteDiscovery = Boolean(discovery && (discovery.failures.length || discovery.skipped ||
     discovery.attempted > discovery.captured || discovery.attempted >= 60));
+  const warnings: string[] = [];
   // 공유 상세의 갱신 잠금 순서를 공고별 발견 순서와 분리합니다.
   for (const { category, detail } of [...entries].sort((a, b) => a.detail.number.localeCompare(b.detail.number))) {
     const match = category === "other" ? /^(R\d{2}BK\d{8})-(\d{3})$/.exec(detail.number) : null;
     const existingNotice = match ? await db.query(`SELECT detail FROM ${table("notices", schema)} WHERE key=$1`, [`${match[1]}--${match[2]}`]) : null;
-    if (!existingNotice?.rows[0]?.detail) await saveIndependentDetail(db, category, detail, incompleteDiscovery, schema);
+    if (detail.settling?.status === "timeout") warnings.push(`독립 상세 ${detail.number} 모달 로딩 시간 초과`);
+    if (!existingNotice?.rows[0]?.detail) {
+      const reason = await saveIndependentDetail(db, category, detail, schema);
+      if (reason) warnings.push(`독립 상세 ${detail.number} 저장 보류: ${reason}`);
+    }
   }
-  if (preserveNotice) return;
+  if (preserveNotice) return warnings;
   const refs = table("notice_independent_refs", schema);
   // 탐색 실패 시 기존 연결 순서를 유지하고 새로 확인한 연결만 뒤에 추가합니다.
   if (!incompleteDiscovery) await db.query(`DELETE FROM ${refs} WHERE notice_key=$1`, [key]);
@@ -159,18 +164,23 @@ export async function saveStoredNoticeInTransaction(db: Queryable, key: string, 
       ON CONFLICT(notice_key,category,detail_key) DO UPDATE SET triggers=EXCLUDED.triggers`,
       [key, detail.number, category, position, JSON.stringify(triggers)]);
   }
+  return warnings;
 }
 
 /** 저장본을 비교하고 다른 트랜잭션에서 먼저 저장했으면 다시 판정합니다. */
 async function saveIndependentDetail(db: Queryable, category: Category, detail: IndependentDetail,
-  incompleteDiscovery: boolean, schema?: string): Promise<void> {
+  schema?: string): Promise<string | undefined> {
   const target = table("independent_details", schema);
   const payload = JSON.stringify(detail);
   while (true) {
     const result = await db.query<{ payload: IndependentDetail }>(
       `SELECT payload FROM ${target} WHERE detail_key=$1`, [detail.number]);
     const previous = result.rows[0]?.payload;
-    if (previous && !shouldUpdateIndependentDetail(previous, detail, incompleteDiscovery)) return;
+    if (previous) {
+      const decision = independentDetailSaveDecision(previous, detail);
+      if (decision.action === "preserve") return decision.reason;
+      if (decision.action === "unchanged") return;
+    }
     const written = previous
       ? await db.query(`UPDATE ${target} SET payload=$2::jsonb WHERE detail_key=$1 AND payload=$3::jsonb`,
         [detail.number, payload, JSON.stringify(previous)])

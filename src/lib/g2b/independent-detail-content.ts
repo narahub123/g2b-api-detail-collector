@@ -19,7 +19,7 @@ function comparable(detail: IndependentDetail): unknown {
 function hasContent(detail: DetailContent): boolean {
   /** 빈 표 틀과 실제 셀 값이 있는 표를 구분합니다. */
   const hasTableContent = (tables: StructuredTable[] = []) => tables.some(table =>
-    [...table.headerRows, ...table.bodyRows].some(row => row.some(cell =>
+    table.bodyRows.some(row => row.some(cell =>
       cell.value?.trim() || cell.contents?.some(item => item.value.trim()))));
   /** 필드에 귀속된 표도 저장할 내용에 포함합니다. */
   const hasFields = (fields: DetailContent["fields"] = []) => fields.some(field =>
@@ -47,49 +47,29 @@ function matchingTable(tables: StructuredTable[], id: string | undefined): Struc
   return matches.length === 1 ? matches[0] : undefined;
 }
 
-/** 기존 페이지가 빠지거나 각 페이지에서 확보한 행 수가 줄었는지 확인합니다. */
-function coversPreviousPages(previous: StructuredTable | undefined, incoming: StructuredTable): boolean {
-  const pages = previous?.pagination?.pageRanges;
-  const next = incoming.pagination;
-  if (!pages?.length || !next) return false;
-  const counts = new Map(next.pageRanges.map(range => [range.page, range.count]));
-  return pages.every(range => (counts.get(range.page) ?? -1) >= range.count);
-}
+type SaveDecision = { action: "update" | "unchanged" } | { action: "preserve"; reason: string };
 
-/** 같은 경로의 하위 상세를 중복 개수까지 비교해 탐색 실패로 인한 누락을 확인합니다. */
-function coversLinkedDetails(previous: DetailContent, incoming: DetailContent): boolean {
-  /** 상위 섹션과 상세 제목을 경로에 포함해 다른 모달의 같은 제목과 구분합니다. */
-  const paths = (detail: DetailContent, parent: string[] = []): string[] =>
-    detail.sections?.flatMap(section => section.details?.flatMap(child => {
-      const path = [...parent, section.title, child.title];
-      return [JSON.stringify(path), ...paths(child, path)];
-    }) ?? []) ?? [];
-  const remaining = paths(incoming);
-  return paths(previous).every(path => {
-    const index = remaining.indexOf(path);
-    if (index < 0) return false;
-    remaining.splice(index, 1);
-    return true;
-  });
-}
-
-/** 본문이 달라졌고 기존에 확보한 수집 범위를 훼손하지 않을 때만 갱신합니다. */
-export function shouldUpdateIndependentDetail(previous: IndependentDetail, incoming: IndependentDetail,
-  incompleteDiscovery = false): boolean {
-  if (isDeepStrictEqual(comparable(previous), comparable(incoming))) return false;
-  if (!hasContent(incoming) && hasContent(previous)) return false;
+/** 내용 변경 여부와 실제로 확인된 데이터 손실을 구분합니다. */
+export function independentDetailSaveDecision(previous: IndependentDetail, incoming: IndependentDetail): SaveDecision {
+  if (isDeepStrictEqual(comparable(previous), comparable(incoming))) return { action: "unchanged" };
+  if (!hasContent(incoming) && hasContent(previous)) return { action: "preserve", reason: "빈 결과" };
   const oldTables = allTables(previous);
   const newTables = allTables(incoming);
-  const incomplete = newTables.filter(table => table.pagination && table.pagination.status !== "complete");
 
-  // 불완전한 수집에서는 사라진 표가 원본에서 삭제됐는지 확인할 수 없습니다.
-  if (incomplete.length || incompleteDiscovery || incoming.settling?.status === "timeout") {
-    if (oldTables.some(table => !matchingTable(newTables, table.sourceId)) ||
-      !coversLinkedDetails(previous, incoming)) return false;
+  // 같은 표의 페이지 기록이 있을 때만 이전 수집 범위와 비교합니다.
+  for (const table of newTables) {
+    const pagination = table.pagination;
+    const id = table.sourceId;
+    if (!pagination || pagination.status === "complete" || !id || matchingTable(newTables, id) !== table) continue;
+    const oldPages = matchingTable(oldTables, id)?.pagination?.pageRanges ?? [];
+    const counts = new Map(pagination.pageRanges.map(range => [range.page, range.count]));
+    for (const { page, count } of oldPages) {
+      const nextCount = counts.get(page);
+      if (nextCount === undefined && (counts.size || pagination.missingPages?.includes(page)))
+        return { action: "preserve", reason: `기존 페이지 누락 (${id}, ${page}페이지)` };
+      if (nextCount !== undefined && nextCount < count)
+        return { action: "preserve", reason: `기존 페이지의 행 감소 (${id}, ${page}페이지)` };
+    }
   }
-  if (oldTables.some(table => table.pagination &&
-    (matchingTable(newTables, table.sourceId)?.pagination === undefined) &&
-    (!incoming.paginationAudit || newTables.some(next => next.sourceId === table.sourceId)))) return false;
-  return incomplete.every(table => matchingTable(newTables, table.sourceId) === table &&
-    coversPreviousPages(matchingTable(oldTables, table.sourceId), table));
+  return { action: "update" };
 }

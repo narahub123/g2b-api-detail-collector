@@ -4,7 +4,7 @@ import type { DetailQueue, DetailRun } from "./detail-queue";
 import type { DetailSnapshot } from "./detail-refresh-store";
 import type { CollectionJob } from "./collection-job";
 import { createCollectionObserver } from "./collection-observer";
-import { addDiagnostic, redactDiagnostic } from "./collection-diagnostics";
+import { addDiagnostic, recordIndependentSaveWarnings, redactDiagnostic } from "./collection-diagnostics";
 import { fetchNoticeByKey } from "./api-client";
 import { scrapeDetailPage, serviceDetailUrl } from "./detail-page";
 import { structureNoticeDetail } from "./structured-data";
@@ -106,6 +106,7 @@ async function processDetail(queue: DetailQueue, token: string, run: DetailRun, 
     // 큐가 요청 작업의 종류를 확인하여 날짜·자동 수집에만 관련 공고를 연결합니다.
     await queue.finish(token, run.id, { status: "succeeded", detail: structured.detail, structured,
       discoveredKeys: scraped.relatedNoticeKeys,
+      onIndependentWarning: warning => recordIndependentSaveWarnings(job, run.notice_key, [warning]),
       onWarning: warning => {
         job.errors.push(warning);
         addDiagnostic(job, { severity: "warning", stage: "detail", operation: "related-notice-limit",

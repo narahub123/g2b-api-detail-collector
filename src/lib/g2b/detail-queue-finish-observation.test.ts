@@ -88,9 +88,13 @@ it("공고 본문을 보존해도 독립 상세 저장 경로를 호출합니다
   const queue = new DetailQueue({ connect: async () => db,
     query: vi.fn(async () => ({ rowCount: 1, rows: [{ found: true }] })) } as unknown as pg.Pool, "public");
   const snapshot = vi.fn(() => ({}));
-  await queue.finish("token", "run", { status: "succeeded", detail: structured.detail, structured, snapshot });
+  const onIndependentWarning = vi.fn();
+  const warning = "독립 상세 R26DD12345678 저장 보류: 빈 결과";
+  vi.mocked(saveStoredNoticeInTransaction).mockResolvedValueOnce([warning]);
+  await queue.finish("token", "run", { status: "succeeded", detail: structured.detail, structured, snapshot, onIndependentWarning });
   expect(saveStoredNoticeInTransaction).toHaveBeenCalledExactlyOnceWith(db, key,
     expect.objectContaining({ detail: previous }), structured, "public", true);
   expect(saveNoticeRelationsInTransaction).not.toHaveBeenCalled();
   expect(snapshot).toHaveBeenCalledWith(true);
+  expect(onIndependentWarning).toHaveBeenCalledExactlyOnceWith(warning);
 });

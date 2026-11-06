@@ -4,7 +4,7 @@ import { deferCollection, maintenanceFromError, type MaintenanceInfo } from "./m
 import { seoulInputToUtc } from "../seoul-time";
 import { randomUUID } from "node:crypto";
 import { ApiPageError, fetchNoticeByKey, prepareServiceNoticesByMinute } from "./api-client";
-import { addDiagnostic, redactDiagnostic, type DiagnosticState } from "./collection-diagnostics";
+import { addDiagnostic, recordIndependentSaveWarnings, redactDiagnostic, type DiagnosticState } from "./collection-diagnostics";
 import { parsePostedTimeRange } from "./date-range";
 import { scrapeDetailPage, serviceDetailUrl, type ScrapeResult } from "./detail-page";
 import { noticeKey, noticeKeyFromParts } from "./identity";
@@ -130,8 +130,9 @@ async function runCollection(job: CollectionJob, deps: CollectionDependencies, l
     await ensureLease();
     const target = job.results?.find(result => result.key === key && !result.finishedAt);
     try {
-      await observation.during("saving", () => preserveNotice ? saveStoredNotice(key, record, structured, true)
+      const warnings = await observation.during("saving", () => preserveNotice ? saveStoredNotice(key, record, structured, true)
         : saveStoredNotice(key, record, structured), target);
+      recordIndependentSaveWarnings(job, key, warnings);
     }
     catch (error) { addDiagnostic(job, { severity: "failure", stage: "database", operation: "save-notice", target: { key }, error }); throw error; }
   };
@@ -398,7 +399,8 @@ async function runRefresh(job: CollectionJob, deps: CollectionDependencies, leas
         addDiagnostic(job, { severity: "warning", stage: "modal", operation: "collect-modal", target: { key: result.key }, error: warning });
       if (record.detail && !shouldReplacePaginatedDetail(record.detail, structured.detail)) {
         await ensureLease();
-        await observation.during("saving", () => saveStoredNotice(result.key, record, structured, true), result);
+        const warnings = await observation.during("saving", () => saveStoredNotice(result.key, record, structured, true), result);
+        recordIndependentSaveWarnings(job, result.key, warnings);
         result.status = "succeeded";
         job.detailSucceeded++;
         job.errors.push(`${result.key}: 재수집한 공고 본문이 불완전해 기존 공고 본문과 연결을 유지했습니다.`);
@@ -414,7 +416,8 @@ async function runRefresh(job: CollectionJob, deps: CollectionDependencies, leas
         detailError: null, detailDiagnostic:null };
       updated.normalized = normalizeNotice(updated.api, updated.detail, { number, order });
       await ensureLease();
-      await observation.during("saving", () => saveStoredNotice(result.key, updated, structured), result);
+      const warnings = await observation.during("saving", () => saveStoredNotice(result.key, updated, structured), result);
+      recordIndependentSaveWarnings(job, result.key, warnings);
       result.status = "succeeded";
       job.detailSucceeded++;
       job.errors.push(...structured.warnings);

@@ -37,22 +37,27 @@ describe("noticeSummary", () => {
     { changed: true, preserveNotice: true, failedDiscovery: false },
     { changed: true, preserveNotice: false, failedDiscovery: true },
     { changed: true, preserveNotice: false, failedDiscovery: false, concurrent: true },
-  ])("공유 독립 상세와 공고 참조를 각각 처리합니다 (%j)", async ({ changed, preserveNotice, failedDiscovery, concurrent }) => {
+    { changed: true, preserveNotice: true, failedDiscovery: false, empty: true },
+  ])("공유 독립 상세와 공고 참조를 각각 처리합니다 (%j)", async ({ changed, preserveNotice, failedDiscovery, concurrent, empty }) => {
     const key = "R26BK01774553--000";
     const fields = [{ label: "계획명", value: [{ text: "계획", visible: true }] }];
     const previous = { schemaVersion: 5 as const, number: "R26DD12345678", title: "발주계획",
-      fields, capturedAt: "2026-10-25T00:00:00Z", sourceNoticeKey: "R26BK01774554--000" };
+      fields, capturedAt: "2026-10-25T00:00:00Z", sourceNoticeKey: "R26BK01774554--000",
+      ...(failedDiscovery ? { sections: [{ title: "이전 표", fields: [], tables: [{ headerRows: [], bodyRows: [] }],
+        details: [{ title: "이전 하위 상세", fields }] }] } : {}) };
     const next = { ...previous, sourceNoticeKey: key, capturedAt: "2026-10-24T00:00:00Z",
-      fields: [{ label: "계획명", value: [{ text: "계획", visible: !changed }] }] };
+      sections: undefined,
+      fields: empty ? [] : [{ label: "계획명", value: [{ text: "계획", visible: !changed }] }] };
     const statements = fakePool(undefined, previous, concurrent ? next : undefined);
-    await saveStoredNotice(key, { api: null, detail: null }, {
+    const warnings = await saveStoredNotice(key, { api: null, detail: null }, {
       detail: { sourceUrl: "", attachments: [], links: [], modalDiscovery: {
         candidates: 1, attempted: 1, captured: 1, skipped: 0, failures: failedDiscovery ? ["모달 열기 실패"] : []
       } },
       orderPlanNumbers: [next.number], preSpecificationNumbers: [], otherDetailNumbers: [], openingDetailKeys: [],
       orderPlans: [next], preSpecifications: [], otherDetails: [], openingDetails: [], independentTriggers: [], warnings: []
     }, preserveNotice);
-    expect(statements.some(({ sql }) => /(?:INSERT INTO|UPDATE) public\.independent_details/.test(sql))).toBe(changed);
+    expect(statements.some(({ sql }) => /(?:INSERT INTO|UPDATE) public\.independent_details/.test(sql))).toBe(changed && !empty);
+    expect(warnings).toEqual(empty ? [`독립 상세 ${next.number} 저장 보류: 빈 결과`] : []);
     expect(statements.some(({ sql }) => sql.includes("INSERT INTO public.notices"))).toBe(!preserveNotice);
     expect(statements.some(({ sql }) => sql.includes("INSERT INTO public.notice_independent_refs"))).toBe(!preserveNotice);
     expect(statements.some(({ sql }) => sql.includes("DELETE FROM public.notice_independent_refs"))).toBe(!preserveNotice && !failedDiscovery);

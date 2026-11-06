@@ -3,7 +3,7 @@ import {serializeError,type SerializedError} from '../error-diagnostics';
 import { deferCollection, maintenanceFromError } from "./maintenance";
 import { randomUUID } from "node:crypto";
 import { ApiPageError, fetchNoticeByKey, prepareServiceNoticesByMinute, type PostedTimeRange } from "./api-client";
-import { addDiagnostic, redactDiagnostic } from "./collection-diagnostics";
+import { addDiagnostic, recordIndependentSaveWarnings, redactDiagnostic } from "./collection-diagnostics";
 import { acquireDbJob, releaseDbLease, renewDbLease, saveDbJob } from "./collection-job-store";
 import type { CollectionJob } from "./collection-job";
 import type { CollectionNoticeResult } from "./collection-progress";
@@ -29,7 +29,7 @@ export type IncrementalStore = {
   renew(jobId: string, token: string): Promise<boolean>;
   release(jobId: string, token: string): Promise<void>;
   getNotice(key: string): Promise<StoredNotice | null>;
-  saveNotice(key: string, record: StoredNotice, structured?: StructuredNoticeDetail): Promise<void>;
+  saveNotice(key: string, record: StoredNotice, structured?: StructuredNoticeDetail): Promise<string[] | void>;
   saveRelation(source: string, related: string): Promise<void>;
   getFailedAttempts(): Promise<NoticeAttempt[]>;
   getAttempt(key: string): Promise<NoticeAttempt | null>;
@@ -265,10 +265,12 @@ export async function runIncrementalCollection(options: RunOptions): Promise<Col
     record.independentTriggers = extracted.structured.independentTriggers;
     await ensureLease();
     // 저장 후 진단·집계는 원래 단계로 복귀한 뒤 수행해 DB 시간에 섞이지 않게 합니다.
-    await observation.during("saving", async () => {
-      await store.saveNotice(key, record, extracted.structured);
+    const warnings = await observation.during("saving", async () => {
+      const saved = await store.saveNotice(key, record, extracted.structured);
       await store.saveAttempt({ key, attempts: (previous?.attempts || 0) + 1, status: "succeeded", error: null, diagnostic:null });
+      return saved;
     }, noticeResult);
+    recordIndependentSaveWarnings(job, key, warnings);
     // 상세와 시도 기록 저장이 끝난 후 복구 성공을 작업 진단에 반영합니다.
     if (previous?.status === "failed" || retry)
       addDiagnostic(job, { severity: "retry", stage: "detail", operation: "scrape-detail", target: { key },
