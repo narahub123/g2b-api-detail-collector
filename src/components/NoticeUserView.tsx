@@ -11,7 +11,8 @@ import { contentSections } from "@/lib/g2b/content-sections";
 import { openingTargetForCell, splitNavigationValue, type NavigationTarget } from "@/lib/g2b/notice-navigation";
 import { useNoticeNavigation } from "./NoticeNavigationContext";
 import { FormAccordion } from "./FormAccordion";
-import { SectionTextBlocks, hasTextBlocks } from "./SectionTextBlocks";
+import { SectionTextBlocks } from "./SectionTextBlocks";
+import { hasVisibleDetailContent, hasVisibleSectionContent, hasVisibleTableData, visibleCellValue, visibleFields } from "@/lib/g2b/content-visibility";
 
 /** 화면 문자열과 수집된 첨부파일명을 같은 기준으로 비교합니다. */
 function fileNameKey(value: string): string {
@@ -40,20 +41,6 @@ function DownloadValue({ value, links, section, row, column }: { value: string; 
     part.target ? renderTarget(part.text, part.target, index) : part.text);
 }
 
-/** 사용자에게 노출할 수 있는 필드만 반환합니다. */
-function visibleFields(fields: StructuredField[]): StructuredField[] {
-  return fields.filter((field) => field.visible !== false &&
-    (Boolean(fieldText(field.value, true)) || field.tables?.some(hasVisibleTableData)));
-}
-
-
-/** 숨겨진 하위 텍스트가 표 셀의 합쳐진 값으로 다시 노출되지 않게 합니다. */
-function visibleCellValue(cell: StructuredTable["bodyRows"][number][number]): string {
-  if (cell.visible === false) return "";
-  if (cell.contents?.length) return cell.contents.filter((item) => item.visible).map((item) => item.value).join("");
-  return cell.value || "";
-}
-
 /** 숨겨진 행을 제외해도 병합 셀이 차지하는 표시 행 수를 유지합니다. */
 function visibleRowSpan(visibility: boolean[] | undefined, start: number, span: number): number {
   let count = 0;
@@ -63,26 +50,7 @@ function visibleRowSpan(visibility: boolean[] | undefined, start: number, span: 
   return Math.max(1, count);
 }
 
-/** 사용자에게 실제로 표시할 값이 있는 표인지 확인합니다. */
-function hasVisibleTableData(table: StructuredTable): boolean {
-  if (table.visible === false) return false;
-  const structured = tableForUserDisplay(table);
-  return structured.bodyRows.some((cells, index) => structured.bodyRowVisibility?.[index] !== false &&
-    cells.some((cell) => Boolean(visibleCellValue(cell).trim())));
-}
-
 type LinkedDetail = NonNullable<StructuredSection["details"]>[number];
-
-/** 하위 상세까지 살펴 사용자에게 표시할 내용이 있는 섹션인지 판별합니다. */
-function hasVisibleSectionContent(section: StructuredSection): boolean {
-  return section.visible !== false && (visibleFields(section.fields).length > 0 ||
-    hasTextBlocks(section.textBlocks) || section.tables.some(hasVisibleTableData) || section.details?.some(hasVisibleDetailContent) === true);
-}
-
-/** 모달의 실제 표시 가능한 섹션을 최상위 섹션과 같은 기준으로 찾습니다. */
-function hasVisibleDetailContent(detail: LinkedDetail): boolean {
-  return contentSections(detail, detail.title).some(hasVisibleSectionContent);
-}
 
 /** 저장된 표의 행·열 병합 구조를 사용자 화면에 표시합니다. */
 function UserTable({ table, label, links, section }: { table: StructuredTable; label: string;

@@ -57,6 +57,47 @@ it("태그로 감싸지 않은 모달 본문도 줄바꿈과 함께 보존합니
     .toEqual([{ text: "안내문\n추가 안내문", visible: true }]);
 });
 
+it.each(["page", "modal"] as const)("%s에서 hide 클래스와 인라인 숨김을 함께 반영합니다", kind => {
+  const body = `<div class="hide other">${section("숨긴 제목", "<p>숨긴 조상</p>")}</div>
+    ${section("표시 제목", '<p class="hide">숨긴 요소</p><p style="visibility:hidden">인라인 숨김</p><p class="hide-panel">표시 문단</p>')}`;
+  const sections = extractCommonSections(kind === "page" ? `<main>${body}</main>` : `<div role="dialog">${body}</div>`, kind);
+  expect(sections.map(item => item.visible)).toEqual([false, true]);
+  expect(sections.flatMap(item => item.textBlocks)).toEqual([
+    { text: "숨긴 조상", visible: false }, { text: "숨긴 요소", visible: false },
+    { text: "인라인 숨김", visible: false }, { text: "표시 문단", visible: true },
+  ]);
+});
+
+it.each([
+  ["숨긴 내용만", "", false],
+  ["표시 문단", "<p>표시 문단</p>", true],
+  ["중복 표시 필드", '<table><tr><td data-title="조건">동일 값</td></tr></table>', true],
+  ["표시 표 본문", '<table id="grid_open"><thead><tr><th>헤더</th></tr></thead><tbody><tr><td>표시 셀</td></tr></tbody></table>', true],
+])("미분류 가시성을 실제 표시 내용으로 결정합니다 (%s)", (_, extra, visible) => {
+  const sections = extractCommonSections(`<div role="dialog"><p class="hide">숨긴 문단</p>
+    <table><tr class="hide"><td data-title="조건">동일 값</td></tr>
+    <tr><td data-title="값"><span class="hide">숨긴 값</span></td></tr></table>
+    <table id="grid"><thead><tr><th>헤더</th></tr></thead><tbody>
+    <tr class="hide"><td>숨긴 행</td></tr><tr><td class="hide">숨긴 셀</td></tr></tbody></table>
+    ${extra}${section("미분류", '<p class="hide">숨긴 본문</p>')}</div>`, "modal");
+  const result = structureNoticeDetail("R26BK1--000", { sourceUrl: "https://www.g2b.go.kr/", sections, attachments: [], links: [] });
+  expect(result.detail.sections).toMatchObject([
+    { title: "미분류", visible },
+    { title: "미분류", visible: true },
+  ]);
+  expect(result.detail.sections?.[0].textBlocks).toContainEqual({ text: "숨긴 문단", visible: false });
+  expect(result.detail.sections?.[0].fields[1].value).toEqual([{ text: "숨긴 값", visible: false }]);
+});
+
+it("미분류에 연결된 하위 모달의 표시 내용을 최종 가시성에 포함합니다", () => {
+  const sections = extractCommonSections('<main><table><tr class="hide"><td data-title="조건">숨긴 값</td></tr></table></main>', "page");
+  const result = structureNoticeDetail("R26BK1--000", { sourceUrl: "https://www.g2b.go.kr/", sections, attachments: [], links: [],
+    modalCaptures: [{ trigger: { index: 0, tag: "a", label: "조회", value: "조회", html: "", sectionHint: "미분류" },
+      modal: { title: "상세", sections: extractCommonSections('<div role="dialog"><p>하위 본문</p></div>', "modal") } }] });
+  expect(result.detail.sections).toMatchObject([{ title: "미분류", visible: true,
+    details: [{ sections: [{ title: "미분류", visible: true }] }] }]);
+});
+
 it.each([false, true])("중첩 배치 표의 본문이 상위 %s 표현에도 없으면 일반 본문으로 보존합니다", grid => {
   const source = `<main>${section("안내", `<table${grid ? ' id="outer_grid"' : ''}><tr><td data-title="조건"><table><tr><td><p>중첩 안내문<br>둘째 줄</p></td></tr></table></td></tr></table>`)}</main>`;
   const sections = extractCommonSections(source, "page");
