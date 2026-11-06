@@ -3,6 +3,7 @@ import { fieldText } from "./field-value";
 import { contentSections } from "./content-sections";
 import { classifyTabModal } from "./tab-modal-classification";
 import { paginationCompleteness } from "./pagination-coverage";
+import { hasVisibleSectionContent } from "./content-visibility";
 
 export type IndependentDetail = {
   schemaVersion: 2 | 3 | 4 | 5;
@@ -55,19 +56,26 @@ const hasTableContent = (tables: StructuredTable[]) => tables.some((table) =>
 const hasContent = (fields: StructuredField[], tables: StructuredTable[], textBlocks?: StructuredSection["textBlocks"]) =>
   hasFieldContent(fields) || hasTableContent(tables) || Boolean(textBlocks?.some(block => block.text.trim()));
 /**
- * 값이 없고 연결된 하위 상세도 없는 섹션을 모든 저장 경로에서 같은 기준으로 제거합니다.
+ * 하위 상세부터 가시성을 확정하고 저장할 내용이 없는 섹션을 제거합니다.
  * @param sections 필터링할 섹션 목록
  * @param unresolvedTitles 귀속되지 않은 모달 때문에 보존해야 하는 최상위 섹션 제목
+ * @param preserveEmpty 귀속되지 않은 모달의 섹션 구조를 보존할지 여부
  * @returns 하위 상세의 섹션까지 정리된 목록
  */
 const filterNonemptySections = (sections: StructuredSection[] | undefined,
-  unresolvedTitles?: ReadonlySet<string>): StructuredSection[] | undefined => sections?.map((section) => ({
-    ...section,
-    ...(section.details ? { details: section.details.map((detail) => ({
-      ...detail,
-      ...(detail.sections ? { sections: filterNonemptySections(detail.sections) } : {})
-    })) } : {})
-  })).filter((section) => hasContent(section.fields, section.tables, section.textBlocks) ||
+  unresolvedTitles?: ReadonlySet<string>, preserveEmpty = false): StructuredSection[] | undefined => sections?.map((section) => {
+    const resolved = {
+      ...section,
+      ...(section.details ? { details: section.details.map((detail) => ({
+        ...detail,
+        ...(detail.sections ? { sections: filterNonemptySections(detail.sections, undefined, preserveEmpty) } : {})
+      })) } : {})
+    };
+    // 실제 HTML 제목이 있는 섹션은 추출 시 이미 가시성이 정해집니다.
+    if (resolved.title === "미분류" && resolved.visible === undefined)
+      resolved.visible = hasVisibleSectionContent(resolved);
+    return resolved;
+  }).filter((section) => preserveEmpty || hasContent(section.fields, section.tables, section.textBlocks) ||
     Boolean(section.details?.length) || Boolean(unresolvedTitles?.has(section.title)));
 /** 독립 표와 필드에 연결된 표를 각각 한 번씩 집계할 목록으로 만듭니다. */
 const allTables = (fields: StructuredField[], tables: StructuredTable[]): StructuredTable[] =>
@@ -201,6 +209,9 @@ export function structureNoticeDetail(key: string, detail: ScrapedDetail): Struc
   for (const entity of [...orderPlans, ...preSpecifications, ...otherDetails, ...openingDetails])
     entity.sections = filterNonemptySections(entity.sections);
   const nonemptySections = filterNonemptySections(sections, unresolvedSectionTitles);
+  for (const capture of modalCaptures) {
+    if (capture.modal.sections) capture.modal.sections = filterNonemptySections(capture.modal.sections, undefined, true);
+  }
   const structured: ScrapedDetail = { ...detail, sections: nonemptySections, modalCaptures };
   if (structured.summary && nonemptySections) {
     structured.summary = {

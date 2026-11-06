@@ -1,10 +1,7 @@
 import type { StructuredTextBlock } from "@/lib/g2b/detail-page";
 import "../app/section-text-blocks.css";
 
-/** 화면에 사용할 본문이 있는지 표시 조건과 같은 기준으로 판단합니다. */
-export function hasTextBlocks(blocks?: StructuredTextBlock[], includeHidden = false): boolean {
-  return Boolean(blocks?.some(block => block.text.trim() && (includeHidden || block.visible !== false)));
-}
+export { hasTextBlocks } from "@/lib/g2b/content-visibility";
 
 /** 저장된 문단을 순서대로 표시하고 관리자에게만 숨긴 본문과 상태를 함께 보여줍니다. */
 export function SectionTextBlocks({ blocks, includeHidden = false, sectionVisible = true }: {

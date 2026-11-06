@@ -35,10 +35,11 @@ export function paginateTableRows<T extends StructuredTableCell[]>(rows: T[], pa
 const clean = (value: string) => value.replace(/\s+/g, " ").trim();
 const nonempty = (value: string) => clean(value) || null;
 
-/** Match the existing section/field rule: inline styles on the node or any ancestor. */
+/** 요소와 조상의 hide 클래스 및 인라인 스타일로 숨김 여부를 판정합니다. */
 export function isInlineVisible($: cheerio.CheerioAPI, node: any): boolean {
   for (let current = node; current; current = current.parent) {
     if (current.type !== "tag") continue;
+    if ($(current).hasClass("hide")) return false;
     for (const declaration of ($(current).attr("style") || "").split(";")) {
       const separator = declaration.indexOf(":");
       if (separator < 0) continue;

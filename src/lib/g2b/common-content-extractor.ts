@@ -29,6 +29,7 @@ export function extractCommonSections(html: string, kind: ContentKind): Structur
   let pending: StructuredTextBlock | null = null;
   /** 제목 없는 모달 본문도 기존 미분류 섹션에 담습니다. */
   const target = (): StructuredSection => {
+    // 제목이 없는 섹션은 하위 상세를 연결한 뒤 가시성을 결정합니다.
     if (!active) { active = { title: "미분류", fields: [], tables: [] }; sections.push(active); }
     return active;
   };
@@ -49,7 +50,7 @@ export function extractCommonSections(html: string, kind: ContentKind): Structur
     active = { title, fields: [], tables: [], visible };
     sections.push(active);
   };
-  /** 중복된 빈 필드는 값으로 보완하되 표를 소유한 반복 필드는 분리합니다. */
+  /** 중복 필드는 표시할 수 있는 값으로 보완하되 표를 소유한 반복 필드는 분리합니다. */
   const appendField = (label: string, cell: cheerio.Cheerio<any>, visible: boolean, ownsTable: boolean): StructuredField | null => {
     if (!label) return null;
     const bucket = target();
@@ -65,7 +66,13 @@ export function extractCommonSections(html: string, kind: ContentKind): Structur
       const empty = same.find((field) => fieldText(field.value) === null);
       if (empty) { empty.value = value; empty.visible = visible; return empty; }
       const existing = same.find((field) => fieldText(field.value) === text);
-      if (existing) return existing;
+      if (existing) {
+        if ((existing.visible === false || !fieldText(existing.value, true)) && visible && fieldText(value, true)) {
+          existing.value = value;
+          existing.visible = visible;
+        }
+        return existing;
+      }
       const field: StructuredField = { label, value, visible };
       bucket.fields.push(field);
       return field;
