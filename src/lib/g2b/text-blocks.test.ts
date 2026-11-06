@@ -39,6 +39,18 @@ it("숨긴 문단과 표시 문단을 구분하고 빈 문단·접기 버튼은 
   expect(result[0].textBlocks).toEqual([{ text: "숨긴 안내", visible: false }, { text: "표시 안내", visible: true }]);
 });
 
+it.each(["", " hide"])("안내의 말줄임 표시만 저장용 필드에서 제외합니다 (%j)", markerClass => {
+  const html = `<main>${section("공고안내", `<table><tr><td data-title="유의사항">
+    <div class="inner helpbox_top toggle"><div class="cmt-inner">
+      <div class="w2textbox help"><div class="help_contents">앞부분...... 원문 뒷부분</div></div>
+      <div class="w2group help_ellipsis${markerClass}"><span class="w2span ellipsis">......</span></div>
+    </div></div></td></tr></table>`)}</main>`;
+  const detail = structureNoticeDetail("R26BK1--000", {
+    sourceUrl: "https://www.g2b.go.kr/", sections: extractCommonSections(html, "page"), attachments: [], links: [],
+  }).detail;
+  expect(detail.sections?.[0].fields[0].value?.map(part => part.text).join("").trim()).toBe("앞부분...... 원문 뒷부분");
+});
+
 it("레이블 없는 서식 셀의 낙찰방법 안내도 본문으로 보존합니다", () => {
   const result = extractCommonSections(`<main>${section("공고일반", `<table><tr><th>공고명</th><td>용역</td></tr>
     <tr><td data-title="" colspan="2"><div class="help"><p>협상적격자 선정 안내</p></div></td></tr></table>`)}</main>`, "page");
